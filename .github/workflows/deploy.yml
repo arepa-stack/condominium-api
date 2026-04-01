@@ -23,6 +23,7 @@ jobs:
           script: |
             set -euo pipefail
             cd /orgs/condominium/condominium-api
+            git config --global --add safe.directory /orgs/condominium/condominium-api
             git pull origin main
 
             docker build -t condominium-api .
