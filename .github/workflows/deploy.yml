@@ -23,13 +23,13 @@ jobs:
           script: |
             set -euo pipefail
             cd /orgs/condominium/condominium-api
-            git config --global --add safe.directory /orgs/condominium/condominium-api
-            git pull origin main
+            sudo git config --global --add safe.directory /orgs/condominium/condominium-api
+            sudo git pull origin main
 
-            docker build -t condominium-api .
+            sudo docker build -t condominium-api .
 
-            docker stop condominium-api || true
-            docker rm condominium-api || true
+            sudo docker stop condominium-api || true
+            sudo docker rm condominium-api || true
 
-            docker run -d --name condominium-api -p 127.0.0.1:3000:3000 --env-file ./.env condominium-api
-            docker image prune -f
+            sudo docker run -d --name condominium-api -p 127.0.0.1:3000:3000 --env-file ./.env condominium-api
+            sudo docker image prune -f
