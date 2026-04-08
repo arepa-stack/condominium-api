@@ -32,11 +32,4 @@ describe('RegisterResident Use Case', () => {
         expect(users[0].name).toBe('New Resident');
     });
 
-    it('should fail if email is already taken', async () => {
-        // Implementation detail: Use case calls authRepo.signUp which might throw if user exists.
-        // In this mock, signUp always succeeds, but create profile checks if user exists.
-        // To properly test this, we'd need to mock failures.
-        // For now, let's verify basic success flow.
-        expect(true).toBe(true);
-    });
 });
