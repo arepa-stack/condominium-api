@@ -1,13 +1,15 @@
 import { Elysia, t } from 'elysia';
 import { SupabaseInvoiceRepository } from '../infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabasePaymentAllocationRepository } from '../infrastructure/repositories/SupabasePaymentAllocationRepository';
+import { SupabaseCreditLedgerRepository } from '../infrastructure/repositories/SupabaseCreditLedgerRepository';
 import { LoadDebt } from '../application/use-cases/LoadDebt';
 import { GetUnitBalance } from '../application/use-cases/GetUnitBalance';
 import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
 import { GetAllInvoices } from '../application/use-cases/GetAllInvoices';
+import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
 import { UnauthorizedError, NotFoundError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
-import { UserRole } from '@/core/domain/enums';
+import { UserRole, InvoiceTag } from '@/core/domain/enums';
 import { PreviewInvoicesFromExcel } from '../application/use-cases/PreviewInvoicesFromExcel';
 import { BulkLoadInvoicesFromExcel } from '../application/use-cases/BulkLoadInvoicesFromExcel';
 import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositories/SupabaseUnitRepository';
@@ -16,6 +18,7 @@ import { ExcelJSInvoiceParser } from '../infrastructure/services/ExcelJSInvoiceP
 // Initialize Repos & Use Cases
 const invoiceRepository = new SupabaseInvoiceRepository();
 const allocationRepository = new SupabasePaymentAllocationRepository();
+const creditLedgerRepository = new SupabaseCreditLedgerRepository();
 const unitRepository = new SupabaseUnitRepository();
 const excelParser = new ExcelJSInvoiceParser();
 
@@ -23,17 +26,20 @@ const loadDebt = new LoadDebt(invoiceRepository);
 const getUnitBalance = new GetUnitBalance(invoiceRepository, allocationRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getAllInvoices = new GetAllInvoices(invoiceRepository);
+const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
 const previewInvoices = new PreviewInvoicesFromExcel(unitRepository, excelParser);
 const bulkLoadInvoices = new BulkLoadInvoicesFromExcel(invoiceRepository, unitRepository);
 
 const InvoiceSchema = t.Object({
     id: t.String(),
-    unit_id: t.String(),
+    unit_id: t.Optional(t.Union([t.String(), t.Null(), t.Undefined()])),
+    building_id: t.Optional(t.Union([t.String(), t.Null(), t.Undefined()])),
     amount: t.Number(),
     period: t.String(),
     description: t.Optional(t.Union([t.String(), t.Null()])),
     receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
     status: t.String(),
+    tag: t.Optional(t.String()),
     paid_amount: t.Optional(t.Union([t.Number(), t.Null()])),
     due_date: t.Optional(t.Any()),
     created_at: t.Optional(t.Any()),
@@ -140,7 +146,8 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             building_id: query.building_id,
             status: query.status,
             period: period,
-            user_id: query.user_id
+            user_id: query.user_id,
+            tag: query.tag as InvoiceTag | undefined
         });
     }, {
         query: t.Object({
@@ -150,11 +157,15 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             period: t.Optional(t.String({ example: '2026-01' })),
             year: t.Optional(t.Numeric()),
             month: t.Optional(t.Numeric()),
-            user_id: t.Optional(t.String())
+            user_id: t.Optional(t.String()),
+            tag: t.Optional(t.Union([
+                t.Literal(InvoiceTag.NORMAL),
+                t.Literal(InvoiceTag.PETTY_CASH)
+            ]))
         }),
         response: t.Array(AdminInvoiceSchema),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'List all invoices with filters (Admin)',
             security: [{ BearerAuth: [] }]
         }
@@ -191,7 +202,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             unitsToCreate: t.Array(t.String())
         }),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Preview invoices from Excel file (Admin)',
             security: [{ BearerAuth: [] }]
         }
@@ -226,7 +237,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             }))
         }),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Confirm and load invoices from Excel (Admin)',
             security: [{ BearerAuth: [] }]
         }
@@ -256,7 +267,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }),
         response: InvoiceSchema,
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Load debt to a unit (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
@@ -277,13 +288,13 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     }, {
         response: BalanceSchema,
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Get unit balance and pending invoices',
             security: [{ BearerAuth: [] }]
         }
     })
     // 3. Get All Unit Invoices
-    .get('/units/:id/invoices', async ({ params, profile }) => {
+    .get('/units/:id/invoices', async ({ params, query, profile }) => {
         // Auth: Admin, Board or Resident (same unit)
         if (profile.role === UserRole.RESIDENT) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
@@ -294,13 +305,58 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see invoices');
         }
 
-        const invoices = await getUnitInvoices.execute(params.id);
+        const invoices = await getUnitInvoices.execute(params.id, query.tag as InvoiceTag | undefined);
         return invoices.map(inv => inv.toJSON());
     }, {
+        query: t.Object({
+            tag: t.Optional(t.Union([
+                t.Literal(InvoiceTag.NORMAL),
+                t.Literal(InvoiceTag.PETTY_CASH)
+            ]))
+        }),
         response: t.Array(InvoiceSchema),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Get all invoices for a unit',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    // 3.5. Get Unit Credit Balance and History
+    .get('/units/:id/credit', async ({ params, profile }) => {
+        const unitId = params.id;
+
+        // Auth: Residents can only access their own units; Board/Admin can access any unit in their buildings
+        if (profile.role === UserRole.RESIDENT) {
+            const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === unitId);
+            if (!hasAccess) {
+                throw new UnauthorizedError('You do not have access to this unit credit balance');
+            }
+        } else if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+            throw new UnauthorizedError('Only Admin, Board or the unit resident can see credit balance');
+        }
+
+        const result = await getUnitCredit.execute(unitId);
+
+        return {
+            balance: result.balance,
+            history: result.history.map(entry => entry.toJSON())
+        };
+    }, {
+        response: t.Object({
+            balance: t.Number(),
+            history: t.Array(t.Object({
+                id: t.String(),
+                unit_id: t.String(),
+                amount: t.Number(),
+                reason: t.String(),
+                reference_type: t.String(),
+                reference_id: t.String(),
+                created_at: t.Optional(t.Any())
+            }))
+        }),
+        detail: {
+            tags: ['Admin - Billing'],
+            summary: 'Get credit balance and history for a unit',
             security: [{ BearerAuth: [] }]
         }
     })
@@ -332,7 +388,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             // Add other payment fields if needed
         })),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Get all payments for a specific invoice',
             security: [{ BearerAuth: [] }]
         }
@@ -363,7 +419,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             allocated_at: t.Any()
         })),
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Get all invoices for a specific payment',
             security: [{ BearerAuth: [] }]
         }
@@ -385,7 +441,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     }, {
         response: InvoiceSchema,
         detail: {
-            tags: ['Billing'],
+            tags: ['Admin - Billing'],
             summary: 'Get invoice details',
             security: [{ BearerAuth: [] }]
         }

@@ -60,30 +60,22 @@ const SuccessResponse = t.Object({
     success: t.Boolean()
 });
 
-export const userRoutes = new Elysia({ prefix: '/users' })
+// App routes — any authenticated user (residents use these from APK)
+export const userAppRoutes = new Elysia({ prefix: '/users' })
     .derive(async ({ request }) => {
         const authHeader = request.headers.get('Authorization');
-
-        if (!authHeader) {
-            throw new UnauthorizedError('Authentication required');
-        }
-
+        if (!authHeader) throw new UnauthorizedError('Authentication required');
         const token = authHeader.replace('Bearer ', '');
         const { data: { user }, error } = await supabase.auth.getUser(token);
-
-        if (error || !user) {
-            throw new UnauthorizedError('Invalid or expired token');
-        }
-
+        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
         return { user };
     })
     .get('/me', async ({ user }) => {
-        // Use case calling itself as target
         return await getUserById.execute({ targetId: user.id, requesterId: user.id });
     }, {
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['App - Users'],
             summary: 'Get current user profile'
         }
     })
@@ -101,12 +93,22 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['App - Users'],
             summary: 'Update user profile',
             description: 'Update current user profile information. All fields are optional.'
         }
+    });
+
+// Admin routes — Board+Admin only
+export const userAdminRoutes = new Elysia({ prefix: '/users' })
+    .derive(async ({ request }) => {
+        const authHeader = request.headers.get('Authorization');
+        if (!authHeader) throw new UnauthorizedError('Authentication required');
+        const token = authHeader.replace('Bearer ', '');
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
+        return { user };
     })
-    // Admin/Board routes
     .get('/', async ({ user, query }) => {
         return await getUsers.execute({
             requesterId: user.id,
@@ -126,7 +128,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: t.Array(UserResponse),
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'List all users (Admin/Board)',
             description: 'Admin sees all users, Board members see only their building users',
             security: [{ BearerAuth: [] }]
@@ -140,7 +142,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
     }, {
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Get user by ID (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
@@ -162,7 +164,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Update user (Admin/Board)',
             description: 'Update user information. Only admins can change roles.',
             security: [{ BearerAuth: [] }]
@@ -177,7 +179,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
     }, {
         response: SuccessResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Approve user registration (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
@@ -187,7 +189,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
     }, {
         response: t.Array(UserUnitSchema),
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Get user units',
             security: [{ BearerAuth: [] }]
         }
@@ -210,7 +212,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: SuccessResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Assign unit to user (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
@@ -229,7 +231,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Update user building role (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
@@ -256,7 +258,7 @@ export const userRoutes = new Elysia({ prefix: '/users' })
         }),
         response: UserResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Create new user (Admin only)',
             description: 'Creates a new user with specified role (e.g. board member). User is auto-activated.',
             security: [{ BearerAuth: [] }]
@@ -271,8 +273,13 @@ export const userRoutes = new Elysia({ prefix: '/users' })
     }, {
         response: SuccessResponse,
         detail: {
-            tags: ['Users'],
+            tags: ['Admin - Users'],
             summary: 'Delete user (Admin only)',
             security: [{ BearerAuth: [] }]
         }
     });
+
+// Legacy combined export
+export const userRoutes = new Elysia({ prefix: '/users' })
+    .use(userAppRoutes)
+    .use(userAdminRoutes);
