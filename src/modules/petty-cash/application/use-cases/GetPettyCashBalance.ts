@@ -8,8 +8,9 @@ export class GetPettyCashBalance {
         const fund = await this.pettyCashRepo.findFundByBuildingId(buildingId);
 
         if (!fund) {
-            // If no fund exists, return zero balance (or we could auto-create it)
+            // If no fund exists, return zero balance
             return {
+                id: '',
                 building_id: buildingId,
                 current_balance: 0,
                 currency: 'USD',

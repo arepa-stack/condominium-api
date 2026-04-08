@@ -36,7 +36,6 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             .select('*')
             .eq('building_id', buildingId)
             .single();
-
         if (error) {
             if (error.code === 'PGRST116') return null;
             throw new DomainError('Error fetching petty cash fund', 'DB_ERROR', 500);
