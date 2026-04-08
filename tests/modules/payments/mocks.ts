@@ -23,8 +23,8 @@ export class MockPaymentRepository implements IPaymentRepository {
         return filtered.sort((a, b) => b.payment_date.getTime() - a.payment_date.getTime());
     }
 
-    async findByUnit(buildingId: string, unitId: string, year?: number): Promise<Payment[]> {
-        let filtered = this.payments.filter(p => p.building_id === buildingId && p.unit_id === unitId);
+    async findByUnit(unitId: string, year?: number): Promise<Payment[]> {
+        let filtered = this.payments.filter(p => p.unit_id === unitId);
 
         if (year) {
             filtered = filtered.filter(p => p.payment_date.getFullYear() === year);

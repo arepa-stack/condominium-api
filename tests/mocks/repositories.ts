@@ -21,6 +21,7 @@ export const createMockInvoiceRepository = (): IInvoiceRepository => ({
     findById: mock(async (id: string) => null),
     findAll: mock(async () => []),
     findInvoicesForAdmin: mock(async () => []),
+    findByBuildingId: mock(async () => []),
     update: mock(async (invoice: Invoice) => invoice),
     createBatch: mock(async (invoices: Invoice[]) => invoices)
 });
