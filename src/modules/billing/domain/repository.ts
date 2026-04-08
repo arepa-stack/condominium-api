@@ -1,5 +1,7 @@
 import { Invoice } from './entities/Invoice';
 import { PaymentAllocation } from './entities/PaymentAllocation';
+import { CreditLedgerEntry } from './entities/CreditLedgerEntry';
+import { InvoiceTag } from '@/core/domain/enums';
 
 export interface AdminInvoiceResult {
     id: string;
@@ -45,6 +47,7 @@ export interface FindAllInvoicesFilters {
     status?: string;
     period?: string;
     type?: string;
+    tag?: InvoiceTag;
 }
 
 export interface IInvoiceRepository {
@@ -52,8 +55,15 @@ export interface IInvoiceRepository {
     findById(id: string): Promise<Invoice | null>;
     findAll(filters?: FindAllInvoicesFilters): Promise<Invoice[]>;
     findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]>;
+    findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]>;
     update(invoice: Invoice): Promise<Invoice>;
     createBatch(invoices: Invoice[]): Promise<Invoice[]>;
+}
+
+export interface ICreditLedgerRepository {
+    addCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry>;
+    getBalanceForUnit(unitId: string): Promise<number>;
+    getEntriesForUnit(unitId: string): Promise<CreditLedgerEntry[]>;
 }
 
 export interface IPaymentAllocationRepository {
