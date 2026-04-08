@@ -5,12 +5,11 @@ import { logger } from './core/logger';
 import { DomainError } from './core/errors';
 import { randomUUID } from 'crypto';
 import { authRoutes } from './modules/auth/presentation/routes';
-import { userRoutes } from './modules/users/presentation/routes';
-import { buildingRoutes } from './modules/buildings/presentation/routes';
-import { paymentRoutes } from './modules/payments/presentation/routes';
-import { billingRoutes } from './modules/billing/presentation/routes';
-import { pettyCashRoutes } from './modules/petty-cash/presentation/routes';
+import { buildingPublicRoutes } from './modules/buildings/presentation/routes';
 import { leadRoutes } from './modules/leads/presentation/routes';
+// v1 grouped routes (APK-facing + Admin-facing)
+import { appRoutes } from './presentation/app-routes';
+import { adminRoutes } from './presentation/admin-routes';
 
 // @ts-ignore
 export const app = new Elysia()
@@ -29,10 +28,17 @@ export const app = new Elysia()
             },
             tags: [
                 { name: 'Auth', description: 'Authentication endpoints' },
-                { name: 'Users', description: 'User profile management' },
-                { name: 'Buildings', description: 'Building information' },
-                { name: 'Payments', description: 'Payment management' },
-                { name: 'Petty Cash', description: 'Petty Cash management' }
+                { name: 'Buildings', description: 'Building information (public)' },
+                { name: 'Leads', description: 'Lead registration (public)' },
+                { name: 'App - Billing', description: 'Billing — APK (Residents)' },
+                { name: 'App - Payments', description: 'Payments — APK (Residents)' },
+                { name: 'App - Petty Cash', description: 'Petty Cash — APK (Residents, read-only)' },
+                { name: 'App - Users', description: 'User profile — APK (Residents)' },
+                { name: 'Admin - Billing', description: 'Billing — Web Admin (Board + Admin)' },
+                { name: 'Admin - Payments', description: 'Payments — Web Admin (Board + Admin)' },
+                { name: 'Admin - Petty Cash', description: 'Petty Cash — Web Admin (Board + Admin)' },
+                { name: 'Admin - Buildings', description: 'Buildings — Web Admin (Board + Admin)' },
+                { name: 'Admin - Users', description: 'User management — Web Admin (Board + Admin)' }
             ],
             components: {
                 securitySchemes: {
@@ -54,13 +60,13 @@ export const app = new Elysia()
             persistAuthorization: true
         }
     }))
+    // ── v1 grouped routes ──────────────────────────────────────────────────────
+    .use(appRoutes)
+    .use(adminRoutes)
+    // ── Public routes (no prefix — no auth required) ────────────────────────
     .use(authRoutes)
-    .use(userRoutes)
-    .use(buildingRoutes)
-    .use(paymentRoutes)
-    .use(billingRoutes)
-    .use(pettyCashRoutes)
     .use(leadRoutes)
+    .use(buildingPublicRoutes)
     .derive(({ request }) => {
         return {
             requestId: request.headers.get('x-request-id') || randomUUID()

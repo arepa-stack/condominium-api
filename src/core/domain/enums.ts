@@ -42,3 +42,8 @@ export enum PettyCashCategory {
     UTILITIES = 'UTILITIES',
     OTHER = 'OTHER'
 }
+
+export enum InvoiceTag {
+    NORMAL = 'NORMAL',
+    PETTY_CASH = 'PETTY_CASH'
+}

@@ -1,13 +1,9 @@
 import { IPaymentRepository } from '../../domain/repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
-import { IPaymentAllocationRepository } from '@/modules/billing/domain/repository';
+import { IPaymentAllocationRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
 import { IInvoiceRepository } from '@/modules/billing/domain/repository';
-import { InvoiceType } from '@/modules/billing/domain/entities/Invoice';
-import { IUnitRepository } from '@/modules/buildings/domain/repository';
-import { PettyCashRepository } from '@/modules/petty-cash/domain/repositories/PettyCashRepository';
-import { PettyCashTransaction } from '@/modules/petty-cash/domain/entities/PettyCashTransaction';
-import { PettyCashTransactionType } from '@/core/domain/enums';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
+import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 
 export interface ApprovePaymentDTO {
     paymentId: string;
@@ -27,8 +23,7 @@ export class ApprovePayment {
         private userRepo: IUserRepository,
         private allocationRepo: IPaymentAllocationRepository,
         private invoiceRepo: IInvoiceRepository,
-        private unitRepo: IUnitRepository,
-        private pettyCashRepo: PettyCashRepository
+        private creditLedgerRepo: ICreditLedgerRepository
     ) { }
 
     async approve({ paymentId, approverId, notes }: ApprovePaymentDTO): Promise<void> {
@@ -52,31 +47,28 @@ export class ApprovePayment {
         payment.approve(approverId, notes);
         await this.paymentRepo.update(payment);
 
-        // Replenish Petty Cash if any allocation is for a replenishment invoice
         const allocations = await this.allocationRepo.findByPaymentId(paymentId);
         for (const alloc of allocations) {
+            // Re-read invoice after allocation insert so DB trigger's paid_amount update is visible
             const invoice = await this.invoiceRepo.findById(alloc.invoice_id);
-            if (invoice?.type !== InvoiceType.PETTY_CASH_REPLENISHMENT) continue;
+            if (!invoice) continue;
 
-            const unit = await this.unitRepo.findById(invoice.unit_id);
-            if (!unit) continue;
+            // Detect overpayment → credit ledger
+            // Only for unit-level invoices (building-level invoices don't generate unit credit)
+            if (!invoice.unit_id) continue;
 
-            const fund = await this.pettyCashRepo.findFundByBuildingId(unit.building_id);
-            if (!fund) continue;
+            const surplus = invoice.paid_amount - invoice.amount;
+            if (surplus <= 0) continue;
 
-            fund.addIncome(alloc.amount);
-            await this.pettyCashRepo.saveFund(fund);
-
-            const transaction = new PettyCashTransaction(
-                '',
-                fund.id,
-                PettyCashTransactionType.INCOME,
-                alloc.amount,
-                `Reposición por pago de factura: ${invoice.description}`,
-                'Otro' as any, // Or a specific category
-                approverId
-            );
-            await this.pettyCashRepo.saveTransaction(transaction);
+            const creditEntry = new CreditLedgerEntry({
+                id: crypto.randomUUID(),
+                unit_id: invoice.unit_id,
+                amount: surplus,
+                reason: `Overpayment on invoice ${invoice.id}`,
+                reference_type: 'payment',
+                reference_id: payment.id
+            });
+            await this.creditLedgerRepo.addCredit(creditEntry);
         }
     }
 

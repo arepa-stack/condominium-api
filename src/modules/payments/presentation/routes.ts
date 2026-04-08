@@ -20,13 +20,11 @@ const storageService = new StorageService();
 // New Repo for allocations
 import { SupabaseInvoiceRepository } from '@/modules/billing/infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabasePaymentAllocationRepository } from '@/modules/billing/infrastructure/repositories/SupabasePaymentAllocationRepository';
-import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
-import { SupabasePettyCashRepository } from '@/modules/petty-cash/infrastructure/repositories/SupabasePettyCashRepository';
+import { SupabaseCreditLedgerRepository } from '@/modules/billing/infrastructure/repositories/SupabaseCreditLedgerRepository';
 
 const invoiceRepo = new SupabaseInvoiceRepository();
 const allocationRepo = new SupabasePaymentAllocationRepository();
-const unitRepo = new SupabaseUnitRepository();
-const pettyCashRepo = new SupabasePettyCashRepository();
+const creditLedgerRepo = new SupabaseCreditLedgerRepository();
 const getUnitBalance = new GetUnitBalance(invoiceRepo, allocationRepo);
 
 const approvePayment = new ApprovePayment(
@@ -34,8 +32,7 @@ const approvePayment = new ApprovePayment(
     userRepo,
     allocationRepo,
     invoiceRepo,
-    unitRepo,
-    pettyCashRepo
+    creditLedgerRepo
 );
 const getUnitPayments = new GetUnitPayments(paymentRepo, userRepo);
 const getUnitPaymentSummary = new GetUnitPaymentSummary(paymentRepo, userRepo, getUnitBalance);
@@ -109,21 +106,15 @@ const SuccessResponse = t.Object({
     success: t.Boolean()
 });
 
-export const paymentRoutes = new Elysia({ prefix: '/payments' })
+// User-facing routes factory (fresh instance per mount — prevents Swagger duplicates)
+function createUserRoutes(tag: string) {
+    return new Elysia()
     .derive(async ({ request }) => {
         const authHeader = request.headers.get('Authorization');
-
-        if (!authHeader) {
-            throw new UnauthorizedError('Authentication required');
-        }
-
+        if (!authHeader) throw new UnauthorizedError('Authentication required');
         const token = authHeader.replace('Bearer ', '');
         const { data: { user }, error } = await supabase.auth.getUser(token);
-
-        if (error || !user) {
-            throw new UnauthorizedError('Invalid or expired token');
-        }
-
+        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
         return { user };
     })
     // Get user's payment history
@@ -142,7 +133,7 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
         }),
         response: t.Array(PaymentSchema),
         detail: {
-            tags: ['Payments'],
+            tags: [tag],
             summary: 'Get user payment history'
         }
     })
@@ -152,7 +143,7 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
     }, {
         response: PaymentSummarySchema,
         detail: {
-            tags: ['Payments'],
+            tags: [tag],
             summary: 'Get payment summary with solvency status',
             description: 'Returns payment history, solvency status, pending periods, and recent transactions'
         }
@@ -193,7 +184,7 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
     }, {
         response: t.Union([PaymentSchema, t.Null()]),
         detail: {
-            tags: ['Payments'],
+            tags: [tag],
             summary: 'Get payment details',
             description: 'Allows residents of the same unit, board members of the same building, and admins to view payment details.'
         }
@@ -275,12 +266,23 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
         type: 'multipart/form-data',
         response: PaymentSchema,
         detail: {
-            tags: ['Payments'],
+            tags: [tag],
             summary: 'Report a new payment',
             description: 'Submit a payment report with optional proof image and invoice allocations.'
         }
+    });
+}
+
+// Admin-only routes (Web Admin): list all payments, approve/reject
+const paymentAdminRoutes = new Elysia()
+    .derive(async ({ request }) => {
+        const authHeader = request.headers.get('Authorization');
+        if (!authHeader) throw new UnauthorizedError('Authentication required');
+        const token = authHeader.replace('Bearer ', '');
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
+        return { user };
     })
-    // Admin routes
     .get('/admin/payments', async ({ user, query }) => {
         const payments = await getAllPayments.execute({
             requesterId: user.id,
@@ -302,7 +304,7 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
         }),
         response: t.Array(PaymentSchema),
         detail: {
-            tags: ['Payments'],
+            tags: ['Admin - Payments'],
             summary: 'List all payments (Admin/Board)',
             description: 'Admin sees all payments, Board members see only their building payments',
             security: [{ BearerAuth: [] }]
@@ -331,9 +333,18 @@ export const paymentRoutes = new Elysia({ prefix: '/payments' })
         }),
         response: SuccessResponse,
         detail: {
-            tags: ['Payments'],
+            tags: ['Admin - Payments'],
             summary: 'Update payment status (Admin/Board)',
             description: 'Approve or reject a payment',
             security: [{ BearerAuth: [] }]
         }
     });
+
+// Full plugin (admin — includes user routes + admin routes)
+export const paymentRoutes = new Elysia({ prefix: '/payments' })
+    .use(createUserRoutes('Admin - Payments'))
+    .use(paymentAdminRoutes);
+
+// App-only plugin (APK — read + report, no admin ops)
+export const paymentAppRoutes = new Elysia({ prefix: '/payments' })
+    .use(createUserRoutes('App - Payments'));

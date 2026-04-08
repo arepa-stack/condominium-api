@@ -54,7 +54,8 @@ const BatchUnitsResponse = t.Object({
     units: t.Array(UnitSchema)
 });
 
-export const buildingRoutes = new Elysia({ prefix: '/buildings' })
+// Public routes — no auth required (used for registration flow)
+export const buildingPublicRoutes = new Elysia({ prefix: '/buildings' })
     .get('/', async () => {
         const buildings = await getBuildings.execute();
         return buildings.map(b => b.toJSON());
@@ -75,7 +76,6 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
             summary: 'Get building by ID'
         }
     })
-    // Unit Routes (Public for Registration)
     .get('/:id/units', async ({ params }) => {
         const units = await getUnitsByBuilding.execute(params.id);
         return units.map(u => u.toJSON());
@@ -86,7 +86,6 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
             summary: 'List units for a building'
         }
     })
-    // Get single unit by ID
     .get('/units/:id', async ({ params }) => {
         const unit = await getUnitById.execute(params.id);
         return unit.toJSON();
@@ -96,17 +95,16 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
             tags: ['Units'],
             summary: 'Get unit by ID'
         }
-    })
+    });
+
+// Admin routes — auth required, Board+Admin only
+export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
     .derive(async ({ request }) => {
-        // We need the user for admin actions
         const authHeader = request.headers.get('Authorization');
         if (!authHeader) throw new UnauthorizedError('Authentication required');
-
         const token = authHeader.replace('Bearer ', '');
         const { data: { user }, error } = await supabase.auth.getUser(token);
-
         if (error || !user) throw new UnauthorizedError('Invalid token');
-
         return { user };
     })
     .post('/', async ({ body, user }) => {
@@ -122,7 +120,7 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
         }),
         response: BuildingSchema,
         detail: {
-            tags: ['Buildings'],
+            tags: ['Admin - Buildings'],
             summary: 'Create a new building (Admin only)',
             security: [{ BearerAuth: [] }]
         }
@@ -141,13 +139,11 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
         }),
         response: BuildingSchema,
         detail: {
-            tags: ['Buildings'],
+            tags: ['Admin - Buildings'],
             summary: 'Update a building (Admin only)',
             security: [{ BearerAuth: [] }]
         }
     })
-
-
     .post('/:id/units', async ({ params, body }) => {
         return await createUnit.execute({
             building_id: params.id,
@@ -163,7 +159,7 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
         }),
         response: UnitSchema,
         detail: {
-            tags: ['Units'],
+            tags: ['Admin - Buildings'],
             summary: 'Create a single unit (Admin only)',
             security: [{ BearerAuth: [] }]
         }
@@ -185,8 +181,13 @@ export const buildingRoutes = new Elysia({ prefix: '/buildings' })
         }),
         response: BatchUnitsResponse,
         detail: {
-            tags: ['Units'],
+            tags: ['Admin - Buildings'],
             summary: 'Batch create units (Admin only)',
             security: [{ BearerAuth: [] }]
         }
     });
+
+// Legacy combined export (kept for backward compat if needed)
+export const buildingRoutes = new Elysia({ prefix: '/buildings' })
+    .use(buildingPublicRoutes)
+    .use(buildingAdminRoutes);

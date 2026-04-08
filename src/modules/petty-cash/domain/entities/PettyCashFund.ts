@@ -25,11 +25,21 @@ export class PettyCashFund {
         this.current_balance += amount;
     }
 
+    /**
+     * @deprecated Use registerExpensePartial() which handles overage gracefully.
+     */
     public registerExpense(amount: number): void {
         if (!this.canAfford(amount)) {
             throw new Error('Insufficient funds in petty cash');
         }
         this.current_balance -= amount;
+    }
+
+    public registerExpensePartial(amount: number): { deducted: number; overage: number } {
+        const deducted = Math.min(this.current_balance, amount);
+        const overage = amount - deducted;
+        this.current_balance -= deducted;
+        return { deducted, overage };
     }
 
     public toJSON() {

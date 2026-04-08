@@ -14,6 +14,7 @@ export class RegisterPettyCashIncome {
     constructor(private pettyCashRepo: PettyCashRepository) { }
 
     async execute(dto: RegisterIncomeDTO) {
+        console.log('Registering petty cash income:', dto);
         let fund = await this.pettyCashRepo.findFundByBuildingId(dto.buildingId);
 
         if (!fund) {

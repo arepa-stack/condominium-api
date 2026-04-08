@@ -7,22 +7,25 @@ import { RegisterPettyCashExpense } from '../application/use-cases/RegisterPetty
 import { SupabaseInvoiceRepository } from '@/modules/billing/infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { StorageService } from '@/infrastructure/storage';
-import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
-import { UnauthorizedError, ForbiddenError } from '@/core/errors';
 import { UserRole, PettyCashTransactionType, PettyCashCategory } from '@/core/domain/enums';
+import { requireRole, requireBuildingAccess } from '@/core/presentation/guards';
+import { PreviewAssessments } from '../application/use-cases/PreviewAssessments';
+import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
 
 // Initialize repo and use cases
 const pettyCashRepo = new SupabasePettyCashRepository();
 const storageService = new StorageService();
+const invoiceRepo = new SupabaseInvoiceRepository();
+const unitRepo = new SupabaseUnitRepository();
 
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo);
-const registerExpense = new RegisterPettyCashExpense(
-    pettyCashRepo,
-    new SupabaseUnitRepository(),
-    new SupabaseInvoiceRepository()
-);
+const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, invoiceRepo);
+const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
+const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
+
+// ── Schemas ─────────────────────────────────────────────────────────────────
 
 const PettyCashFundSchema = t.Object({
     id: t.String(),
@@ -40,112 +43,164 @@ const PettyCashTransactionSchema = t.Object({
     description: t.String(),
     category: t.String(),
     created_by: t.String(),
-    evidence_url: t.Nullable(t.Optional(t.String())),
-    created_at: t.Nullable(t.Optional(t.Any()))
+    evidence_url: t.Optional(t.Nullable(t.String())),
+    created_at: t.Optional(t.Nullable(t.Any()))
 });
 
+const AssessmentUnitSchema = t.Object({
+    id: t.String(),
+    name: t.String(),
+    amount: t.Number()
+});
+
+const AssessmentPreviewSchema = t.Object({
+    building_id: t.String(),
+    total_expenses: t.Number(),
+    total_income: t.Number(),
+    fund_balance: t.Number(),
+    total_overage: t.Number(),
+    already_assessed: t.Number(),
+    pending_to_assess: t.Number(),
+    units: t.Array(AssessmentUnitSchema)
+});
+
+const AssessmentInvoiceSchema = t.Object({
+    unit_id: t.String(),
+    unit_name: t.String(),
+    amount: t.Number(),
+    invoice_id: t.String()
+});
+
+const AssessmentResultSchema = t.Object({
+    building_id: t.String(),
+    total_assessed: t.Number(),
+    invoices_created: t.Number(),
+    invoices: t.Array(AssessmentInvoiceSchema)
+});
+
+// ── Route factories (fresh instance each call — prevents Swagger duplicates) ─
+
+function createReadRoutes(tag: string) {
+    return new Elysia()
+        .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+        .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-read-access'))
+        .get('/funds/:buildingId', async ({ params }) => {
+            return await getBalance.execute(params.buildingId);
+        }, {
+            response: PettyCashFundSchema,
+            detail: {
+                tags: [tag],
+                summary: 'Get fund balance for a building'
+            }
+        })
+        .get('/funds/:buildingId/transactions', async ({ params, query }) => {
+            return await getHistory.execute(params.buildingId, {
+                type: query.type as PettyCashTransactionType,
+                category: query.category as PettyCashCategory,
+                page: query.page ? Number(query.page) : 1,
+                limit: query.limit ? Number(query.limit) : 10
+            });
+        }, {
+            query: t.Object({
+                type: t.Optional(t.String()),
+                category: t.Optional(t.String()),
+                page: t.Optional(t.Numeric()),
+                limit: t.Optional(t.Numeric())
+            }),
+            response: t.Array(PettyCashTransactionSchema),
+            detail: {
+                tags: [tag],
+                summary: 'List transactions for a building fund'
+            }
+        });
+}
+
+function createWriteRoutes() {
+    return new Elysia()
+        .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+        .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-write-access'))
+        .post('/funds/:buildingId/transactions', async ({ params, body, profile }) => {
+            const buildingId = params.buildingId;
+            const amount = typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount;
+
+            if (body.type === PettyCashTransactionType.INCOME) {
+                return await registerIncome.execute({
+                    buildingId,
+                    amount,
+                    description: body.description,
+                    userId: profile.id
+                });
+            }
+
+            // EXPENSE
+            let evidenceUrl: string | undefined;
+            if (body.evidence_image) {
+                evidenceUrl = await storageService.uploadProof(body.evidence_image, profile.id);
+            }
+
+            return await registerExpense.execute({
+                buildingId,
+                amount,
+                description: body.description,
+                category: (body.category ?? PettyCashCategory.OTHER) as PettyCashCategory,
+                userId: profile.id,
+                evidenceUrl
+            });
+        }, {
+            body: t.Object({
+                type: t.Union([
+                    t.Literal(PettyCashTransactionType.INCOME),
+                    t.Literal(PettyCashTransactionType.EXPENSE)
+                ]),
+                amount: t.Union([t.Number(), t.String()]),
+                description: t.String(),
+                category: t.Optional(t.String()),
+                evidence_image: t.Optional(t.File())
+            }),
+            type: 'multipart/form-data',
+            response: PettyCashTransactionSchema,
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Create a transaction (income or expense)',
+                description: 'Type INCOME creates a fund replenishment. Type EXPENSE creates a fund deduction and generates a PETTY_CASH invoice. Category and evidence_image only apply to EXPENSE.'
+            }
+        });
+}
+
+function createAssessmentRoutes() {
+    return new Elysia()
+        .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+        .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-assessment-access'))
+        .get('/funds/:buildingId/assessments', async ({ params }) => {
+            return await previewAssessments.execute(params.buildingId);
+        }, {
+            response: AssessmentPreviewSchema,
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Preview overage assessment for units',
+                description: 'Shows how the accumulated petty cash overage would be split across building units. No invoices are created.'
+            }
+        })
+        .post('/funds/:buildingId/assessments', async ({ params }) => {
+            return await generateAssessments.execute(params.buildingId);
+        }, {
+            response: AssessmentResultSchema,
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Generate overage assessment invoices',
+                description: 'Creates PENDING invoices for each unit in the building, splitting the accumulated petty cash overage equally. Returns 400 if no pending overage exists.'
+            }
+        });
+}
+
+// ── Exports ─────────────────────────────────────────────────────────────────
+
+// App routes (APK — read only)
+export const pettyCashAppRoutes = new Elysia({ prefix: '/petty-cash' })
+    .use(createReadRoutes('App - Petty Cash'));
+
+// Admin routes (Web Admin — read + write + assessments)
 export const pettyCashRoutes = new Elysia({ prefix: '/petty-cash' })
-    .derive(async ({ request }) => {
-        const authHeader = request.headers.get('Authorization');
-        if (!authHeader) throw new UnauthorizedError('Authentication required');
-
-        const token = authHeader.replace('Bearer ', '');
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
-
-        // Fetch user profile to check role
-        const { data: profile } = await supabaseAdmin
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .single();
-
-        return { user, profile };
-    })
-    .get('/balance/:buildingId', async ({ params }) => {
-        return await getBalance.execute(params.buildingId);
-    }, {
-        response: PettyCashFundSchema,
-        detail: {
-            tags: ['Petty Cash'],
-            summary: 'Get current balance'
-        }
-    })
-    .get('/history/:buildingId', async ({ params, query }) => {
-        return await getHistory.execute(params.buildingId, {
-            type: query.type as PettyCashTransactionType,
-            category: query.category as PettyCashCategory,
-            page: query.page ? Number(query.page) : 1,
-            limit: query.limit ? Number(query.limit) : 10
-        });
-    }, {
-        query: t.Object({
-            type: t.Optional(t.String()),
-            category: t.Optional(t.String()),
-            page: t.Optional(t.Numeric()),
-            limit: t.Optional(t.Numeric())
-        }),
-        response: t.Array(PettyCashTransactionSchema),
-        detail: {
-            tags: ['Petty Cash'],
-            summary: 'Get transaction history'
-        }
-    })
-    .post('/income', async ({ body, user, profile }) => {
-        // Only Admin or Board
-        if (profile?.role !== UserRole.ADMIN && profile?.role !== UserRole.BOARD) {
-            throw new ForbiddenError('Only Admin or Board members can register income');
-        }
-
-        return await registerIncome.execute({
-            buildingId: body.building_id,
-            amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
-            description: body.description,
-            userId: user.id
-        });
-    }, {
-        body: t.Object({
-            building_id: t.String(),
-            amount: t.Union([t.Number(), t.String()]),
-            description: t.String()
-        }),
-        response: PettyCashTransactionSchema,
-        detail: {
-            tags: ['Petty Cash'],
-            summary: 'Register income'
-        }
-    })
-    .post('/expense', async ({ body, user, profile }) => {
-        // Only Admin or Board
-        if (profile?.role !== UserRole.ADMIN && profile?.role !== UserRole.BOARD) {
-            throw new ForbiddenError('Only Admin or Board members can register expenses');
-        }
-
-        let evidenceUrl: string | undefined;
-        if (body.evidence_image) {
-            evidenceUrl = await storageService.uploadProof(body.evidence_image, user.id);
-        }
-
-        return await registerExpense.execute({
-            buildingId: body.building_id,
-            amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
-            description: body.description,
-            category: body.category as PettyCashCategory,
-            userId: user.id,
-            evidenceUrl
-        });
-    }, {
-        body: t.Object({
-            building_id: t.String(),
-            amount: t.Union([t.Number(), t.String()]),
-            description: t.String(),
-            category: t.String(),
-            evidence_image: t.Optional(t.File())
-        }),
-        type: 'multipart/form-data',
-        response: PettyCashTransactionSchema,
-        detail: {
-            tags: ['Petty Cash'],
-            summary: 'Register expense'
-        }
-    });
+    .use(createReadRoutes('Admin - Petty Cash'))
+    .use(createWriteRoutes())
+    .use(createAssessmentRoutes());
