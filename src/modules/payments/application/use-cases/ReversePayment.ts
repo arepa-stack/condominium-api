@@ -11,6 +11,12 @@ export interface ReversePaymentDTO {
     reason: string;
 }
 
+// SECURITY: this use case does NOT perform its own role / building-access
+// check. Authorization is gated at the route layer via requireRole
+// ([ADMIN, BOARD]). See src/modules/payments/presentation/routes.ts
+// (paymentAdminRoutes). If you ever mount this use case from a new
+// entry point, apply the same guard there or add an internal check
+// (see ApprovePayment.ts for the building-membership pattern).
 export class ReversePayment {
     constructor(
         private paymentRepo: IPaymentRepository,

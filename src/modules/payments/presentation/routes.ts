@@ -11,6 +11,7 @@ import { StorageService } from '@/infrastructure/storage';
 import { supabase } from '@/infrastructure/supabase';
 import { UnauthorizedError, NotFoundError } from '@/core/errors';
 import { PaymentMethod, UserRole } from '@/core/domain/enums';
+import { requireRole } from '@/core/presentation/guards';
 
 // Initialize repositories and use cases
 const paymentRepo = new SupabasePaymentRepository();
@@ -278,19 +279,25 @@ function createUserRoutes(tag: string) {
     });
 }
 
-// Admin-only routes (Web Admin): list all payments, approve/reject
+// Admin-only routes (Web Admin): list all payments, approve/reject, reverse.
+//
+// SECURITY: all endpoints below are gated by requireRole([ADMIN, BOARD]).
+// The previous version only validated that a Bearer token was present,
+// which left /admin/payments/:id/reverse reachable by any authenticated
+// user. ReversePayment itself has no internal role check, so the route
+// guard is the only line of defense — do NOT remove it.
+//
+// TODO(tech-debt): apply requireBuildingAccess once there's a clean way
+// to derive the building_id from the payment (the id lives inside the
+// entity, not the URL params, so the guard helper needs a pre-load).
+// Until then, a BOARD member of building X could still hit
+// admin/payments/:id for a payment from building Y. ApprovePayment has
+// an internal building check; ReversePayment does not — flagged.
 const paymentAdminRoutes = new Elysia()
-    .derive(async ({ request }) => {
-        const authHeader = request.headers.get('Authorization');
-        if (!authHeader) throw new UnauthorizedError('Authentication required');
-        const token = authHeader.replace('Bearer ', '');
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
-        return { user };
-    })
-    .get('/admin/payments', async ({ user, query }) => {
+    .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+    .get('/admin/payments', async ({ profile, query }) => {
         const payments = await getAllPayments.execute({
-            requesterId: user.id,
+            requesterId: profile.id,
             filters: {
                 building_id: query.building_id,
                 status: query.status,
@@ -315,17 +322,17 @@ const paymentAdminRoutes = new Elysia()
             security: [{ BearerAuth: [] }]
         }
     })
-    .patch('/admin/payments/:id', async ({ user, params, body }) => {
+    .patch('/admin/payments/:id', async ({ profile, params, body }) => {
         if (body.status === 'APPROVED') {
             await approvePayment.approve({
                 paymentId: params.id,
-                approverId: user.id,
+                approverId: profile.id,
                 notes: body.notes
             });
         } else if (body.status === 'REJECTED') {
             await approvePayment.reject({
                 paymentId: params.id,
-                approverId: user.id,
+                approverId: profile.id,
                 notes: body.notes
             });
         }
@@ -344,21 +351,25 @@ const paymentAdminRoutes = new Elysia()
             security: [{ BearerAuth: [] }]
         }
     })
-    .post('/admin/payments/:id/reverse', async ({ user, params, body }) => {
+    .post('/admin/payments/:id/reverse', async ({ profile, params, body }) => {
         await reversePayment.execute({
             paymentId: params.id,
-            requesterId: user.id,
+            requesterId: profile.id,
             reason: body.reason
         });
         return { success: true };
     }, {
         body: t.Object({
-            reason: t.String()
+            reason: t.String({
+                minLength: 10,
+                maxLength: 500,
+                description: 'Human-readable explanation of why this approved payment is being reversed. Stored in the payment notes and used in credit ledger audit trail.'
+            })
         }),
         response: SuccessResponse,
         detail: {
             tags: ['Admin - Payments'],
-            summary: 'Reverse an approved payment (Admin only)',
+            summary: 'Reverse an approved payment (Admin/Board)',
             description: 'Reverts payment approval, cancels credits, and restores invoice balances',
             security: [{ BearerAuth: [] }]
         }
