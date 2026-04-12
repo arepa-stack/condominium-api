@@ -116,11 +116,15 @@ function createReadRoutes(tag: string) {
                 summary: 'List transactions for a building fund'
             }
         })
-        .get('/funds/:buildingId/transparency', async ({ params }) => {
-            return await getTransparency.execute(params.buildingId);
+        .get('/funds/:buildingId/transparency', async ({ params, query }) => {
+            return await getTransparency.execute(params.buildingId, query.period);
         }, {
+            query: t.Object({
+                period: t.String({ minLength: 1, description: 'Period to report (e.g. "2024-01")' })
+            }),
             response: t.Object({
                 building_id: t.String(),
+                period: t.String(),
                 total_to_collect: t.Number(),
                 total_collected: t.Number(),
                 collection_percentage: t.Number(),
@@ -129,13 +133,17 @@ function createReadRoutes(tag: string) {
                     unit_name: t.String(),
                     expected_amount: t.Number(),
                     covered_amount: t.Number(),
-                    status: t.String()
+                    status: t.Union([
+                        t.Literal('PENDING'),
+                        t.Literal('PARTIAL'),
+                        t.Literal('PAID')
+                    ])
                 }))
             }),
             detail: {
                 tags: [tag],
                 summary: 'Get petty cash replenishment transparency view',
-                description: 'Shows progress of fund replenishment, capping unit contributions at their assigned quota.'
+                description: 'Shows progress of fund replenishment for a specific period, capping unit contributions at their assigned quota. Cancelled invoices are excluded from totals.'
             }
         });
 }

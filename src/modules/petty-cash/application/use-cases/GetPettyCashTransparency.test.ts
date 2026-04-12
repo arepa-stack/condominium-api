@@ -3,43 +3,60 @@ import { GetPettyCashTransparency } from './GetPettyCashTransparency';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
 
-describe('GetPettyCashTransparency', () => {
-    const mockUnits = [
-        { id: 'u1', name: 'Apto 1' },
-        { id: 'u2', name: 'Apto 2' }
-    ];
+const makeInvoice = (overrides: {
+    id: string;
+    unit_id?: string;
+    amount: number;
+    paid_amount: number;
+    status: InvoiceStatus;
+    period?: string;
+}) => new Invoice({
+    id: overrides.id,
+    unit_id: overrides.unit_id,
+    building_id: 'b1',
+    amount: overrides.amount,
+    paid_amount: overrides.paid_amount,
+    period: overrides.period ?? '2024-01',
+    issue_date: new Date(),
+    status: overrides.status,
+    type: InvoiceType.DEBT,
+    tag: InvoiceTag.PETTY_CASH
+});
 
-    const mockInvoices = [
-        new Invoice({
-            id: 'i1', unit_id: 'u1', building_id: 'b1', amount: 80, paid_amount: 100, // Overpaid
-            period: '2024-01', issue_date: new Date(), status: InvoiceStatus.PAID, type: InvoiceType.DEBT, tag: InvoiceTag.PETTY_CASH
-        }),
-        new Invoice({
-            id: 'i2', unit_id: 'u2', building_id: 'b1', amount: 80, paid_amount: 30, // Partial
-            period: '2024-01', issue_date: new Date(), status: InvoiceStatus.PARTIAL, type: InvoiceType.DEBT, tag: InvoiceTag.PETTY_CASH
+const units = [
+    { id: 'u1', name: 'Apto 1' },
+    { id: 'u2', name: 'Apto 2' }
+];
+
+const makeRepos = (invoices: Invoice[], queriedFilters: { period?: string }[] = []) => ({
+    invoiceRepo: {
+        findAll: mock(async (filters: any) => {
+            queriedFilters.push(filters);
+            return invoices.filter(inv => !filters.period || inv.period === filters.period);
         })
-    ];
+    },
+    unitRepo: {
+        findByBuildingId: mock(async () => units as any)
+    }
+});
 
-    const mockInvoiceRepo = {
-        findAll: mock(async () => mockInvoices),
-    };
+describe('GetPettyCashTransparency', () => {
+    it('caps contribution at quota (RN1, RN5, CA9)', async () => {
+        const invoices = [
+            makeInvoice({ id: 'i1', unit_id: 'u1', amount: 80, paid_amount: 100, status: InvoiceStatus.PAID }),
+            makeInvoice({ id: 'i2', unit_id: 'u2', amount: 80, paid_amount: 30, status: InvoiceStatus.PARTIAL })
+        ];
+        const { invoiceRepo, unitRepo } = makeRepos(invoices);
 
-    const mockUnitRepo = {
-        findByBuildingId: mock(async () => mockUnits as any),
-    };
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        const result = await useCase.execute('b1', '2024-01');
 
-    const useCase = new GetPettyCashTransparency(mockInvoiceRepo as any, mockUnitRepo as any);
-
-    it('should calculate transparency with quota capping (RN1, RN5, CA9)', async () => {
-        const result = await useCase.execute('b1');
-
-        expect(result.total_to_collect).toBe(160); // 80 + 80
-        
-        // Apto 1: paid 100, but capped at 80
-        // Apto 2: paid 30
-        // Total should be 80 + 30 = 110
+        expect(result.period).toBe('2024-01');
+        expect(result.total_to_collect).toBe(160);
+        // Apto 1 overpaid (100) but capped to its quota (80).
+        // Apto 2 paid 30.
         expect(result.total_collected).toBe(110);
-        expect(result.collection_percentage).toBe(68.75); // (110/160)*100
+        expect(result.collection_percentage).toBe(68.75);
 
         const apto1 = result.units.find(u => u.unit_id === 'u1');
         expect(apto1?.covered_amount).toBe(80);
@@ -48,5 +65,103 @@ describe('GetPettyCashTransparency', () => {
         const apto2 = result.units.find(u => u.unit_id === 'u2');
         expect(apto2?.covered_amount).toBe(30);
         expect(apto2?.expected_amount).toBe(80);
+    });
+
+    it('rejects calls without a period', async () => {
+        const { invoiceRepo, unitRepo } = makeRepos([]);
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+
+        await expect(useCase.execute('b1', '')).rejects.toThrow(/period is required/);
+        await expect(useCase.execute('b1', '   ')).rejects.toThrow(/period is required/);
+    });
+
+    it('passes the period to the invoice repo filter', async () => {
+        const queried: { period?: string }[] = [];
+        const invoices = [
+            makeInvoice({ id: 'i1', unit_id: 'u1', amount: 80, paid_amount: 0, status: InvoiceStatus.PENDING })
+        ];
+        const { invoiceRepo, unitRepo } = makeRepos(invoices, queried);
+
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        await useCase.execute('b1', '2024-03');
+
+        expect(queried).toHaveLength(1);
+        expect(queried[0].period).toBe('2024-03');
+    });
+
+    it('excludes CANCELLED invoices from the collection total', async () => {
+        // Apto 1 has a CANCELLED invoice (must not count in totals or %).
+        // Apto 2 has a normal PARTIAL invoice.
+        const invoices = [
+            makeInvoice({ id: 'i1', unit_id: 'u1', amount: 80, paid_amount: 0, status: InvoiceStatus.CANCELLED }),
+            makeInvoice({ id: 'i2', unit_id: 'u2', amount: 80, paid_amount: 30, status: InvoiceStatus.PARTIAL })
+        ];
+        const { invoiceRepo, unitRepo } = makeRepos(invoices);
+
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        const result = await useCase.execute('b1', '2024-01');
+
+        // Only Apto 2 contributes to the totals; Apto 1's cancelled quota
+        // is treated as if the unit had no assessment.
+        expect(result.total_to_collect).toBe(80);
+        expect(result.total_collected).toBe(30);
+        expect(result.collection_percentage).toBe(37.5);
+
+        // Apto 1 still appears in the output, but with zeros and PENDING.
+        const apto1 = result.units.find(u => u.unit_id === 'u1');
+        expect(apto1?.expected_amount).toBe(0);
+        expect(apto1?.covered_amount).toBe(0);
+        expect(apto1?.status).toBe(InvoiceStatus.PENDING);
+    });
+
+    it('only counts invoices from the requested period', async () => {
+        // Simulated: repo would return only period-matching invoices
+        // because we pass the filter through, but we verify end-to-end
+        // by mocking the filter behavior.
+        const invoices = [
+            makeInvoice({ id: 'i-jan', unit_id: 'u1', amount: 80, paid_amount: 80, status: InvoiceStatus.PAID, period: '2024-01' }),
+            makeInvoice({ id: 'i-feb', unit_id: 'u1', amount: 80, paid_amount: 0, status: InvoiceStatus.PENDING, period: '2024-02' })
+        ];
+        const { invoiceRepo, unitRepo } = makeRepos(invoices);
+
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        const febResult = await useCase.execute('b1', '2024-02');
+
+        // Only the Feb invoice counts toward the Feb report.
+        expect(febResult.total_to_collect).toBe(80);
+        expect(febResult.total_collected).toBe(0);
+        expect(febResult.units.find(u => u.unit_id === 'u1')?.status).toBe(InvoiceStatus.PENDING);
+    });
+
+    it('lists units with no assessment as PENDING with zero quota', async () => {
+        // Only Apto 1 has an invoice this period. Apto 2 has none.
+        const invoices = [
+            makeInvoice({ id: 'i1', unit_id: 'u1', amount: 80, paid_amount: 80, status: InvoiceStatus.PAID })
+        ];
+        const { invoiceRepo, unitRepo } = makeRepos(invoices);
+
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        const result = await useCase.execute('b1', '2024-01');
+
+        expect(result.units).toHaveLength(2);
+        const apto2 = result.units.find(u => u.unit_id === 'u2');
+        expect(apto2?.expected_amount).toBe(0);
+        expect(apto2?.covered_amount).toBe(0);
+        expect(apto2?.status).toBe(InvoiceStatus.PENDING);
+
+        // Totals only reflect Apto 1.
+        expect(result.total_to_collect).toBe(80);
+        expect(result.total_collected).toBe(80);
+        expect(result.collection_percentage).toBe(100);
+    });
+
+    it('returns 0% when there is nothing to collect', async () => {
+        const { invoiceRepo, unitRepo } = makeRepos([]);
+        const useCase = new GetPettyCashTransparency(invoiceRepo as any, unitRepo as any);
+        const result = await useCase.execute('b1', '2024-01');
+
+        expect(result.total_to_collect).toBe(0);
+        expect(result.total_collected).toBe(0);
+        expect(result.collection_percentage).toBe(0);
     });
 });
