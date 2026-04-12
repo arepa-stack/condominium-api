@@ -16,14 +16,11 @@ export interface ProcessOverpaymentResult {
 }
 
 export class ProcessInvoiceOverpayment {
-    private overpaymentService: OverpaymentService;
-
     constructor(
         private invoiceRepo: IInvoiceRepository,
-        private creditLedgerRepo: ICreditLedgerRepository
-    ) {
-        this.overpaymentService = new OverpaymentService();
-    }
+        private creditLedgerRepo: ICreditLedgerRepository,
+        private overpaymentService: OverpaymentService = new OverpaymentService()
+    ) { }
 
     async execute(dto: ProcessOverpaymentDTO): Promise<ProcessOverpaymentResult> {
         const invoice = await this.invoiceRepo.findById(dto.invoiceId);
@@ -37,16 +34,32 @@ export class ProcessInvoiceOverpayment {
             dto.paymentAmount
         );
 
-        if (generatedCredit > 0 && invoice.unit_id) {
-            const creditEntry = new CreditLedgerEntry({
-                id: crypto.randomUUID(),
-                unit_id: invoice.unit_id,
-                amount: generatedCredit,
-                reason: `Excedente de pago en factura ${invoice.id}`,
-                reference_type: CreditLedgerReferenceType.PAYMENT,
-                reference_id: dto.paymentId
-            });
-            await this.creditLedgerRepo.addCredit(creditEntry);
+        if (generatedCredit > 0) {
+            if (!invoice.unit_id) {
+                // TODO(spec): building-level PETTY_CASH overpayment policy is
+                // undefined. The excess is currently dropped. Surface it so
+                // silent data loss is at least observable in logs.
+                console.warn(
+                    `[ProcessInvoiceOverpayment] Dropping ${generatedCredit} excess on building-level invoice ${invoice.id} (payment ${dto.paymentId}) — no unit to credit.`
+                );
+            } else if (await this.hasExistingCreditForInvoice(dto.paymentId, invoice.id)) {
+                // Idempotency: the caller (ApprovePayment) may retry. Best-effort
+                // check — races are possible between parallel runs. The real fix
+                // is either (a) adding invoice_id to unit_credit_ledger with a
+                // UNIQUE(reference_id, invoice_id) constraint, or (b) making
+                // ApprovePayment short-circuit when the payment is already
+                // APPROVED. This guard prevents the common retry case.
+            } else {
+                const creditEntry = new CreditLedgerEntry({
+                    id: crypto.randomUUID(),
+                    unit_id: invoice.unit_id,
+                    amount: generatedCredit,
+                    reason: `Excedente de pago en factura ${invoice.id}`,
+                    reference_type: CreditLedgerReferenceType.PAYMENT,
+                    reference_id: dto.paymentId
+                });
+                await this.creditLedgerRepo.addCredit(creditEntry);
+            }
         }
 
         const balance = invoice.unit_id ? await this.creditLedgerRepo.getBalanceForUnit(invoice.unit_id) : 0;
@@ -56,5 +69,13 @@ export class ProcessInvoiceOverpayment {
             generatedUnitCredit: generatedCredit,
             remainingCreditBalance: balance
         };
+    }
+
+    private async hasExistingCreditForInvoice(paymentId: string, invoiceId: string): Promise<boolean> {
+        const existing = await this.creditLedgerRepo.findByReferenceId(paymentId);
+        return existing.some(e =>
+            e.reference_type === CreditLedgerReferenceType.PAYMENT &&
+            e.reason.includes(invoiceId)
+        );
     }
 }
