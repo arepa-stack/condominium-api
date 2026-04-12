@@ -70,6 +70,7 @@ export interface ICreditLedgerRepository {
 
 export interface IPaymentAllocationRepository {
     create(allocation: PaymentAllocation): Promise<PaymentAllocation>;
+    delete(allocationId: string): Promise<void>;
     findByPaymentId(paymentId: string): Promise<PaymentAllocation[]>;
     findByInvoiceId(invoiceId: string): Promise<PaymentAllocation[]>;
     findPaymentsByInvoiceId(invoiceId: string): Promise<PaymentAllocationResult[]>; // Returns Payment details joined

@@ -73,11 +73,12 @@ describe('Invoice status transition guard', () => {
             expect(inv.status).toBe(InvoiceStatus.PARTIAL);
         });
 
-        it('PAID -> PENDING via updateStatus when paid_amount drops to zero (full reversal)', () => {
+        it('PAID -> PENDING via subtractPayment + updateStatus (full reversal)', () => {
             const inv = makeInvoice({ status: InvoiceStatus.PAID, paid_amount: 100 });
-            (inv as any).props.paid_amount = 0;
+            inv.subtractPayment(100);
             expect(() => inv.updateStatus()).not.toThrow();
             expect(inv.status).toBe(InvoiceStatus.PENDING);
+            expect(inv.paid_amount).toBe(0);
         });
 
         it('same-status transitions are idempotent no-ops', () => {
@@ -108,5 +109,79 @@ describe('Invoice status transition guard', () => {
             const inv = makeInvoice({ status: InvoiceStatus.PAID, paid_amount: 100 });
             expect(() => inv.cancel()).toThrow(/PAID -> CANCELLED/);
         });
+    });
+});
+
+describe('Invoice.addPayment', () => {
+    it('increments paid_amount', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PENDING, paid_amount: 0 });
+        inv.addPayment(40);
+        expect(inv.paid_amount).toBe(40);
+    });
+
+    it('accumulates across multiple calls', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PENDING, paid_amount: 0 });
+        inv.addPayment(30);
+        inv.addPayment(25);
+        expect(inv.paid_amount).toBe(55);
+    });
+
+    it('allows reaching exactly the invoice amount', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PENDING, paid_amount: 0 });
+        inv.addPayment(100);
+        expect(inv.paid_amount).toBe(100);
+    });
+
+    it('throws when the result would exceed invoice amount', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PENDING, paid_amount: 0 });
+        expect(() => inv.addPayment(150)).toThrow(/exceed invoice amount/);
+    });
+
+    it('throws when the result would exceed after accumulation', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PARTIAL, paid_amount: 80 });
+        expect(() => inv.addPayment(30)).toThrow(/exceed invoice amount/);
+    });
+
+    it('rejects zero', () => {
+        const inv = makeInvoice({ paid_amount: 0 });
+        expect(() => inv.addPayment(0)).toThrow(/must be positive/);
+    });
+
+    it('rejects negative amounts', () => {
+        const inv = makeInvoice({ paid_amount: 0 });
+        expect(() => inv.addPayment(-10)).toThrow(/must be positive/);
+    });
+});
+
+describe('Invoice.subtractPayment', () => {
+    it('decrements paid_amount', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PAID, paid_amount: 100 });
+        inv.subtractPayment(40);
+        expect(inv.paid_amount).toBe(60);
+    });
+
+    it('can drain paid_amount back to zero', () => {
+        const inv = makeInvoice({ status: InvoiceStatus.PAID, paid_amount: 100 });
+        inv.subtractPayment(100);
+        expect(inv.paid_amount).toBe(0);
+    });
+
+    it('clamps to zero instead of going negative when subtracting more than paid', () => {
+        // Defensive: if the caller passes a bad amount we clamp rather than
+        // produce an impossible negative paid_amount. The caller still has the
+        // opportunity to detect the anomaly through other means.
+        const inv = makeInvoice({ status: InvoiceStatus.PARTIAL, paid_amount: 30 });
+        inv.subtractPayment(50);
+        expect(inv.paid_amount).toBe(0);
+    });
+
+    it('rejects zero', () => {
+        const inv = makeInvoice({ paid_amount: 100 });
+        expect(() => inv.subtractPayment(0)).toThrow(/must be positive/);
+    });
+
+    it('rejects negative amounts', () => {
+        const inv = makeInvoice({ paid_amount: 100 });
+        expect(() => inv.subtractPayment(-10)).toThrow(/must be positive/);
     });
 });

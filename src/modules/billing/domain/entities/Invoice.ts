@@ -100,6 +100,31 @@ export class Invoice {
         return this.props.status === InvoiceStatus.PAID;
     }
 
+    addPayment(amount: number): void {
+        if (amount <= 0) {
+            throw new DomainError('addPayment amount must be positive', 'VALIDATION_ERROR', 400);
+        }
+        const next = this.paid_amount + amount;
+        if (next > this.amount) {
+            throw new DomainError(
+                `addPayment would exceed invoice amount: ${next} > ${this.amount}. ` +
+                `The caller must route the excess to the credit ledger, not force it onto the invoice.`,
+                'VALIDATION_ERROR',
+                400
+            );
+        }
+        this.props.paid_amount = next;
+        this.props.updated_at = new Date();
+    }
+
+    subtractPayment(amount: number): void {
+        if (amount <= 0) {
+            throw new DomainError('subtractPayment amount must be positive', 'VALIDATION_ERROR', 400);
+        }
+        this.props.paid_amount = Math.max(0, this.paid_amount - amount);
+        this.props.updated_at = new Date();
+    }
+
     markAsPaid(): void {
         this.assertCanTransitionTo(InvoiceStatus.PAID);
         this.props.status = InvoiceStatus.PAID;

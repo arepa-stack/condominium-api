@@ -25,7 +25,7 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
                 amount: allocation.amount,
                 created_at: allocation.created_at
             })
-            .select() // This will trigger the trigger_update_invoice_status in DB
+            .select()
             .single();
 
         if (error) {
@@ -33,6 +33,17 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
         }
 
         return this.toDomain(data);
+    }
+
+    async delete(allocationId: string): Promise<void> {
+        const { error } = await supabase
+            .from('payment_allocations')
+            .delete()
+            .eq('id', allocationId);
+
+        if (error) {
+            throw new DomainError('Error deleting allocation: ' + error.message, 'DB_ERROR', 500);
+        }
     }
 
     async findByPaymentId(paymentId: string): Promise<PaymentAllocation[]> {
