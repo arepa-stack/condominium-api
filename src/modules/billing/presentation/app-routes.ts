@@ -105,7 +105,13 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
             balance: t.Number(),
             history: t.Array(t.Object({
                 id: t.String(), unit_id: t.String(), amount: t.Number(),
-                reason: t.String(), reference_type: t.String(), reference_id: t.String(),
+                reason: t.String(),
+                reference_type: t.Union([
+                    t.Literal('payment'),
+                    t.Literal('reversal'),
+                    t.Literal('manual_adjustment')
+                ]),
+                reference_id: t.String(),
                 created_at: t.Optional(t.Any())
             }))
         }),
