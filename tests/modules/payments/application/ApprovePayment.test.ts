@@ -9,7 +9,7 @@ import { PaymentMethod, PaymentStatus, UserRole, UserStatus } from '@/core/domai
 import { IPaymentAllocationRepository, IInvoiceRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentAllocation } from '@/modules/billing/domain/entities/PaymentAllocation';
-import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 
 describe('ApprovePayment Use Case', () => {
     let paymentRepo: MockPaymentRepository;
@@ -277,7 +277,7 @@ describe('ApprovePayment Use Case', () => {
             const savedEntry: CreditLedgerEntry = (creditLedgerRepo.addCredit as ReturnType<typeof mock>).mock.calls[0][0];
             expect(savedEntry.unit_id).toBe('unit-1');
             expect(savedEntry.amount).toBe(50); // 150 - 100
-            expect(savedEntry.reference_type).toBe('payment');
+            expect(savedEntry.reference_type).toBe(CreditLedgerReferenceType.PAYMENT);
             expect(savedEntry.reference_id).toBe('payment-1');
             expect(savedEntry.reason).toContain('invoice-1');
         });

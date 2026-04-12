@@ -2,7 +2,7 @@ import { describe, expect, it, mock } from 'bun:test';
 import { ReversePayment } from './ReversePayment';
 import { Payment } from '../../domain/entities/Payment';
 import { PaymentStatus, PaymentMethod } from '@/core/domain/enums';
-import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 
 describe('ReversePayment', () => {
@@ -36,7 +36,7 @@ describe('ReversePayment', () => {
     };
 
     const mockCreditEntry = new CreditLedgerEntry({
-        id: 'c1', unit_id: 'u1', amount: 20, reason: 'Test', reference_type: 'payment', reference_id: 'pay-1'
+        id: 'c1', unit_id: 'u1', amount: 20, reason: 'Test', reference_type: CreditLedgerReferenceType.PAYMENT, reference_id: 'pay-1'
     });
 
     const mockCreditLedgerRepo = {

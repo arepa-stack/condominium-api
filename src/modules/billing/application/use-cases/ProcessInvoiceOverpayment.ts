@@ -1,7 +1,7 @@
 import { OverpaymentService } from '../../domain/services/OverpaymentService';
 import { IInvoiceRepository, ICreditLedgerRepository } from '../../domain/repository';
 import { InvoiceStatus } from '../../domain/entities/Invoice';
-import { CreditLedgerEntry } from '../../domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '../../domain/entities/CreditLedgerEntry';
 import { NotFoundError } from '@/core/errors';
 
 export interface ProcessOverpaymentDTO {
@@ -57,7 +57,7 @@ export class ProcessInvoiceOverpayment {
                 unit_id: invoice.unit_id,
                 amount: generatedCredit,
                 reason: `Excedente de pago en factura ${invoice.id}`,
-                reference_type: 'payment',
+                reference_type: CreditLedgerReferenceType.PAYMENT,
                 reference_id: dto.paymentId
             });
             await this.creditLedgerRepo.addCredit(creditEntry);

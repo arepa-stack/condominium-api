@@ -1,5 +1,5 @@
 import { ICreditLedgerRepository } from '../../domain/repository';
-import { CreditLedgerEntry } from '../../domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '../../domain/entities/CreditLedgerEntry';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 
@@ -10,7 +10,7 @@ export class SupabaseCreditLedgerRepository implements ICreditLedgerRepository {
             unit_id: data.unit_id as string,
             amount: data.amount as number,
             reason: data.reason as string,
-            reference_type: data.reference_type as string,
+            reference_type: data.reference_type as CreditLedgerReferenceType,
             reference_id: data.reference_id as string,
             created_at: data.created_at ? new Date(data.created_at as string) : undefined
         });

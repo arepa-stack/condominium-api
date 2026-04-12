@@ -36,14 +36,10 @@ export class ReversePayment {
         const entries = await this.creditLedgerRepo.findByReferenceId(dto.paymentId);
         for (const entry of entries) {
             if (entry.isCredit) {
-                const reversalEntry = new CreditLedgerEntry({
-                    id: crypto.randomUUID(),
-                    unit_id: entry.unit_id,
-                    amount: -entry.amount, // Negative to offset
-                    reason: `Reversión de pago ${dto.paymentId}: ${dto.reason}`,
-                    reference_type: 'reversal',
-                    reference_id: dto.paymentId
-                });
+                const reversalEntry = CreditLedgerEntry.reversalOf(
+                    entry,
+                    `Reversión de pago ${dto.paymentId}: ${dto.reason}`
+                );
                 await this.creditLedgerRepo.deductCredit(reversalEntry);
             }
         }
