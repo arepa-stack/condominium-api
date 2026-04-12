@@ -37,8 +37,7 @@ describe('ProcessInvoiceOverpayment', () => {
 
         expect(result.appliedToInvoice).toBe(100);
         expect(result.generatedUnitCredit).toBe(20);
-        expect(result.invoiceStatus).toBe(InvoiceStatus.PAID);
-        
+
         // Verify credit ledger was called
         expect(mockCreditRepo.addCredit).toHaveBeenCalled();
         const callArgs = mockCreditRepo.addCredit.mock.calls[0][0] as CreditLedgerEntry;

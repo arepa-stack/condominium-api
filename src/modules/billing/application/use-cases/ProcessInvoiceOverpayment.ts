@@ -1,6 +1,5 @@
 import { OverpaymentService } from '../../domain/services/OverpaymentService';
 import { IInvoiceRepository, ICreditLedgerRepository } from '../../domain/repository';
-import { InvoiceStatus } from '../../domain/entities/Invoice';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '../../domain/entities/CreditLedgerEntry';
 import { NotFoundError } from '@/core/errors';
 
@@ -13,7 +12,6 @@ export interface ProcessOverpaymentDTO {
 export interface ProcessOverpaymentResult {
     appliedToInvoice: number;
     generatedUnitCredit: number;
-    invoiceStatus: InvoiceStatus;
     remainingCreditBalance: number;
 }
 
@@ -33,24 +31,12 @@ export class ProcessInvoiceOverpayment {
             throw new NotFoundError(`Invoice ${dto.invoiceId} not found`);
         }
 
-        const { appliedToInvoice, generatedCredit, invoiceStatus } = this.overpaymentService.calculate(
+        const { appliedToInvoice, generatedCredit } = this.overpaymentService.calculate(
             invoice.amount,
             invoice.paid_amount,
             dto.paymentAmount
         );
 
-        // Update Invoice status (paid_amount is updated by DB trigger via allocations, 
-        // but we need to ensure the status field is correct in our domain model before saving if we were to save here.
-        // Actually, the status is usually updated by a trigger too, but the refinement says:
-        // "el invoice queda en PAID si el saldo llegó a 0"
-        // We'll trust the domain logic for the result and potentially for the update if needed.
-        
-        // Wait, the Invoice entity has updateStatus() which we should use.
-        // But paid_amount in the entity is stale until we re-fetch after allocation or simulate it.
-        // In the context of ApprovePayment, this use case is called AFTER allocations are created.
-        
-        // The refinement says: "Todo monto que exceda la obligación de la unidad será convertido en saldo a favor"
-        
         if (generatedCredit > 0 && invoice.unit_id) {
             const creditEntry = new CreditLedgerEntry({
                 id: crypto.randomUUID(),
@@ -68,7 +54,6 @@ export class ProcessInvoiceOverpayment {
         return {
             appliedToInvoice,
             generatedUnitCredit: generatedCredit,
-            invoiceStatus,
             remainingCreditBalance: balance
         };
     }
