@@ -36,6 +36,13 @@ export interface InvoiceProps {
     updated_at?: Date;
 }
 
+const ALLOWED_TRANSITIONS: Record<InvoiceStatus, readonly InvoiceStatus[]> = {
+    [InvoiceStatus.PENDING]: [InvoiceStatus.PARTIAL, InvoiceStatus.PAID, InvoiceStatus.CANCELLED],
+    [InvoiceStatus.PARTIAL]: [InvoiceStatus.PENDING, InvoiceStatus.PAID, InvoiceStatus.CANCELLED],
+    [InvoiceStatus.PAID]: [InvoiceStatus.PARTIAL, InvoiceStatus.PENDING],
+    [InvoiceStatus.CANCELLED]: []
+};
+
 export class Invoice {
     constructor(private props: InvoiceProps) {
         if (!this.props.tag) this.props.tag = InvoiceTag.NORMAL;
@@ -53,6 +60,19 @@ export class Invoice {
         }
         if (!this.props.unit_id && !this.props.building_id) {
             throw new DomainError('Invoice must have at least unit_id or building_id', 'VALIDATION_ERROR', 400);
+        }
+    }
+
+    private assertCanTransitionTo(next: InvoiceStatus): void {
+        const current = this.props.status;
+        if (current === next) return;
+        const allowed = ALLOWED_TRANSITIONS[current] ?? [];
+        if (!allowed.includes(next)) {
+            throw new DomainError(
+                `Invalid invoice status transition: ${current} -> ${next}`,
+                'INVALID_STATE_TRANSITION',
+                409
+            );
         }
     }
 
@@ -81,27 +101,33 @@ export class Invoice {
     }
 
     markAsPaid(): void {
+        this.assertCanTransitionTo(InvoiceStatus.PAID);
         this.props.status = InvoiceStatus.PAID;
         this.props.updated_at = new Date();
     }
 
     markAsPartial(): void {
+        this.assertCanTransitionTo(InvoiceStatus.PARTIAL);
         this.props.status = InvoiceStatus.PARTIAL;
         this.props.updated_at = new Date();
     }
 
     updateStatus(): void {
+        let next: InvoiceStatus;
         if (this.paid_amount >= this.amount) {
-            this.markAsPaid();
+            next = InvoiceStatus.PAID;
         } else if (this.paid_amount > 0) {
-            this.markAsPartial();
+            next = InvoiceStatus.PARTIAL;
         } else {
-            this.props.status = InvoiceStatus.PENDING;
+            next = InvoiceStatus.PENDING;
         }
+        this.assertCanTransitionTo(next);
+        this.props.status = next;
         this.props.updated_at = new Date();
     }
 
     cancel(): void {
+        this.assertCanTransitionTo(InvoiceStatus.CANCELLED);
         this.props.status = InvoiceStatus.CANCELLED;
         this.props.updated_at = new Date();
     }
