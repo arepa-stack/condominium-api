@@ -10,6 +10,7 @@ import { IPaymentAllocationRepository, IInvoiceRepository, ICreditLedgerReposito
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentAllocation } from '@/modules/billing/domain/entities/PaymentAllocation';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
 
 describe('ApprovePayment Use Case', () => {
     let paymentRepo: MockPaymentRepository;
@@ -41,14 +42,15 @@ describe('ApprovePayment Use Case', () => {
         creditLedgerRepo = {
             addCredit: mock(async (entry: CreditLedgerEntry) => entry),
             getBalanceForUnit: mock(async () => 0),
-            getEntriesForUnit: mock(async () => [])
+            getEntriesForUnit: mock(async () => []),
+            findByReferenceId: mock(async () => [])
         };
+        const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
         approvePayment = new ApprovePayment(
             paymentRepo,
             userRepo,
             allocationRepo,
-            invoiceRepo,
-            creditLedgerRepo
+            processOverpayment
         );
     });
 
@@ -362,6 +364,47 @@ describe('ApprovePayment Use Case', () => {
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('idempotency', () => {
+        it('short-circuits and does not re-process allocations when payment is already APPROVED', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+
+            const alreadyApproved = new Payment({
+                id: 'payment-1',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 150,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.APPROVED,
+                unit_id: 'unit-1'
+            });
+
+            await userRepo.create(admin);
+            await paymentRepo.create(alreadyApproved);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-1',
+                payment_id: 'payment-1',
+                invoice_id: 'invoice-1',
+                amount: 150
+            });
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+
+            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
+
+            // The allocation loop must NOT run again — no overpayment processing,
+            // no duplicate credit entries.
+            expect(allocationRepo.findByPaymentId).not.toHaveBeenCalled();
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
         });
     });
