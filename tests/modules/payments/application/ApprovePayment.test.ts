@@ -26,6 +26,7 @@ describe('ApprovePayment Use Case', () => {
         allocationRepo = {
             findByPaymentId: mock(async () => []),
             create: mock(),
+            delete: mock(),
             findByInvoiceId: mock(),
             findPaymentsByInvoiceId: mock(),
             findInvoicesByPaymentId: mock()
@@ -249,7 +250,9 @@ describe('ApprovePayment Use Case', () => {
         });
 
         it('should create a credit entry for overpayment (150 on invoice of 100)', async () => {
-            // Allocation of 150 on an invoice worth 100
+            // Allocation of 150 on an invoice worth 100. The domain now owns
+            // paid_amount recalculation (triggers were dropped), so the
+            // invoice starts in PRE-application state: paid_amount=0, PENDING.
             const allocation = new PaymentAllocation({
                 id: 'alloc-1',
                 payment_id: 'payment-1',
@@ -257,21 +260,20 @@ describe('ApprovePayment Use Case', () => {
                 amount: 150
             });
 
-            // After allocation, DB trigger sets paid_amount = 150 (overpayment)
-            const invoiceAfterTrigger = new Invoice({
+            const invoicePre = new Invoice({
                 id: 'invoice-1',
                 unit_id: 'unit-1',
                 building_id: 'building-1',
                 amount: 100,
-                paid_amount: 150, // DB trigger ran
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
-                status: InvoiceStatus.PAID,
+                status: InvoiceStatus.PENDING,
                 type: InvoiceType.DEBT
             });
 
             (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoiceAfterTrigger);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
@@ -282,6 +284,10 @@ describe('ApprovePayment Use Case', () => {
             expect(savedEntry.reference_type).toBe(CreditLedgerReferenceType.PAYMENT);
             expect(savedEntry.reference_id).toBe('payment-1');
             expect(savedEntry.reason).toContain('invoice-1');
+
+            // The invoice mutated in place: 100 applied, status now PAID.
+            expect(invoicePre.paid_amount).toBe(100);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
         });
 
         it('should NOT create a credit entry for exact payment (100 on 100)', async () => {
@@ -292,24 +298,26 @@ describe('ApprovePayment Use Case', () => {
                 amount: 100
             });
 
-            const invoiceExact = new Invoice({
+            const invoicePre = new Invoice({
                 id: 'invoice-1',
                 unit_id: 'unit-1',
                 building_id: 'building-1',
                 amount: 100,
-                paid_amount: 100, // Exact payment
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
-                status: InvoiceStatus.PAID,
+                status: InvoiceStatus.PENDING,
                 type: InvoiceType.DEBT
             });
 
             (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoiceExact);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+            expect(invoicePre.paid_amount).toBe(100);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
         });
 
         it('should NOT create a credit entry for partial payment (50 on 100)', async () => {
@@ -320,12 +328,12 @@ describe('ApprovePayment Use Case', () => {
                 amount: 50
             });
 
-            const invoicePartial = new Invoice({
+            const invoicePre = new Invoice({
                 id: 'invoice-1',
                 unit_id: 'unit-1',
                 building_id: 'building-1',
                 amount: 100,
-                paid_amount: 50, // Partial
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
                 status: InvoiceStatus.PENDING,
@@ -333,11 +341,13 @@ describe('ApprovePayment Use Case', () => {
             });
 
             (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePartial);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+            expect(invoicePre.paid_amount).toBe(50);
+            expect(invoicePre.status).toBe(InvoiceStatus.PARTIAL);
         });
 
         it('should NOT create a credit entry for building-level invoice (no unit_id)', async () => {
@@ -352,10 +362,10 @@ describe('ApprovePayment Use Case', () => {
                 id: 'invoice-1',
                 building_id: 'building-1', // No unit_id
                 amount: 100,
-                paid_amount: 150,
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
-                status: InvoiceStatus.PAID,
+                status: InvoiceStatus.PENDING,
                 type: InvoiceType.DEBT
             });
 

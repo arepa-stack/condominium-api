@@ -5,122 +5,56 @@ import { PaymentStatus, PaymentMethod } from '@/core/domain/enums';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 
-describe('ReversePayment', () => {
-    const mockPaymentRepo = {
-        findById: mock(async (id: string) => {
-            return new Payment({
-                id: 'pay-1',
-                amount: 100,
-                status: PaymentStatus.APPROVED,
-                method: PaymentMethod.CASH,
-                payment_date: new Date(),
-                unit_id: 'u1',
-                building_id: 'b1'
-            });
-        }),
-        update: mock(async () => { })
-    };
+// ---------------------------------------------------------------------
+// Factories: every test builds its own set of mocks so there is no
+// module-level state shared across tests.
+// ---------------------------------------------------------------------
 
-    const mockInvoiceRepo = {
-        findById: mock(async (id: string) => {
-            return new Invoice({
-                id: id, unit_id: 'u1', amount: 100, paid_amount: 100,
-                period: '2024-01', issue_date: new Date(), status: InvoiceStatus.PAID, type: InvoiceType.DEBT
-            });
-        }),
-        update: mock(async () => { })
-    };
-
-    const mockAllocationRepo = {
-        findByPaymentId: mock(async () => [{ invoice_id: 'i1', amount: 100 } as any])
-    };
-
-    const mockCreditEntry = new CreditLedgerEntry({
-        id: 'c1', unit_id: 'u1', amount: 20, reason: 'Test', reference_type: CreditLedgerReferenceType.PAYMENT, reference_id: 'pay-1'
-    });
-
-    const mockCreditLedgerRepo = {
-        findByReferenceId: mock(async () => [mockCreditEntry]),
-        deductCredit: mock(async () => ({}) as any)
-    };
-
-    const useCase = new ReversePayment(
-        mockPaymentRepo as any,
-        mockInvoiceRepo as any,
-        mockAllocationRepo as any,
-        mockCreditLedgerRepo as any
-    );
-
-    it('should reverse payment and create debit entry (CA12)', async () => {
-        await useCase.execute({
-            paymentId: 'pay-1',
-            requesterId: 'admin-1',
-            reason: 'Error en registro'
-        });
-
-        // 1. Payment marked as REJECTED (with REVERSED note)
-        expect(mockPaymentRepo.update).toHaveBeenCalled();
-        const updatedPayment = mockPaymentRepo.update.mock.calls[0][0] as Payment;
-        expect(updatedPayment.status).toBe(PaymentStatus.REJECTED);
-        expect(updatedPayment.notes).toContain('REVERSED');
-
-        // 2. Debit entry created
-        expect(mockCreditLedgerRepo.deductCredit).toHaveBeenCalled();
-        const debitEntry = mockCreditLedgerRepo.deductCredit.mock.calls[0][0] as CreditLedgerEntry;
-        expect(debitEntry.amount).toBe(-20);
-        expect(debitEntry.isDebit).toBe(true);
-
-        // 3. Invoice updated
-        expect(mockInvoiceRepo.update).toHaveBeenCalled();
-    });
+const makeApprovedPayment = (id = 'pay-1') => new Payment({
+    id,
+    amount: 100,
+    status: PaymentStatus.APPROVED,
+    method: PaymentMethod.CASH,
+    payment_date: new Date(),
+    unit_id: 'u1',
+    building_id: 'b1'
 });
 
-describe('ReversePayment — CANCELLED invoice handling', () => {
-    // Regression guard: after introducing the Invoice transition guard
-    // (commit aabf4dd), calling updateStatus() on a CANCELLED invoice
-    // throws INVALID_STATE_TRANSITION. ReversePayment must skip cancelled
-    // invoices in its allocation loop so a reversal that touches one
-    // doesn't explode mid-flight.
+const makePaymentRepo = (payment: Payment) => ({
+    findById: mock(async () => payment),
+    update: mock(async () => { })
+});
 
-    const makePaymentRepo = () => ({
-        findById: mock(async () => new Payment({
-            id: 'pay-2',
-            amount: 100,
-            status: PaymentStatus.APPROVED,
-            method: PaymentMethod.CASH,
-            payment_date: new Date(),
-            unit_id: 'u1',
-            building_id: 'b1'
-        })),
-        update: mock(async () => { })
-    });
+const makeInvoiceRepo = (invoice: Invoice) => ({
+    findById: mock(async () => invoice),
+    update: mock(async () => { })
+});
 
-    const makeCancelledInvoiceRepo = () => ({
-        findById: mock(async (id: string) => new Invoice({
-            id,
-            unit_id: 'u1',
-            amount: 100,
-            paid_amount: 100,
-            period: '2024-01',
-            issue_date: new Date(),
-            status: InvoiceStatus.CANCELLED,
-            type: InvoiceType.DEBT
-        })),
-        update: mock(async () => { })
-    });
+const makeAllocationRepo = (allocations: Array<{ id: string; invoice_id: string; amount: number }>) => ({
+    findByPaymentId: mock(async () => allocations),
+    delete: mock(async () => { })
+});
 
-    const allocationRepo = {
-        findByPaymentId: mock(async () => [{ invoice_id: 'i-cancelled', amount: 100 } as any])
-    };
+const makeCreditLedgerRepo = (entries: CreditLedgerEntry[] = []) => ({
+    findByReferenceId: mock(async () => entries),
+    deductCredit: mock(async () => ({}) as any)
+});
 
-    const creditLedgerRepo = {
-        findByReferenceId: mock(async () => []),
-        deductCredit: mock(async () => ({}) as any)
-    };
+describe('ReversePayment', () => {
+    it('full reversal brings a PAID invoice back to PENDING with paid_amount = 0', async () => {
+        const payment = makeApprovedPayment('pay-1');
+        const paymentRepo = makePaymentRepo(payment);
 
-    it('skips cancelled invoices without throwing INVALID_STATE_TRANSITION', async () => {
-        const paymentRepo = makePaymentRepo();
-        const invoiceRepo = makeCancelledInvoiceRepo();
+        const invoice = new Invoice({
+            id: 'inv-1', unit_id: 'u1', amount: 100, paid_amount: 100,
+            period: '2024-01', issue_date: new Date(),
+            status: InvoiceStatus.PAID, type: InvoiceType.DEBT
+        });
+        const invoiceRepo = makeInvoiceRepo(invoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
+        ]);
+        const creditLedgerRepo = makeCreditLedgerRepo();
 
         const useCase = new ReversePayment(
             paymentRepo as any,
@@ -129,15 +63,190 @@ describe('ReversePayment — CANCELLED invoice handling', () => {
             creditLedgerRepo as any
         );
 
+        await useCase.execute({
+            paymentId: 'pay-1',
+            requesterId: 'admin-1',
+            reason: 'Error en registro'
+        });
+
+        // Payment reaches REJECTED with REVERSED note.
+        expect(paymentRepo.update).toHaveBeenCalled();
+        const updatedPayment = paymentRepo.update.mock.calls[0][0] as Payment;
+        expect(updatedPayment.status).toBe(PaymentStatus.REJECTED);
+        expect(updatedPayment.notes).toContain('REVERSED');
+
+        // Invoice state actually reflects the reversal — this is the
+        // assertion the old test was missing entirely.
+        expect(invoiceRepo.update).toHaveBeenCalled();
+        expect(invoice.paid_amount).toBe(0);
+        expect(invoice.status).toBe(InvoiceStatus.PENDING);
+
+        // Allocation cleaned up — no orphan row pointing at a rejected payment.
+        expect(allocationRepo.delete).toHaveBeenCalledWith('alloc-1');
+    });
+
+    it('partial reversal leaves invoice in PARTIAL when other payments remain applied', async () => {
+        // Invoice amount = 100, another approved payment already contributed 40,
+        // this payment contributed 60 → paid_amount was 100 (PAID). Reversing
+        // this payment should bring paid_amount to 40 (PARTIAL).
+        const payment = makeApprovedPayment('pay-1');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const invoice = new Invoice({
+            id: 'inv-1', unit_id: 'u1', amount: 100, paid_amount: 100,
+            period: '2024-01', issue_date: new Date(),
+            status: InvoiceStatus.PAID, type: InvoiceType.DEBT
+        });
+        const invoiceRepo = makeInvoiceRepo(invoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-1', invoice_id: 'inv-1', amount: 60 }
+        ]);
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            makeCreditLedgerRepo() as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-1',
+            requesterId: 'admin-1',
+            reason: 'Partial reversal'
+        });
+
+        expect(invoice.paid_amount).toBe(40);
+        expect(invoice.status).toBe(InvoiceStatus.PARTIAL);
+        expect(allocationRepo.delete).toHaveBeenCalledWith('alloc-1');
+    });
+
+    it('reverses credit ledger entries generated by the original payment', async () => {
+        const payment = makeApprovedPayment('pay-1');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const invoice = new Invoice({
+            id: 'inv-1', unit_id: 'u1', amount: 100, paid_amount: 100,
+            period: '2024-01', issue_date: new Date(),
+            status: InvoiceStatus.PAID, type: InvoiceType.DEBT
+        });
+
+        const originalCredit = new CreditLedgerEntry({
+            id: 'c1', unit_id: 'u1', amount: 20,
+            reason: 'Excedente de pago en factura inv-1',
+            reference_type: CreditLedgerReferenceType.PAYMENT,
+            reference_id: 'pay-1'
+        });
+
+        const creditLedgerRepo = makeCreditLedgerRepo([originalCredit]);
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            makeInvoiceRepo(invoice) as any,
+            makeAllocationRepo([
+                { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
+            ]) as any,
+            creditLedgerRepo as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-1',
+            requesterId: 'admin-1',
+            reason: 'Error'
+        });
+
+        expect(creditLedgerRepo.deductCredit).toHaveBeenCalledTimes(1);
+        const debit = creditLedgerRepo.deductCredit.mock.calls[0][0] as CreditLedgerEntry;
+        expect(debit.amount).toBe(-20);
+        expect(debit.isDebit).toBe(true);
+        expect(debit.reference_type).toBe(CreditLedgerReferenceType.REVERSAL);
+    });
+
+    it('does not re-reverse REVERSAL entries on re-invocation', async () => {
+        // Scenario: if somehow findByReferenceId returns a mix of the original
+        // credit and its previous reversal, only the credit should be reversed.
+        // The APPROVED guard already blocks double-reversal, but this test
+        // pins the reference_type filter that protects against stale rows.
+        const payment = makeApprovedPayment('pay-1');
+        const invoice = new Invoice({
+            id: 'inv-1', unit_id: 'u1', amount: 100, paid_amount: 100,
+            period: '2024-01', issue_date: new Date(),
+            status: InvoiceStatus.PAID, type: InvoiceType.DEBT
+        });
+
+        const originalCredit = new CreditLedgerEntry({
+            id: 'c1', unit_id: 'u1', amount: 20,
+            reason: 'Excedente de pago en factura inv-1',
+            reference_type: CreditLedgerReferenceType.PAYMENT,
+            reference_id: 'pay-1'
+        });
+        const staleReversal = new CreditLedgerEntry({
+            id: 'c2', unit_id: 'u1', amount: -20,
+            reason: 'Reversión previa',
+            reference_type: CreditLedgerReferenceType.REVERSAL,
+            reference_id: 'pay-1'
+        });
+
+        const creditLedgerRepo = makeCreditLedgerRepo([originalCredit, staleReversal]);
+
+        const useCase = new ReversePayment(
+            makePaymentRepo(payment) as any,
+            makeInvoiceRepo(invoice) as any,
+            makeAllocationRepo([
+                { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
+            ]) as any,
+            creditLedgerRepo as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-1',
+            requesterId: 'admin-1',
+            reason: 'Error'
+        });
+
+        // Only the PAYMENT entry is reversed. The existing REVERSAL row is skipped.
+        expect(creditLedgerRepo.deductCredit).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('ReversePayment — CANCELLED invoice handling', () => {
+    // Regression guard from aabf4dd: the transition guard now throws
+    // INVALID_STATE_TRANSITION on a CANCELLED invoice. ReversePayment must
+    // skip the state mutation on cancelled invoices but still delete the
+    // allocation so no orphan row remains.
+
+    it('skips state mutation on cancelled invoice but still deletes the allocation', async () => {
+        const payment = makeApprovedPayment('pay-2');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const cancelledInvoice = new Invoice({
+            id: 'i-cancelled', unit_id: 'u1', amount: 100, paid_amount: 100,
+            period: '2024-01', issue_date: new Date(),
+            status: InvoiceStatus.CANCELLED, type: InvoiceType.DEBT
+        });
+        const invoiceRepo = makeInvoiceRepo(cancelledInvoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-x', invoice_id: 'i-cancelled', amount: 100 }
+        ]);
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            makeCreditLedgerRepo() as any
+        );
+
         await expect(useCase.execute({
             paymentId: 'pay-2',
             requesterId: 'admin-1',
             reason: 'Test cancelled invoice path'
         })).resolves.toBeUndefined();
 
-        // Cancelled invoice should NOT be updated — skipped entirely.
+        // State mutation skipped: no update on the cancelled invoice.
         expect(invoiceRepo.update).not.toHaveBeenCalled();
-        // Payment itself still reaches REJECTED state.
+        expect(cancelledInvoice.paid_amount).toBe(100); // untouched
+        // But the allocation is still cleaned up.
+        expect(allocationRepo.delete).toHaveBeenCalledWith('alloc-x');
+        // And the payment itself still reaches REJECTED.
         expect(paymentRepo.update).toHaveBeenCalled();
     });
 });

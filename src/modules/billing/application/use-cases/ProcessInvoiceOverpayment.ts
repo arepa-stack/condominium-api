@@ -28,11 +28,21 @@ export class ProcessInvoiceOverpayment {
             throw new NotFoundError(`Invoice ${dto.invoiceId} not found`);
         }
 
+        // paid_amount here is the PRE-application state — the domain owns
+        // recalculation now that the DB triggers have been dropped. The
+        // caller (ApprovePayment loop) invokes this use case once per
+        // allocation, and each invocation reads the latest persisted state.
         const { appliedToInvoice, generatedCredit } = this.overpaymentService.calculate(
             invoice.amount,
             invoice.paid_amount,
             dto.paymentAmount
         );
+
+        if (appliedToInvoice > 0) {
+            invoice.addPayment(appliedToInvoice);
+            invoice.updateStatus();
+            await this.invoiceRepo.update(invoice);
+        }
 
         if (generatedCredit > 0) {
             if (!invoice.unit_id) {
@@ -48,7 +58,8 @@ export class ProcessInvoiceOverpayment {
                 // is either (a) adding invoice_id to unit_credit_ledger with a
                 // UNIQUE(reference_id, invoice_id) constraint, or (b) making
                 // ApprovePayment short-circuit when the payment is already
-                // APPROVED. This guard prevents the common retry case.
+                // APPROVED (done in cd6daed). This guard prevents the remaining
+                // race case where two parallel retries beat the short-circuit.
             } else {
                 const creditEntry = new CreditLedgerEntry({
                     id: crypto.randomUUID(),
