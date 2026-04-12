@@ -74,3 +74,70 @@ describe('ReversePayment', () => {
         expect(mockInvoiceRepo.update).toHaveBeenCalled();
     });
 });
+
+describe('ReversePayment — CANCELLED invoice handling', () => {
+    // Regression guard: after introducing the Invoice transition guard
+    // (commit aabf4dd), calling updateStatus() on a CANCELLED invoice
+    // throws INVALID_STATE_TRANSITION. ReversePayment must skip cancelled
+    // invoices in its allocation loop so a reversal that touches one
+    // doesn't explode mid-flight.
+
+    const makePaymentRepo = () => ({
+        findById: mock(async () => new Payment({
+            id: 'pay-2',
+            amount: 100,
+            status: PaymentStatus.APPROVED,
+            method: PaymentMethod.CASH,
+            payment_date: new Date(),
+            unit_id: 'u1',
+            building_id: 'b1'
+        })),
+        update: mock(async () => { })
+    });
+
+    const makeCancelledInvoiceRepo = () => ({
+        findById: mock(async (id: string) => new Invoice({
+            id,
+            unit_id: 'u1',
+            amount: 100,
+            paid_amount: 100,
+            period: '2024-01',
+            issue_date: new Date(),
+            status: InvoiceStatus.CANCELLED,
+            type: InvoiceType.DEBT
+        })),
+        update: mock(async () => { })
+    });
+
+    const allocationRepo = {
+        findByPaymentId: mock(async () => [{ invoice_id: 'i-cancelled', amount: 100 } as any])
+    };
+
+    const creditLedgerRepo = {
+        findByReferenceId: mock(async () => []),
+        deductCredit: mock(async () => ({}) as any)
+    };
+
+    it('skips cancelled invoices without throwing INVALID_STATE_TRANSITION', async () => {
+        const paymentRepo = makePaymentRepo();
+        const invoiceRepo = makeCancelledInvoiceRepo();
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            creditLedgerRepo as any
+        );
+
+        await expect(useCase.execute({
+            paymentId: 'pay-2',
+            requesterId: 'admin-1',
+            reason: 'Test cancelled invoice path'
+        })).resolves.toBeUndefined();
+
+        // Cancelled invoice should NOT be updated — skipped entirely.
+        expect(invoiceRepo.update).not.toHaveBeenCalled();
+        // Payment itself still reaches REJECTED state.
+        expect(paymentRepo.update).toHaveBeenCalled();
+    });
+});

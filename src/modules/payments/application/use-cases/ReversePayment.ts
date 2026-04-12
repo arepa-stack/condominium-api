@@ -2,6 +2,7 @@ import { IPaymentRepository } from '../../domain/repository';
 import { IInvoiceRepository, IPaymentAllocationRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
 import { NotFoundError, ForbiddenError } from '@/core/errors';
 import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentStatus } from '@/core/domain/enums';
 
 export interface ReversePaymentDTO {
@@ -54,8 +55,9 @@ export class ReversePayment {
         const allocations = await this.allocationRepo.findByPaymentId(dto.paymentId);
         for (const alloc of allocations) {
             const invoice = await this.invoiceRepo.findById(alloc.invoice_id);
-            if (invoice) {
-                // Force status update logic
+            // Skip cancelled invoices: CANCELLED is a terminal state and
+            // updateStatus() would throw INVALID_STATE_TRANSITION on them.
+            if (invoice && invoice.status !== InvoiceStatus.CANCELLED) {
                 invoice.updateStatus();
                 await this.invoiceRepo.update(invoice);
             }
