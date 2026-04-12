@@ -30,6 +30,9 @@ export class CreditLedgerEntry {
     get reference_id(): string { return this.props.reference_id; }
     get created_at(): Date { return this.props.created_at!; }
 
+    get isCredit(): boolean { return this.props.amount > 0; }
+    get isDebit(): boolean { return this.props.amount < 0; }
+
     toJSON(): CreditLedgerEntryProps {
         return { ...this.props };
     }

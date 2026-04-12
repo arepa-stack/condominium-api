@@ -62,8 +62,10 @@ export interface IInvoiceRepository {
 
 export interface ICreditLedgerRepository {
     addCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry>;
+    deductCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry>;
     getBalanceForUnit(unitId: string): Promise<number>;
     getEntriesForUnit(unitId: string): Promise<CreditLedgerEntry[]>;
+    findByReferenceId(referenceId: string): Promise<CreditLedgerEntry[]>;
 }
 
 export interface IPaymentAllocationRepository {

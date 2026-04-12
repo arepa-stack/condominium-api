@@ -23,7 +23,7 @@ const unitRepository = new SupabaseUnitRepository();
 const excelParser = new ExcelJSInvoiceParser();
 
 const loadDebt = new LoadDebt(invoiceRepository);
-const getUnitBalance = new GetUnitBalance(invoiceRepository, allocationRepository);
+const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getAllInvoices = new GetAllInvoices(invoiceRepository);
 const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
@@ -91,6 +91,8 @@ const BalanceSchema = t.Object({
     unit: t.String(),
     totalDebt: t.Number(),
     pendingInvoices: t.Number(),
+    creditBalance: t.Number(),
+    netBalance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 

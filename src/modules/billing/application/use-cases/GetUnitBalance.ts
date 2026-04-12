@@ -1,10 +1,11 @@
-import { IInvoiceRepository, IPaymentAllocationRepository } from '../../domain/repository';
-import { DomainError } from '@/core/errors';
+import { IInvoiceRepository, ICreditLedgerRepository } from '../../domain/repository';
 
 export interface UnitBalanceDTO {
     unit: string;
     totalDebt: number;
     pendingInvoices: number;
+    creditBalance: number;
+    netBalance: number;
     details: {
         invoiceId: string;
         amount: number;
@@ -18,25 +19,21 @@ export interface UnitBalanceDTO {
 export class GetUnitBalance {
     constructor(
         private invoiceRepository: IInvoiceRepository,
-        private paymentAllocationRepository: IPaymentAllocationRepository
+        private creditLedgerRepo: ICreditLedgerRepository
     ) { }
 
     async execute(unitId: string): Promise<UnitBalanceDTO> {
-        // Fetch all pending or partially paid invoices
-        // We need a filter for status IN ['PENDING', 'PARTIALLY_PAID']
-        // The findAll filter currently supports single status string. 
-        // We might need to fetch all for unit and filter in memory or update repo.
-        // Assuming we fetch all for unit for now as volume per unit is low.
+        const [invoices, creditBalance] = await Promise.all([
+            this.invoiceRepository.findAll({ unit_id: unitId }),
+            this.creditLedgerRepo.getBalanceForUnit(unitId)
+        ]);
 
-        const invoices = await this.invoiceRepository.findAll({ unit_id: unitId });
-
-        const pendingInvoices = invoices.filter(inv => inv.status === 'PENDING');
+        const pendingInvoices = invoices.filter(inv => inv.status === 'PENDING' || inv.status === 'PARTIAL');
 
         let totalDebt = 0;
         const details = [];
 
         for (const invoice of pendingInvoices) {
-            // Use trusted paid_amount from invoice (calculated by trigger based on APPROVED payments)
             const paid = invoice.paid_amount;
             const remaining = invoice.amount - paid;
 
@@ -57,6 +54,8 @@ export class GetUnitBalance {
             unit: unitId,
             totalDebt,
             pendingInvoices: details.length,
+            creditBalance,
+            netBalance: Math.max(0, totalDebt - creditBalance),
             details
         };
     }

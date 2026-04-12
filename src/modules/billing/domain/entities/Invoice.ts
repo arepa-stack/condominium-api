@@ -1,10 +1,11 @@
-import { DomainError, ValidationError, NotFoundError } from '../../../../core/errors';
+import { DomainError } from '../../../../core/errors';
 import { InvoiceTag } from '../../../../core/domain/enums';
 
 export { InvoiceTag };
 
 export enum InvoiceStatus {
     PENDING = 'PENDING',
+    PARTIAL = 'PARTIAL',
     PAID = 'PAID',
     CANCELLED = 'CANCELLED'
 }
@@ -71,12 +72,32 @@ export class Invoice {
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
 
+    get remainingBalance(): number {
+        return Math.max(0, this.props.amount - this.paid_amount);
+    }
+
     isPaid(): boolean {
         return this.props.status === InvoiceStatus.PAID;
     }
 
     markAsPaid(): void {
         this.props.status = InvoiceStatus.PAID;
+        this.props.updated_at = new Date();
+    }
+
+    markAsPartial(): void {
+        this.props.status = InvoiceStatus.PARTIAL;
+        this.props.updated_at = new Date();
+    }
+
+    updateStatus(): void {
+        if (this.paid_amount >= this.amount) {
+            this.markAsPaid();
+        } else if (this.paid_amount > 0) {
+            this.markAsPartial();
+        } else {
+            this.props.status = InvoiceStatus.PENDING;
+        }
         this.props.updated_at = new Date();
     }
 

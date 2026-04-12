@@ -1,9 +1,8 @@
 import { IPaymentRepository } from '../../domain/repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
-import { IPaymentAllocationRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
-import { IInvoiceRepository } from '@/modules/billing/domain/repository';
+import { IPaymentAllocationRepository } from '@/modules/billing/domain/repository';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
-import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
 
 export interface ApprovePaymentDTO {
     paymentId: string;
@@ -22,8 +21,7 @@ export class ApprovePayment {
         private paymentRepo: IPaymentRepository,
         private userRepo: IUserRepository,
         private allocationRepo: IPaymentAllocationRepository,
-        private invoiceRepo: IInvoiceRepository,
-        private creditLedgerRepo: ICreditLedgerRepository
+        private processOverpayment: ProcessInvoiceOverpayment
     ) { }
 
     async approve({ paymentId, approverId, notes }: ApprovePaymentDTO): Promise<void> {
@@ -50,25 +48,12 @@ export class ApprovePayment {
         const allocations = await this.allocationRepo.findByPaymentId(paymentId);
         for (const alloc of allocations) {
             // Re-read invoice after allocation insert so DB trigger's paid_amount update is visible
-            const invoice = await this.invoiceRepo.findById(alloc.invoice_id);
-            if (!invoice) continue;
-
-            // Detect overpayment → credit ledger
-            // Only for unit-level invoices (building-level invoices don't generate unit credit)
-            if (!invoice.unit_id) continue;
-
-            const surplus = invoice.paid_amount - invoice.amount;
-            if (surplus <= 0) continue;
-
-            const creditEntry = new CreditLedgerEntry({
-                id: crypto.randomUUID(),
-                unit_id: invoice.unit_id,
-                amount: surplus,
-                reason: `Overpayment on invoice ${invoice.id}`,
-                reference_type: 'payment',
-                reference_id: payment.id
+            // Actually, we delegate the "processing" (status update and credit generation) to billing use case
+            await this.processOverpayment.execute({
+                invoiceId: alloc.invoice_id,
+                paymentId: payment.id,
+                paymentAmount: alloc.amount
             });
-            await this.creditLedgerRepo.addCredit(creditEntry);
         }
     }
 

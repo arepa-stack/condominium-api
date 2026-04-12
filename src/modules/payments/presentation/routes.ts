@@ -25,15 +25,20 @@ import { SupabaseCreditLedgerRepository } from '@/modules/billing/infrastructure
 const invoiceRepo = new SupabaseInvoiceRepository();
 const allocationRepo = new SupabasePaymentAllocationRepository();
 const creditLedgerRepo = new SupabaseCreditLedgerRepository();
-const getUnitBalance = new GetUnitBalance(invoiceRepo, allocationRepo);
+const getUnitBalance = new GetUnitBalance(invoiceRepo, creditLedgerRepo);
+
+import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
+const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
 
 const approvePayment = new ApprovePayment(
     paymentRepo,
     userRepo,
     allocationRepo,
-    invoiceRepo,
-    creditLedgerRepo
+    processOverpayment
 );
+
+import { ReversePayment } from '../application/use-cases/ReversePayment';
+const reversePayment = new ReversePayment(paymentRepo, invoiceRepo, allocationRepo, creditLedgerRepo);
 const getUnitPayments = new GetUnitPayments(paymentRepo, userRepo);
 const getUnitPaymentSummary = new GetUnitPaymentSummary(paymentRepo, userRepo, getUnitBalance);
 const getAllPayments = new GetAllPayments(paymentRepo, userRepo);
@@ -336,6 +341,25 @@ const paymentAdminRoutes = new Elysia()
             tags: ['Admin - Payments'],
             summary: 'Update payment status (Admin/Board)',
             description: 'Approve or reject a payment',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .post('/admin/payments/:id/reverse', async ({ user, params, body }) => {
+        await reversePayment.execute({
+            paymentId: params.id,
+            requesterId: user.id,
+            reason: body.reason
+        });
+        return { success: true };
+    }, {
+        body: t.Object({
+            reason: t.String()
+        }),
+        response: SuccessResponse,
+        detail: {
+            tags: ['Admin - Payments'],
+            summary: 'Reverse an approved payment (Admin only)',
+            description: 'Reverts payment approval, cancels credits, and restores invoice balances',
             security: [{ BearerAuth: [] }]
         }
     });
