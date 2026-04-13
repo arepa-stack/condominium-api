@@ -62,12 +62,15 @@ export interface IInvoiceRepository {
 
 export interface ICreditLedgerRepository {
     addCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry>;
+    deductCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry>;
     getBalanceForUnit(unitId: string): Promise<number>;
     getEntriesForUnit(unitId: string): Promise<CreditLedgerEntry[]>;
+    findByReferenceId(referenceId: string): Promise<CreditLedgerEntry[]>;
 }
 
 export interface IPaymentAllocationRepository {
     create(allocation: PaymentAllocation): Promise<PaymentAllocation>;
+    delete(allocationId: string): Promise<void>;
     findByPaymentId(paymentId: string): Promise<PaymentAllocation[]>;
     findByInvoiceId(invoiceId: string): Promise<PaymentAllocation[]>;
     findPaymentsByInvoiceId(invoiceId: string): Promise<PaymentAllocationResult[]>; // Returns Payment details joined

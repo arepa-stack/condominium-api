@@ -1,11 +1,12 @@
 import { describe, expect, test, mock } from "bun:test";
 import { IUserRepository } from "@/modules/users/domain/repository";
-import { IInvoiceRepository, IPaymentAllocationRepository } from "@/modules/billing/domain/repository";
+import { IInvoiceRepository, IPaymentAllocationRepository, ICreditLedgerRepository } from "@/modules/billing/domain/repository";
 import { IPaymentRepository } from "@/modules/payments/domain/repository";
 import { User } from "@/modules/users/domain/entities/User";
 import { Invoice } from "@/modules/billing/domain/entities/Invoice";
 import { Payment } from "@/modules/payments/domain/entities/Payment";
 import { PaymentAllocation } from "@/modules/billing/domain/entities/PaymentAllocation";
+import { CreditLedgerEntry } from "@/modules/billing/domain/entities/CreditLedgerEntry";
 
 export const createMockUserRepository = (): IUserRepository => ({
     create: mock(async (user: User) => user),
@@ -38,8 +39,17 @@ export const createMockPaymentRepository = (): IPaymentRepository => ({
 
 export const createMockAllocationRepository = (): IPaymentAllocationRepository => ({
     create: mock(async (alloc: PaymentAllocation) => alloc),
+    delete: mock(async (id: string) => { }),
     findByPaymentId: mock(async (id: string) => []),
     findByInvoiceId: mock(async (id: string) => []),
     findPaymentsByInvoiceId: mock(async (id: string) => []),
     findInvoicesByPaymentId: mock(async (id: string) => [])
+});
+
+export const createMockCreditLedgerRepository = (): ICreditLedgerRepository => ({
+    addCredit: mock(async (entry: CreditLedgerEntry) => entry),
+    deductCredit: mock(async (entry: CreditLedgerEntry) => entry),
+    getBalanceForUnit: mock(async () => 0),
+    getEntriesForUnit: mock(async () => []),
+    findByReferenceId: mock(async () => [])
 });

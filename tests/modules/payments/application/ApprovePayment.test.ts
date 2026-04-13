@@ -9,7 +9,8 @@ import { PaymentMethod, PaymentStatus, UserRole, UserStatus } from '@/core/domai
 import { IPaymentAllocationRepository, IInvoiceRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentAllocation } from '@/modules/billing/domain/entities/PaymentAllocation';
-import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
 
 describe('ApprovePayment Use Case', () => {
     let paymentRepo: MockPaymentRepository;
@@ -25,6 +26,7 @@ describe('ApprovePayment Use Case', () => {
         allocationRepo = {
             findByPaymentId: mock(async () => []),
             create: mock(),
+            delete: mock(),
             findByInvoiceId: mock(),
             findPaymentsByInvoiceId: mock(),
             findInvoicesByPaymentId: mock()
@@ -41,14 +43,15 @@ describe('ApprovePayment Use Case', () => {
         creditLedgerRepo = {
             addCredit: mock(async (entry: CreditLedgerEntry) => entry),
             getBalanceForUnit: mock(async () => 0),
-            getEntriesForUnit: mock(async () => [])
+            getEntriesForUnit: mock(async () => []),
+            findByReferenceId: mock(async () => [])
         };
+        const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
         approvePayment = new ApprovePayment(
             paymentRepo,
             userRepo,
             allocationRepo,
-            invoiceRepo,
-            creditLedgerRepo
+            processOverpayment
         );
     });
 
@@ -222,8 +225,11 @@ describe('ApprovePayment Use Case', () => {
 
     describe('Overpayment → credit ledger', () => {
         let admin: User;
-        let payment: Payment;
 
+        // Each test creates its own payment with an amount that matches its
+        // allocation scenario — prevents cross-pollination with the
+        // "unallocated surplus" logic, which fires whenever
+        // payment.amount > sum(allocations).
         beforeEach(async () => {
             admin = new User({
                 id: 'admin-1',
@@ -232,22 +238,29 @@ describe('ApprovePayment Use Case', () => {
                 role: UserRole.ADMIN,
                 status: UserStatus.ACTIVE
             });
-            payment = new Payment({
-                id: 'payment-1',
-                user_id: 'user-1',
-                building_id: 'building-1',
-                amount: 150,
-                payment_date: new Date(),
-                method: PaymentMethod.TRANSFER,
-                status: PaymentStatus.PENDING,
-                unit_id: 'unit-1'
-            });
             await userRepo.create(admin);
-            await paymentRepo.create(payment);
+        });
+
+        const buildPayment = (amount: number): Payment => new Payment({
+            id: 'payment-1',
+            user_id: 'user-1',
+            building_id: 'building-1',
+            amount,
+            payment_date: new Date(),
+            method: PaymentMethod.TRANSFER,
+            status: PaymentStatus.PENDING,
+            unit_id: 'unit-1'
         });
 
         it('should create a credit entry for overpayment (150 on invoice of 100)', async () => {
-            // Allocation of 150 on an invoice worth 100
+            // Allocation of 150 on an invoice worth 100. The domain now owns
+            // paid_amount recalculation (triggers were dropped), so the
+            // invoice starts in PRE-application state: paid_amount=0, PENDING.
+            // payment.amount == allocation.amount so no unallocated surplus
+            // interferes — this test isolates the invoice-level overpayment
+            // split logic.
+            await paymentRepo.create(buildPayment(150));
+
             const allocation = new PaymentAllocation({
                 id: 'alloc-1',
                 payment_id: 'payment-1',
@@ -255,75 +268,12 @@ describe('ApprovePayment Use Case', () => {
                 amount: 150
             });
 
-            // After allocation, DB trigger sets paid_amount = 150 (overpayment)
-            const invoiceAfterTrigger = new Invoice({
+            const invoicePre = new Invoice({
                 id: 'invoice-1',
                 unit_id: 'unit-1',
                 building_id: 'building-1',
                 amount: 100,
-                paid_amount: 150, // DB trigger ran
-                period: '2026-01',
-                issue_date: new Date(),
-                status: InvoiceStatus.PAID,
-                type: InvoiceType.DEBT
-            });
-
-            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoiceAfterTrigger);
-
-            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
-
-            expect(creditLedgerRepo.addCredit).toHaveBeenCalledTimes(1);
-            const savedEntry: CreditLedgerEntry = (creditLedgerRepo.addCredit as ReturnType<typeof mock>).mock.calls[0][0];
-            expect(savedEntry.unit_id).toBe('unit-1');
-            expect(savedEntry.amount).toBe(50); // 150 - 100
-            expect(savedEntry.reference_type).toBe('payment');
-            expect(savedEntry.reference_id).toBe('payment-1');
-            expect(savedEntry.reason).toContain('invoice-1');
-        });
-
-        it('should NOT create a credit entry for exact payment (100 on 100)', async () => {
-            const allocation = new PaymentAllocation({
-                id: 'alloc-1',
-                payment_id: 'payment-1',
-                invoice_id: 'invoice-1',
-                amount: 100
-            });
-
-            const invoiceExact = new Invoice({
-                id: 'invoice-1',
-                unit_id: 'unit-1',
-                building_id: 'building-1',
-                amount: 100,
-                paid_amount: 100, // Exact payment
-                period: '2026-01',
-                issue_date: new Date(),
-                status: InvoiceStatus.PAID,
-                type: InvoiceType.DEBT
-            });
-
-            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoiceExact);
-
-            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
-
-            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
-        });
-
-        it('should NOT create a credit entry for partial payment (50 on 100)', async () => {
-            const allocation = new PaymentAllocation({
-                id: 'alloc-1',
-                payment_id: 'payment-1',
-                invoice_id: 'invoice-1',
-                amount: 50
-            });
-
-            const invoicePartial = new Invoice({
-                id: 'invoice-1',
-                unit_id: 'unit-1',
-                building_id: 'building-1',
-                amount: 100,
-                paid_amount: 50, // Partial
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
                 status: InvoiceStatus.PENDING,
@@ -331,14 +281,97 @@ describe('ApprovePayment Use Case', () => {
             });
 
             (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
-            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePartial);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
+
+            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
+
+            expect(creditLedgerRepo.addCredit).toHaveBeenCalledTimes(1);
+            const savedEntry: CreditLedgerEntry = (creditLedgerRepo.addCredit as ReturnType<typeof mock>).mock.calls[0][0];
+            expect(savedEntry.unit_id).toBe('unit-1');
+            expect(savedEntry.amount).toBe(50); // 150 - 100
+            expect(savedEntry.reference_type).toBe(CreditLedgerReferenceType.PAYMENT);
+            expect(savedEntry.reference_id).toBe('payment-1');
+            expect(savedEntry.reason).toContain('invoice-1');
+
+            // The invoice mutated in place: 100 applied, status now PAID.
+            expect(invoicePre.paid_amount).toBe(100);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
+        });
+
+        it('should NOT create a credit entry for exact payment (100 on 100)', async () => {
+            // payment.amount matches allocation.amount exactly — zero surplus,
+            // zero invoice overpayment → no credit entries of any kind.
+            await paymentRepo.create(buildPayment(100));
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-1',
+                payment_id: 'payment-1',
+                invoice_id: 'invoice-1',
+                amount: 100
+            });
+
+            const invoicePre = new Invoice({
+                id: 'invoice-1',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-01',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+            expect(invoicePre.paid_amount).toBe(100);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
+        });
+
+        it('should NOT create a credit entry for partial payment (50 on 100)', async () => {
+            // payment.amount == allocation.amount so no surplus. Tests that
+            // a partial application to the invoice does not itself trigger
+            // invoice-level overpayment credit.
+            await paymentRepo.create(buildPayment(50));
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-1',
+                payment_id: 'payment-1',
+                invoice_id: 'invoice-1',
+                amount: 50
+            });
+
+            const invoicePre = new Invoice({
+                id: 'invoice-1',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-01',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
+
+            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
+
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+            expect(invoicePre.paid_amount).toBe(50);
+            expect(invoicePre.status).toBe(InvoiceStatus.PARTIAL);
         });
 
         it('should NOT create a credit entry for building-level invoice (no unit_id)', async () => {
+            // Building-level invoice: the invoice-overpayment branch warns
+            // and drops. payment.amount == allocation.amount so no surplus.
+            await paymentRepo.create(buildPayment(150));
+
             const allocation = new PaymentAllocation({
                 id: 'alloc-1',
                 payment_id: 'payment-1',
@@ -350,10 +383,10 @@ describe('ApprovePayment Use Case', () => {
                 id: 'invoice-1',
                 building_id: 'building-1', // No unit_id
                 amount: 100,
-                paid_amount: 150,
+                paid_amount: 0,
                 period: '2026-01',
                 issue_date: new Date(),
-                status: InvoiceStatus.PAID,
+                status: InvoiceStatus.PENDING,
                 type: InvoiceType.DEBT
             });
 
@@ -362,6 +395,322 @@ describe('ApprovePayment Use Case', () => {
 
             await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
 
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('Unallocated surplus → unit credit', () => {
+        let admin: User;
+
+        beforeEach(async () => {
+            admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+        });
+
+        it('credits the unit with the diff when allocation.amount < payment.amount (APK caps case)', async () => {
+            // Reported by the user:
+            //   - Invoice of 40.
+            //   - Resident reports payment of 100.
+            //   - APK sends allocation.amount = 40 (capped to the invoice remaining).
+            //   - Expected: invoice PAID and credit ledger +60 on the unit.
+            const payment = new Payment({
+                id: 'payment-1',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.PAGO_MOVIL,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-1',
+                payment_id: 'payment-1',
+                invoice_id: 'invoice-1',
+                amount: 40
+            });
+
+            const invoicePre = new Invoice({
+                id: 'invoice-1',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 40,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
+
+            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
+
+            // The invoice was fully paid by the allocation (no split needed).
+            expect(invoicePre.paid_amount).toBe(40);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
+
+            // The 60 unallocated portion landed in the credit ledger as a
+            // distinct entry (not an invoice-overpayment entry).
+            expect(creditLedgerRepo.addCredit).toHaveBeenCalledTimes(1);
+            const savedEntry: CreditLedgerEntry = (creditLedgerRepo.addCredit as ReturnType<typeof mock>).mock.calls[0][0];
+            expect(savedEntry.amount).toBe(60);
+            expect(savedEntry.unit_id).toBe('unit-1');
+            expect(savedEntry.reference_id).toBe('payment-1');
+            expect(savedEntry.reference_type).toBe(CreditLedgerReferenceType.PAYMENT);
+            expect(savedEntry.reason).toContain('Excedente no asignado');
+        });
+
+        it('credits the full payment amount when the payment has no allocations', async () => {
+            // Pure credit deposit flow — resident pays into credit balance
+            // without assigning to any invoice.
+            const payment = new Payment({
+                id: 'payment-2',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 50,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => []);
+
+            await approvePayment.approve({ paymentId: 'payment-2', approverId: 'admin-1' });
+
+            expect(creditLedgerRepo.addCredit).toHaveBeenCalledTimes(1);
+            const savedEntry: CreditLedgerEntry = (creditLedgerRepo.addCredit as ReturnType<typeof mock>).mock.calls[0][0];
+            expect(savedEntry.amount).toBe(50);
+            expect(savedEntry.unit_id).toBe('unit-1');
+            expect(savedEntry.reference_id).toBe('payment-2');
+            expect(savedEntry.reason).toContain('Excedente no asignado');
+        });
+
+        it('does not create a surplus entry when sum(allocations) equals payment.amount', async () => {
+            const payment = new Payment({
+                id: 'payment-3',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.CASH,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-exact',
+                payment_id: 'payment-3',
+                invoice_id: 'invoice-exact',
+                amount: 100
+            });
+
+            const invoicePre = new Invoice({
+                id: 'invoice-exact',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
+
+            await approvePayment.approve({ paymentId: 'payment-3', approverId: 'admin-1' });
+
+            // Invoice got its allocation, no surplus, no credit ledger entry.
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('Approval against a CANCELLED invoice', () => {
+        // Reported from manual QA:
+        // 1) User reports a payment with an allocation to a CANCELLED invoice.
+        // 2) Admin tries to approve → first attempt throws (expected).
+        // 3) Admin tries again → the idempotency short-circuit returns success
+        //    even though the invoice state is still CANCELLED and the
+        //    allocation was never applied.
+        //
+        // Before the pre-flight validation fix, this produced a zombie state
+        // where payment.status was APPROVED but the invoice had not moved.
+        // After the fix, approve() throws BEFORE persisting the status
+        // change, so the payment stays PENDING and the admin can reject it
+        // or re-allocate to a valid invoice.
+
+        it('throws before persisting when any allocated invoice is CANCELLED, and leaves the payment PENDING', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+
+            const pending = new Payment({
+                id: 'payment-cancel',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.CASH,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(pending);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-cancelled',
+                payment_id: 'payment-cancel',
+                invoice_id: 'invoice-cancelled',
+                amount: 100
+            });
+
+            const cancelledInvoice = new Invoice({
+                id: 'invoice-cancelled',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.CANCELLED,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => cancelledInvoice);
+
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-cancel', approverId: 'admin-1' })
+            ).rejects.toThrow(/cancelled invoice/i);
+
+            // Critical: the payment status must still be PENDING. Without
+            // the pre-flight check, it would have been persisted as APPROVED
+            // and the next retry would short-circuit into a false success.
+            const reloaded = await paymentRepo.findById('payment-cancel');
+            expect(reloaded?.status).toBe(PaymentStatus.PENDING);
+
+            // No credit ledger writes happened either.
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+
+        it('retrying approval on the same cancelled-invoice payment keeps failing cleanly (no zombie APPROVED)', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+
+            const pending = new Payment({
+                id: 'payment-retry',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.CASH,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(pending);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-retry',
+                payment_id: 'payment-retry',
+                invoice_id: 'invoice-retry',
+                amount: 100
+            });
+
+            const cancelledInvoice = new Invoice({
+                id: 'invoice-retry',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.CANCELLED,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => cancelledInvoice);
+
+            // First attempt: throws.
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-retry', approverId: 'admin-1' })
+            ).rejects.toThrow();
+
+            // Second attempt: MUST also throw, not return success via the
+            // idempotency short-circuit. The payment is still PENDING so the
+            // short-circuit does not fire, and the pre-flight check catches
+            // the cancelled invoice again.
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-retry', approverId: 'admin-1' })
+            ).rejects.toThrow(/cancelled invoice/i);
+
+            const reloaded = await paymentRepo.findById('payment-retry');
+            expect(reloaded?.status).toBe(PaymentStatus.PENDING);
+        });
+    });
+
+    describe('idempotency', () => {
+        it('short-circuits and does not re-process allocations when payment is already APPROVED', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+
+            const alreadyApproved = new Payment({
+                id: 'payment-1',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 150,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.APPROVED,
+                unit_id: 'unit-1'
+            });
+
+            await userRepo.create(admin);
+            await paymentRepo.create(alreadyApproved);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-1',
+                payment_id: 'payment-1',
+                invoice_id: 'invoice-1',
+                amount: 150
+            });
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+
+            await approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1' });
+
+            // The allocation loop must NOT run again — no overpayment processing,
+            // no duplicate credit entries.
+            expect(allocationRepo.findByPaymentId).not.toHaveBeenCalled();
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
         });
     });

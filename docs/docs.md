@@ -1,5 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
+> **Última actualización**: 2026-04-13 — Refleja el estado post-PR `fix/invoices`.
+> Cambios arquitectónicos destacados: el dominio es dueño de `invoice.paid_amount` y del status (triggers de BD dropeados — "Camino 2"), estado `PARTIAL` funcional, dos canales de credit ledger (invoice-overpayment + unallocated surplus), P0 de seguridad en payments admin cerrado, y nuevos endpoints de reverse y petty cash transparency.
+
 ## 1. Visión General
 
 **Condominio** es un sistema backend para una aplicación móvil de gestión de condominios residenciales. Permite a residentes, juntas de condominio y administradores gestionar pagos, facturación, caja chica y la información de edificios y unidades (apartamentos).
@@ -151,8 +154,8 @@ Tabla que gestiona roles de junta por edificio (separada de la relación usuario
 | `reference` | TEXT | Número de referencia (opcional) |
 | `bank` | TEXT | Banco emisor (opcional) |
 | `proof_url` | TEXT | URL del comprobante en Storage (opcional) |
-| `status` | TEXT | Estado: `PENDING`, `APPROVED`, `REJECTED` |
-| `notes` | TEXT | Notas adicionales (opcional) |
+| `status` | TEXT | Estado: `PENDING`, `APPROVED`, `REJECTED`. Un pago revertido administrativamente queda en `REJECTED` con `notes` prefijado `"REVERSED: <motivo>"`. |
+| `notes` | TEXT | Notas adicionales (opcional). Los pagos revertidos tienen el prefijo `REVERSED:` seguido del motivo. |
 | `processed_by` | UUID | ID del admin/board que procesó el pago |
 | `processed_at` | TIMESTAMP | Fecha de procesamiento |
 
@@ -167,14 +170,22 @@ Representa recibos unificados del sistema: tanto deudas de condominio como gasto
 | `tag` | VARCHAR(20) | Etiqueta: `NORMAL` (recibo de condominio) o `PETTY_CASH` (gasto de caja chica). Default: `NORMAL` |
 | `type` | VARCHAR | Tipo: `EXPENSE`, `DEBT`, `EXTRAORDINARY`, `PETTY_CASH_REPLENISHMENT` (deprecated) |
 | `amount` | NUMERIC | Monto de la factura |
-| `paid_amount` | NUMERIC | Monto pagado hasta ahora (actualizado por trigger de BD) |
+| `paid_amount` | NUMERIC | Monto pagado hasta ahora. **El dominio (`Invoice.addPayment` / `Invoice.subtractPayment`) es el único mutador**. Los triggers de BD que antes recalculaban `paid_amount` fueron dropeados; ver sección 7.2. |
 | `period` | TEXT | Período en formato `YYYY-MM` (ej: "2026-01") |
 | `description` | TEXT | Descripción de la factura. En caja chica: `"[CATEGORÍA] descripción"` |
 | `receipt_number` | TEXT | Número de recibo (opcional) |
-| `status` | TEXT | Estado: `PENDING`, `PAID`, `CANCELLED` |
+| `status` | TEXT | Estado: `PENDING`, `PARTIAL`, `PAID`, `CANCELLED`. Ver grafo de transiciones en sección 6. |
 | `due_date` | DATE | Fecha de vencimiento (opcional) |
 
-**Constraints**: `CHECK (unit_id IS NOT NULL OR building_id IS NOT NULL)` — al menos uno debe estar presente. Esto permite invoices a nivel de unidad (recibos normales) o a nivel de edificio (gastos de caja chica).
+**Constraints**:
+- `CHECK (unit_id IS NOT NULL OR building_id IS NOT NULL)` — al menos uno debe estar presente. Permite invoices a nivel de unidad (recibos normales) o a nivel de edificio (gastos de caja chica).
+- `CHECK (status IN ('PENDING', 'PARTIAL', 'PAID', 'CANCELLED'))`.
+
+**Invariantes del dominio** (enforced by `Invoice` entity):
+- `amount >= 0`.
+- Transiciones de estado validadas por un grafo explícito (`assertCanTransitionTo`). `CANCELLED` es el único estado terminal; `PAID` puede volver a `PARTIAL`/`PENDING` para soportar reversas.
+- `Invoice.addPayment(amount)` rechaza si `paid_amount + amount > amount` (el excedente debe ir al credit ledger, no a la invoice).
+- `Invoice.subtractPayment(amount)` clampa a 0 en el lower bound.
 
 #### Asignación de Pago (`payment_allocations`)
 Vincula pagos con facturas, permitiendo pagos parciales y que un pago cubra múltiples facturas.
@@ -213,25 +224,33 @@ Movimientos de la caja chica (ingresos y egresos).
 | `created_at` | TIMESTAMPTZ | Fecha de creación |
 
 #### Crédito por Unidad — Ledger (`unit_credit_ledger`)
-Registro append-only de movimientos de crédito/saldo a favor por unidad. Cuando un residente paga de más, el excedente se acumula aquí.
+**Libro mayor append-only** (source of truth) de movimientos de crédito/débito por unidad. Cada fila es un asiento contable inmutable. Los sobrepagos, excedentes no asignados y reversas se expresan como filas nuevas (nunca se borran ni se actualizan filas existentes).
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `id` | UUID | Identificador único |
 | `unit_id` | UUID | Unidad que tiene el crédito |
-| `amount` | DECIMAL(12,2) | Monto (positivo = crédito acumulado, negativo = consumo futuro). CHECK: != 0 |
-| `reason` | TEXT | Razón del crédito (ej: "Overpayment on invoice abc-123") |
-| `reference_type` | VARCHAR(50) | Tipo de referencia (ej: `payment`) |
-| `reference_id` | UUID | ID de la referencia |
+| `amount` | DECIMAL(12,2) | Monto. **Positivo** = crédito acumulado; **negativo** = contra-asiento (reversas / débitos). CHECK: `!= 0` |
+| `reason` | TEXT | Razón legible del asiento. El texto se usa para distinguir tipos: `"Excedente de pago en factura <id>"` (invoice overpayment), `"Excedente no asignado del pago <id>"` (unallocated surplus), `"Reversión de pago <id>: <motivo>"` (reversa). |
+| `reference_type` | ENUM | `payment`, `reversal`, `manual_adjustment`. Usa strings narrow validados en el dominio via `CreditLedgerReferenceType`. |
+| `reference_id` | UUID | ID del recurso que causó el asiento (siempre el `payment.id` tanto para el credit original como para su reversa — el `reason` es el que distingue). |
 | `created_at` | TIMESTAMPTZ | Fecha de creación |
 
+**Invariantes del dominio** (enforced by `CreditLedgerEntry` entity):
+- `amount != 0`.
+- `unit_id`, `reason`, `reference_id` no pueden ser strings vacíos.
+- `reference_type` debe ser un valor válido del enum.
+- Static factory `CreditLedgerEntry.reversalOf(original, reason)` genera el contra-asiento con `amount = -original.amount`, `reference_type = REVERSAL`, preservando `unit_id` y `reference_id` para trazabilidad.
+
 #### Crédito por Unidad — Balance (`unit_credit_balance`)
-Vista materializada que calcula el saldo a favor de cada unidad.
+**Vista SQL normal** (NO materializada) que calcula al vuelo el saldo a favor de cada unidad sumando el ledger. Siempre consistente con `unit_credit_ledger` — cualquier INSERT se refleja inmediatamente en la próxima query.
 
 ```sql
 SELECT unit_id, COALESCE(SUM(amount), 0) AS balance
 FROM unit_credit_ledger GROUP BY unit_id
 ```
+
+**Read-only**. El backend lee de `unit_credit_balance` para obtener el total actual y de `unit_credit_ledger` para el historial detallado.
 
 #### Lead (`leads`)
 Registros de personas interesadas en la aplicación (módulo de captación).
@@ -282,13 +301,15 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 |----------|--------|-------------|-------------|
 | `/users/me` | GET | App - Users | Mi perfil |
 | `/users/me` | PATCH | App - Users | Actualizar mi perfil (nombre, teléfono) |
-| `/billing/units/:id/balance` | GET | App - Billing | Balance de deuda de mi unidad |
+| `/billing/units/:id/balance` | GET | App - Billing | Balance de deuda de mi unidad. Incluye `creditBalance` y `netBalance` (clamped a 0). |
 | `/billing/units/:id/invoices?tag=` | GET | App - Billing | Mis invoices (filtrable por tag) |
-| `/billing/units/:id/credit` | GET | App - Billing | Mi crédito/saldo a favor |
+| `/billing/units/:id/credit` | GET | App - Billing | Mi crédito/saldo a favor. Response con `reference_type` narrow: `payment` \| `reversal` \| `manual_adjustment`. |
+| `/billing/invoices/:id` | GET | App - Billing | Detalle de una invoice. Residents solo pueden ver invoices de sus propias units (ownership check). |
+| `/billing/invoices/:id/payments` | GET | App - Billing | Lista los pagos aplicados a una invoice (joined con allocation info). Ownership check por unit. |
 | `/payments` | GET | App - Payments | Mi historial de pagos |
 | `/payments/summary` | GET | App - Payments | Mi resumen de solvencia |
 | `/payments/:id` | GET | App - Payments | Detalle de un pago |
-| `/payments` | POST | App - Payments | Reportar pago con comprobante |
+| `/payments` | POST | App - Payments | Reportar pago con comprobante. `allocations[]` es un array de intenciones explícitas — cada entrada dice "aplicar N a esta invoice"; el excedente entre `payment.amount` y `sum(allocations)` se convierte en credit. |
 | `/petty-cash/funds/:buildingId` | GET | App - Petty Cash | Balance caja chica (lectura) |
 | `/petty-cash/funds/:buildingId/transactions` | GET | App - Petty Cash | Historial de movimientos (lectura) |
 
@@ -312,6 +333,8 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 
 **Pagos (Admin - Payments)**:
 
+El grupo `/payments/admin/*` está gated por `.use(requireRole([ADMIN, BOARD]))` a nivel de plugin — residents reciben `403` inmediato en cualquier endpoint admin. **Antes de este fix (commit `0da5961`) residents podían revertir pagos de cualquier edificio; era un P0 de seguridad crítico**.
+
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
 | `/payments` | GET | Historial de pagos |
@@ -319,7 +342,8 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/payments/:id` | GET | Detalle de un pago |
 | `/payments` | POST | Reportar pago |
 | `/payments/admin/payments` | GET | Listar todos los pagos (filtros: `building_id`, `status`, `year`, `unit_id`) |
-| `/payments/admin/payments/:id` | PATCH | Aprobar o rechazar un pago |
+| `/payments/admin/payments/:id` | PATCH | Aprobar o rechazar un pago. Body: `{ status: "APPROVED" \| "REJECTED" \| "PENDING", notes? }`. El approve tiene pre-flight validation — si alguna allocation apunta a una invoice `CANCELLED`, devuelve 409 sin persistir nada y el payment queda `PENDING` para rechazo manual. |
+| `/payments/admin/payments/:id/reverse` | POST | **Revertir un pago ya APPROVED** — el payment queda `REJECTED` con prefijo `REVERSED:`, se restan los montos aplicados a las invoices afectadas, las allocations se borran, y se generan contra-asientos en el credit ledger para cualquier credit que el pago haya generado. Body: `{ reason: string }` (minLength 10, maxLength 500 — valida al edge). |
 
 **Caja Chica (Admin - Petty Cash)** — RESTful, recurso `funds` con sub-recursos `transactions` y `assessments`:
 
@@ -330,6 +354,7 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/petty-cash/funds/:buildingId/transactions` | POST | Crear transacción. `type` en body: `INCOME` (reposición) o `EXPENSE` (gasto, genera invoice PETTY_CASH). `category` y `evidence_image` solo para EXPENSE. |
 | `/petty-cash/funds/:buildingId/assessments` | GET | Preview: muestra excedente del fondo (gastos - ingresos), lo ya cobrado a unidades, lo pendiente y cuánto le toca a cada unidad |
 | `/petty-cash/funds/:buildingId/assessments` | POST | Generar facturas PENDING a cada unidad del edificio por el excedente pendiente. Retorna 400 si no hay excedente. |
+| `/petty-cash/funds/:buildingId/transparency?period=YYYY-MM` | GET | **Vista de transparencia del estado de cobro de caja chica**, por período específico. Devuelve por cada unit: `expected_amount` (su cuota), `covered_amount` (capado a la cuota — los sobrepagos no inflan la recaudación del grupo), `status` (`PENDING` \| `PARTIAL` \| `PAID`). El response incluye `total_to_collect`, `total_collected` y `collection_percentage`. Invoices `CANCELLED` se excluyen del total. **`period` es query param requerido** — llamadas sin él devuelven `422`. |
 
 **Edificios (Admin - Buildings)**:
 
@@ -382,7 +407,33 @@ El query param `tag` es opcional en los endpoints de invoices:
 |-------|-------------|
 | `PENDING` | Pago reportado, pendiente de revisión |
 | `APPROVED` | Pago aprobado por Admin o Board |
-| `REJECTED` | Pago rechazado |
+| `REJECTED` | Pago rechazado por Admin/Board, O pago revertido administrativamente (en ese caso `notes` empieza con `REVERSED: <motivo>`) |
+
+### Estados de Invoice
+| Valor | Descripción |
+|-------|-------------|
+| `PENDING` | Factura emitida, `paid_amount = 0` |
+| `PARTIAL` | Pago parcial aplicado: `0 < paid_amount < amount` |
+| `PAID` | Totalmente pagada: `paid_amount >= amount` |
+| `CANCELLED` | Cancelada administrativamente. **Estado terminal** — ninguna transición sale de acá |
+
+**Grafo de transiciones** (validado por `Invoice.assertCanTransitionTo`):
+
+```
+PENDING   → PARTIAL, PAID, CANCELLED
+PARTIAL   → PENDING, PAID, CANCELLED
+PAID      → PARTIAL, PENDING             (soporta reversas de pago)
+CANCELLED → (terminal — ninguna transición)
+```
+
+**Nota importante**: `PAID` NO es terminal. Una reversa de pago puede bajar `paid_amount` y llevar la invoice de vuelta a `PARTIAL` o `PENDING`. Un intento de transición ilegal (ej: `CANCELLED → PAID`) tira `DomainError` con code `INVALID_STATE_TRANSITION` y HTTP 409.
+
+### CreditLedgerReferenceType (tipo de asiento en `unit_credit_ledger`)
+| Valor | Descripción |
+|-------|-------------|
+| `payment` | Credit generado por un pago. Cubre **dos subcasos distinguidos por el `reason`**: invoice-level overpayment (`"Excedente de pago en factura <id>"`) y unallocated surplus (`"Excedente no asignado del pago <id>"`). |
+| `reversal` | Contra-asiento de una reversa. `amount` es negativo. Vinculado al mismo `reference_id` del credit original para trazabilidad. |
+| `manual_adjustment` | Ajuste manual (no usado por flujos automáticos hoy, reservado para ajustes administrativos futuros) |
 
 ### Estado de Solvencia
 | Valor | Descripción |
@@ -427,19 +478,60 @@ El query param `tag` es opcional en los endpoints de invoices:
 ```
 
 ### 7.2 Reporte y Aprobación de Pago (con detección de sobrepago)
+
+**Nota arquitectónica importante** (commit `1280bce` — "Camino 2"): el dominio de la aplicación es el **único dueño** de `invoice.paid_amount` y de `invoice.status`. Los triggers de Postgres que antes recalculaban estos campos automáticamente fueron dropeados. El orden de operaciones y los invariantes los enforce el dominio vía `Invoice.addPayment`, `Invoice.subtractPayment`, `Invoice.updateStatus` y `Invoice.assertCanTransitionTo`.
+
+**Modelo de allocations**: una `PaymentAllocation` es una **intención explícita** — "aplicar N unidades de este pago a esta invoice". No es una fracción que el backend divida. El cliente (APK / Web Admin) decide cómo distribuir el pago entre las invoices, y la suma de allocations **puede ser menor** que `payment.amount`. La diferencia = **unallocated surplus** → credit automático a la unit.
+
 ```
-1. Residente reporta pago → POST /payments (monto, fecha, método, referencia, banco, comprobante)
-   - Opcionalmente asigna el pago a facturas específicas (allocations)
-2. Pago se crea con estado "PENDING"
-3. Admin/Board revisa pagos pendientes → GET /payments/admin/payments?status=PENDING
-4. Admin/Board aprueba → PATCH /payments/admin/payments/:id { status: "APPROVED" }
-   - El trigger de BD actualiza el paid_amount de las facturas asignadas
-   - Si el pago excede el monto de una factura (sobrepago):
-     → El excedente se acumula como crédito en unit_credit_ledger
-     → Solo aplica a facturas con unit_id (no a building-level)
-   - O rechaza → PATCH /payments/admin/payments/:id { status: "REJECTED", notes: "..." }
-5. Se registra quién procesó el pago (processed_by, processed_at)
+1. Residente reporta pago → POST /payments
+   Body (multipart): amount, date, method, reference, bank, proof_image?, unit_id?,
+                     building_id?, notes?, allocations?
+   - payment.amount = monto total que el residente entregó.
+   - allocations[] = lista de asignaciones explícitas { invoice_id, amount }.
+   - Validación: sum(allocations.amount) <= payment.amount. Positivos obligatorios.
+2. Pago se crea con estado PENDING. Allocations se persisten con el amount que vino del cliente.
+3. Admin/Board revisa pagos pendientes → GET /payments/admin/payments?status=PENDING.
+
+4. Admin/Board aprueba → PATCH /payments/admin/payments/:id { status: "APPROVED" }.
+
+   El use case ApprovePayment ejecuta en este orden:
+
+   4.1. Short-circuit de idempotency: si payment.status ya es APPROVED, retorna
+        inmediatamente sin tocar nada (protege contra doble-click y retries).
+
+   4.2. Carga allocations del pago.
+
+   4.3. Pre-flight validation: para CADA allocation verifica
+        ProcessInvoiceOverpayment.assertInvoiceCanAcceptPayment(invoice_id).
+        Si alguna invoice está CANCELLED → DomainError 409 INMEDIATAMENTE
+        sin persistir NADA. El payment queda PENDING para rechazo manual.
+        (Este pre-check existe para evitar zombie state — ver sección 7.9.)
+
+   4.4. Solo si pasa la pre-validación: payment.approve() + paymentRepo.update().
+
+   4.5. Loop sobre allocations:
+        - ProcessInvoiceOverpayment.execute({ invoiceId, paymentId, paymentAmount: alloc.amount }).
+        - Calcula el split via OverpaymentService: applied = min(alloc.amount, invoice.remaining),
+          credit = max(0, alloc.amount - invoice.remaining).
+        - invoice.addPayment(applied) + invoice.updateStatus() + invoiceRepo.update().
+        - Si generatedCredit > 0 y la invoice tiene unit_id: crea entry en unit_credit_ledger
+          con reason "Excedente de pago en factura <id>". Idempotency check best-effort.
+        - Si la invoice es building-level (sin unit_id) y hay credit: warn + drop (no hay unit
+          destinataria — gap de spec documentado).
+
+   4.6. Después del loop: calcula unallocatedSurplus = payment.amount - sum(alloc.amount).
+        Si > 0 y payment.unit_id existe: crea entry en unit_credit_ledger con reason
+        "Excedente no asignado del pago <id>". Este es el canal que cubre el caso más común
+        del APK — pagar 100 contra invoice de 40 con allocation.amount = 40 genera credit de 60.
+
+5. O rechaza → PATCH /payments/admin/payments/:id { status: "REJECTED", notes: "..." }.
+   Los rechazos sobre pagos PENDING no tienen efectos financieros (solo cambio de estado).
+
+6. Se registra quién procesó el pago (processed_by, processed_at).
 ```
+
+**Limitación conocida (documentada en REVIEW_BACKLOG.md)**: el flujo de approve NO es transaccional. Si falla entre `paymentRepo.update` y el primer `ProcessInvoiceOverpayment.execute`, el payment queda APPROVED con allocations parcialmente procesadas. La pre-flight validation cubre el caso más común (allocation contra CANCELLED); otros fallos de DB pueden producir partial commits. El fix definitivo es envolver `approve()` en un Supabase RPC / unit-of-work.
 
 ### 7.3 Carga de Deuda (Facturación)
 ```
@@ -520,22 +612,147 @@ Generar facturas:
 ```
 
 ### 7.7 Crédito / Saldo a Favor por Unidad
-```
-Acumulación automática:
-1. Residente paga recibo de $40 con $50
-2. Board/Admin aprueba el pago
-3. Trigger de BD actualiza paid_amount del invoice a $50
-4. Sistema detecta sobrepago: $50 - $40 = $10 de excedente
-5. Se crea entrada en unit_credit_ledger: amount=$10, reason="Overpayment on invoice X"
-6. Saldo a favor de la unidad aumenta en $10
 
-Consulta:
-- Residente consulta su crédito → GET /billing/units/:id/credit
-- Retorna: { balance: 10.00, history: [...] }
+El `unit_credit_ledger` tiene **dos canales complementarios** que producen credit entries. Ambos usan `reference_type=payment` y `reference_id=<payment_id>`, pero el campo `reason` los distingue — lo que permite que `ReversePayment` encuentre todos los créditos de un pago con una sola query y genere contra-asientos para ambos.
 
-Nota: El consumo del crédito (usar saldo a favor para pagar recibos futuros)
-está planificado para una futura actualización.
+**Canal A — Invoice-level overpayment** (`reason` empieza con `"Excedente de pago en factura"`):
 ```
+Dispara cuando alloc.amount > invoice.remaining.
+Ejemplo: payment.amount=150, allocation={invoice X, amount:150}, invoice X de $100.
+  - OverpaymentService.calculate(100, 0, 150) → applied=100, credit=50.
+  - invoice.addPayment(100) → PAID.
+  - creditLedgerRepo.addCredit({ amount: 50, reason: "Excedente de pago en factura X" }).
+```
+
+**Canal B — Unallocated surplus** (`reason` empieza con `"Excedente no asignado del pago"`):
+```
+Dispara cuando sum(allocations) < payment.amount.
+Ejemplo: payment.amount=100, allocation={invoice X, amount:40}, invoice X de $40.
+  - ProcessInvoiceOverpayment aplica los 40 → invoice PAID, credit=0 (no hay overpayment).
+  - ApprovePayment detecta surplus = 100 - 40 = 60.
+  - creditLedgerRepo.addCredit({ amount: 60, reason: "Excedente no asignado del pago Y" }).
+
+Este es el caso más común en la APK: la APK manda allocations capadas al
+monto remaining de la invoice, y el surplus va automáticamente al credit.
+```
+
+**Caso especial — payment sin allocations**:
+```
+payment.amount=100, allocations=[].
+→ Loop de allocations no corre.
+→ unallocatedSurplus = 100 - 0 = 100 → credit ledger +100.
+→ Permite al residente depositar directo a credit para usar después.
+```
+
+**Consulta**:
+- Residente → `GET /billing/units/:id/credit`
+- Retorna:
+```json
+{
+  "balance": 60,
+  "history": [
+    {
+      "id": "...",
+      "unit_id": "...",
+      "amount": 60,
+      "reason": "Excedente no asignado del pago <id>",
+      "reference_type": "payment",
+      "reference_id": "<id>",
+      "created_at": "..."
+    }
+  ]
+}
+```
+
+**Consumo del crédito** (aplicar saldo a favor a recibos futuros): **planificado para una futura actualización**. Hoy el credit solo se acumula y se revierte.
+
+### 7.8 Reversa de Pagos
+
+Nuevo flujo administrativo introducido con esta rama. Permite al Board/Admin revertir un pago ya APPROVED, restaurando el estado previo del sistema contable.
+
+```
+1. Board/Admin → POST /payments/admin/payments/:id/reverse
+   Body: { reason: string }  // minLength 10, maxLength 500
+
+2. Pre-validación:
+   - Payment debe estar en estado APPROVED. Si no → 403 "Only approved payments can be reversed".
+
+3. payment.reject(requesterId, `REVERSED: ${reason}`)
+   - El status del payment pasa a REJECTED.
+   - notes queda con el prefijo REVERSED: seguido del motivo.
+   - paymentRepo.update(payment).
+
+4. Reversa de credit ledger:
+   - Busca todas las entries con reference_id=paymentId y reference_type=PAYMENT.
+   - Para cada una que sea crédito positivo, genera un contra-asiento via
+     CreditLedgerEntry.reversalOf(original, reason) con amount negativo y
+     reference_type=REVERSAL.
+   - creditLedgerRepo.deductCredit(reversalEntry).
+   - Esto revierte AMBOS canales: invoice overpayment y unallocated surplus,
+     porque los dos comparten reference_id.
+
+5. Reversa de invoices:
+   - Carga las allocations del pago.
+   - Para cada allocation:
+     a. Carga la invoice.
+     b. Si la invoice está CANCELLED: skip la mutación (no tiene sentido
+        recalcular status de algo terminal) pero igual borra la allocation.
+     c. Si no está CANCELLED:
+        - invoice.subtractPayment(alloc.amount) — baja paid_amount (clamp a 0).
+        - invoice.updateStatus() — recalcula el status según el nuevo paid_amount.
+        - invoiceRepo.update(invoice).
+   - Borra la allocation en todos los casos (allocationRepo.delete).
+
+6. Response: { success: true }.
+```
+
+**Validaciones de input** (Elysia schema):
+- `reason` es `t.String({ minLength: 10, maxLength: 500 })`. Forzar un mínimo útil evita notes vacíos o "x" en el audit trail.
+
+**Limitaciones conocidas**:
+- **No es transaccional**. Si falla entre la reversa del credit ledger y la reversa de invoices, queda estado inconsistente.
+- **Distingue REVERSED de REJECTED solo por el prefijo del notes**. Un futuro rediseño podría introducir un estado `REVERSED` separado — por ahora ambos terminan en `REJECTED` y se distinguen por el contenido de `notes`.
+- **Cross-building para BOARD**: un BOARD de edificio X puede ejecutar reverse sobre un pago de edificio Y (ReversePayment no tiene check interno de building membership; el guard `requireRole` solo chequea rol, no building). Pendiente de arreglar con `requireBuildingAccess` async-aware.
+
+### 7.9 Transparencia de Caja Chica
+
+```
+1. Board/Admin → GET /petty-cash/funds/:buildingId/transparency?period=YYYY-MM
+   - period es query param REQUERIDO. Sin él → 422.
+
+2. El use case GetPettyCashTransparency:
+   a. Carga las units del edificio (todas aparecen en el response, tengan o no invoice).
+   b. Carga las invoices PETTY_CASH del edificio filtradas por el período solicitado.
+   c. Indexa las invoices por unit_id en un Map (O(1) lookup).
+      - Invoices CANCELLED se EXCLUYEN del indexado — no cuentan en los totales.
+      - Si una unit tiene múltiples invoices del mismo período, la última en el array gana
+        (TODO: agregar UNIQUE constraint a nivel DB cuando el modelo lo garantice).
+
+3. Por cada unit:
+   a. Si tiene invoice activa: expected_amount = invoice.amount,
+      covered_amount = min(invoice.paid_amount, invoice.amount)  // capado a la cuota
+      status = invoice.status (PENDING | PARTIAL | PAID — CANCELLED ya está filtrado).
+   b. Si NO tiene invoice (o estaba CANCELLED): expected=0, covered=0, status=PENDING.
+
+4. El capado de covered_amount a expected_amount es intencional: un residente que
+   pagó 100 contra una cuota de 80 NO debe inflar el collection_percentage del grupo.
+   Su excedente (20) va al credit ledger por el canal B (unallocated surplus),
+   no al total de caja chica.
+
+5. Response:
+   {
+     building_id,
+     period,
+     total_to_collect: sum de expected_amount,
+     total_collected: sum de covered_amount (todas capadas a sus respectivas cuotas),
+     collection_percentage: (total_collected / total_to_collect) * 100 (redondeado 2 decimales),
+     units: [
+       { unit_id, unit_name, expected_amount, covered_amount, status }
+     ]
+   }
+```
+
+**Breaking change**: el endpoint requería antes `?period=` como opcional (y se ignoraba, agregando todas las invoices históricas del edificio — bug). Ahora es estrictamente requerido. El frontend del Web Admin debe pasar el período actual explícitamente.
 
 ---
 
@@ -550,8 +767,17 @@ está planificado para una futura actualización.
 1. **Nivel de Ruta**: Guards composables validan JWT y permisos antes de ejecutar cualquier lógica:
    - `requireRole(roles[])`: Valida que el usuario tenga uno de los roles permitidos. Retorna 401 (sin token) o 403 (rol no permitido).
    - `requireBuildingAccess(getBuildingId)`: Valida que el usuario (Board) sea miembro del edificio solicitado. Admin bypasses automáticamente. Retorna 403 si no es miembro.
-2. **Nivel de Negocio**: Los Use Cases verifican el rol del usuario que ejecuta la acción.
+2. **Nivel de Negocio**: Los Use Cases verifican el rol del usuario que ejecuta la acción. **Ojo**: `ApprovePayment.approve/reject` tienen check interno de building membership; `ReversePayment` NO (pendiente de arreglar — ver REVIEW_BACKLOG.md).
 3. **Nivel de Base de Datos**: Row Level Security (RLS) en Supabase como capa adicional de seguridad.
+
+**Estado actual de auth en los tres módulos con route groups separados** (pendiente de unificación en una MR dedicada):
+| Módulo | Patrón | Estado |
+|---|---|---|
+| `petty-cash` | `.use(requireRole(...))` + `.use(requireBuildingAccess(...))` en el plugin | ✅ Referencia correcta |
+| `payments` admin | `.use(requireRole([ADMIN, BOARD]))` en el plugin (commit `0da5961`) | ✅ — pero sin `requireBuildingAccess` |
+| `billing` admin | `.derive()` con profile + checks inline en cada handler | ⚠️ Inconsistente, frágil |
+
+**P0 histórico cerrado en commit `0da5961`**: las rutas admin de payments usaban un `.derive()` raw que solo validaba el token, sin chequear rol. Combinado con `ReversePayment` sin check interno, cualquier residente autenticado podía revertir cualquier pago del sistema. Ahora está gated correctamente al nivel del plugin.
 
 ### Políticas RLS Principales
 - **Profiles**: Cada usuario solo ve su perfil. Admin ve todos. Board ve perfiles de usuarios de su edificio.

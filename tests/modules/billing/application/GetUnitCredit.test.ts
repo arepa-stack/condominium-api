@@ -1,7 +1,7 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
 import { GetUnitCredit } from '@/modules/billing/application/use-cases/GetUnitCredit';
 import { ICreditLedgerRepository } from '@/modules/billing/domain/repository';
-import { CreditLedgerEntry } from '@/modules/billing/domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 
 describe('GetUnitCredit Use Case', () => {
     let creditLedgerRepo: ICreditLedgerRepository;
@@ -22,7 +22,7 @@ describe('GetUnitCredit Use Case', () => {
             unit_id: 'unit-1',
             amount: 50,
             reason: 'Overpayment on invoice inv-1',
-            reference_type: 'payment',
+            reference_type: CreditLedgerReferenceType.PAYMENT,
             reference_id: 'payment-1',
             created_at: new Date('2026-01-15')
         });
@@ -31,7 +31,7 @@ describe('GetUnitCredit Use Case', () => {
             unit_id: 'unit-1',
             amount: 25,
             reason: 'Overpayment on invoice inv-2',
-            reference_type: 'payment',
+            reference_type: CreditLedgerReferenceType.PAYMENT,
             reference_id: 'payment-2',
             created_at: new Date('2026-02-10')
         });

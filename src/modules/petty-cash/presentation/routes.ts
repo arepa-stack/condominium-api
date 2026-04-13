@@ -25,6 +25,9 @@ const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, invoiceRepo)
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 
+import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
+const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo);
+
 // ── Schemas ─────────────────────────────────────────────────────────────────
 
 const PettyCashFundSchema = t.Object({
@@ -111,6 +114,36 @@ function createReadRoutes(tag: string) {
             detail: {
                 tags: [tag],
                 summary: 'List transactions for a building fund'
+            }
+        })
+        .get('/funds/:buildingId/transparency', async ({ params, query }) => {
+            return await getTransparency.execute(params.buildingId, query.period);
+        }, {
+            query: t.Object({
+                period: t.String({ minLength: 1, description: 'Period to report (e.g. "2024-01")' })
+            }),
+            response: t.Object({
+                building_id: t.String(),
+                period: t.String(),
+                total_to_collect: t.Number(),
+                total_collected: t.Number(),
+                collection_percentage: t.Number(),
+                units: t.Array(t.Object({
+                    unit_id: t.String(),
+                    unit_name: t.String(),
+                    expected_amount: t.Number(),
+                    covered_amount: t.Number(),
+                    status: t.Union([
+                        t.Literal('PENDING'),
+                        t.Literal('PARTIAL'),
+                        t.Literal('PAID')
+                    ])
+                }))
+            }),
+            detail: {
+                tags: [tag],
+                summary: 'Get petty cash replenishment transparency view',
+                description: 'Shows progress of fund replenishment for a specific period, capping unit contributions at their assigned quota. Cancelled invoices are excluded from totals.'
             }
         });
 }

@@ -23,7 +23,7 @@ const unitRepository = new SupabaseUnitRepository();
 const excelParser = new ExcelJSInvoiceParser();
 
 const loadDebt = new LoadDebt(invoiceRepository);
-const getUnitBalance = new GetUnitBalance(invoiceRepository, allocationRepository);
+const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getAllInvoices = new GetAllInvoices(invoiceRepository);
 const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
@@ -91,6 +91,8 @@ const BalanceSchema = t.Object({
     unit: t.String(),
     totalDebt: t.Number(),
     pendingInvoices: t.Number(),
+    creditBalance: t.Number(),
+    netBalance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 
@@ -349,7 +351,11 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 unit_id: t.String(),
                 amount: t.Number(),
                 reason: t.String(),
-                reference_type: t.String(),
+                reference_type: t.Union([
+                    t.Literal('payment'),
+                    t.Literal('reversal'),
+                    t.Literal('manual_adjustment')
+                ]),
                 reference_id: t.String(),
                 created_at: t.Optional(t.Any())
             }))

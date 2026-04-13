@@ -1,5 +1,5 @@
 import { ICreditLedgerRepository } from '../../domain/repository';
-import { CreditLedgerEntry } from '../../domain/entities/CreditLedgerEntry';
+import { CreditLedgerEntry, CreditLedgerReferenceType } from '../../domain/entities/CreditLedgerEntry';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 
@@ -10,7 +10,7 @@ export class SupabaseCreditLedgerRepository implements ICreditLedgerRepository {
             unit_id: data.unit_id as string,
             amount: data.amount as number,
             reason: data.reason as string,
-            reference_type: data.reference_type as string,
+            reference_type: data.reference_type as CreditLedgerReferenceType,
             reference_id: data.reference_id as string,
             created_at: data.created_at ? new Date(data.created_at as string) : undefined
         });
@@ -38,6 +38,11 @@ export class SupabaseCreditLedgerRepository implements ICreditLedgerRepository {
         return this.toDomain(data);
     }
 
+    async deductCredit(entry: CreditLedgerEntry): Promise<CreditLedgerEntry> {
+        // Technically the same as addCredit but with negative amount
+        return this.addCredit(entry);
+    }
+
     async getBalanceForUnit(unitId: string): Promise<number> {
         const { data, error } = await supabase
             .from('unit_credit_balance')
@@ -62,6 +67,19 @@ export class SupabaseCreditLedgerRepository implements ICreditLedgerRepository {
 
         if (error) {
             throw new DomainError('Error fetching credit entries: ' + error.message, 'DB_ERROR', 500);
+        }
+
+        return (data || []).map(d => this.toDomain(d as Record<string, unknown>));
+    }
+
+    async findByReferenceId(referenceId: string): Promise<CreditLedgerEntry[]> {
+        const { data, error } = await supabase
+            .from('unit_credit_ledger')
+            .select('*')
+            .eq('reference_id', referenceId);
+
+        if (error) {
+            throw new DomainError('Error finding credit entries by reference: ' + error.message, 'DB_ERROR', 500);
         }
 
         return (data || []).map(d => this.toDomain(d as Record<string, unknown>));

@@ -5,6 +5,7 @@ import { createMockPaymentRepository, createMockInvoiceRepository, createMockAll
 import { PaymentMethod, PaymentStatus } from "@/core/domain/enums";
 import { Payment } from "@/modules/payments/domain/entities/Payment";
 import { PaymentAllocation } from "@/modules/billing/domain/entities/PaymentAllocation"; // Note cross-module import logic in test
+import { Invoice, InvoiceStatus, InvoiceType } from "@/modules/billing/domain/entities/Invoice";
 
 describe("Payments Use Cases", () => {
     let mockPaymentRepo: ReturnType<typeof createMockPaymentRepository>;
@@ -78,6 +79,16 @@ describe("Payments Use Cases", () => {
             });
             mockPaymentRepo.findById = mock(async () => payment);
             mockAllocRepo.findByPaymentId = mock(async () => []); // No prior allocations
+            mockInvoiceRepo.findById = mock(async () => new Invoice({
+                id: "inv-1",
+                unit_id: "un1",
+                amount: 100,
+                paid_amount: 0,
+                period: "2024-01",
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT,
+                issue_date: new Date()
+            }));
 
             await useCase.execute({
                 paymentId: "pay-1",

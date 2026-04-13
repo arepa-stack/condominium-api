@@ -5,8 +5,8 @@
 
 import { Elysia, t } from 'elysia';
 import { SupabaseInvoiceRepository } from '../infrastructure/repositories/SupabaseInvoiceRepository';
-import { SupabasePaymentAllocationRepository } from '../infrastructure/repositories/SupabasePaymentAllocationRepository';
 import { SupabaseCreditLedgerRepository } from '../infrastructure/repositories/SupabaseCreditLedgerRepository';
+import { SupabasePaymentAllocationRepository } from '../infrastructure/repositories/SupabasePaymentAllocationRepository';
 import { GetUnitBalance } from '../application/use-cases/GetUnitBalance';
 import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
@@ -15,10 +15,10 @@ import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { UserRole, InvoiceTag } from '@/core/domain/enums';
 
 const invoiceRepository = new SupabaseInvoiceRepository();
-const allocationRepository = new SupabasePaymentAllocationRepository();
 const creditLedgerRepository = new SupabaseCreditLedgerRepository();
+const allocationRepository = new SupabasePaymentAllocationRepository();
 
-const getUnitBalance = new GetUnitBalance(invoiceRepository, allocationRepository);
+const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
 
@@ -51,6 +51,8 @@ const BalanceSchema = t.Object({
     unit: t.String(),
     totalDebt: t.Number(),
     pendingInvoices: t.Number(),
+    creditBalance: t.Number(),
+    netBalance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 
@@ -105,9 +107,71 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
             balance: t.Number(),
             history: t.Array(t.Object({
                 id: t.String(), unit_id: t.String(), amount: t.Number(),
-                reason: t.String(), reference_type: t.String(), reference_id: t.String(),
+                reason: t.String(),
+                reference_type: t.Union([
+                    t.Literal('payment'),
+                    t.Literal('reversal'),
+                    t.Literal('manual_adjustment')
+                ]),
+                reference_id: t.String(),
                 created_at: t.Optional(t.Any())
             }))
         }),
         detail: { tags: ['App - Billing'], summary: 'Get credit balance for a unit' }
+    })
+    // Invoice detail by id. Mirrors the admin endpoint at
+    // /admin/billing/invoices/:id but with ownership enforcement for
+    // residents — a resident can only fetch invoices belonging to one
+    // of their own units.
+    .get('/invoices/:id', async ({ params, profile }) => {
+        const invoice = await invoiceRepository.findById(params.id);
+        if (!invoice) throw new NotFoundError('Invoice not found');
+
+        if (profile.role === UserRole.RESIDENT) {
+            const ownsUnit = invoice.unit_id
+                && profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
+            if (!ownsUnit) {
+                throw new UnauthorizedError('You do not have access to this invoice');
+            }
+        }
+
+        return invoice.toJSON();
+    }, {
+        response: InvoiceSchema,
+        detail: { tags: ['App - Billing'], summary: 'Get invoice details' }
+    })
+    // List payments allocated to a specific invoice. Mirrors the admin
+    // endpoint at /admin/billing/invoices/:id/payments but with ownership
+    // enforcement for residents — a resident can only see the payments
+    // applied to an invoice that belongs to one of their own units.
+    .get('/invoices/:id/payments', async ({ params, profile }) => {
+        const invoice = await invoiceRepository.findById(params.id);
+        if (!invoice) throw new NotFoundError('Invoice not found');
+
+        if (profile.role === UserRole.RESIDENT) {
+            const ownsUnit = invoice.unit_id
+                && profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
+            if (!ownsUnit) {
+                throw new UnauthorizedError('You do not have access to this invoice');
+            }
+        }
+
+        return await allocationRepository.findPaymentsByInvoiceId(params.id);
+    }, {
+        response: t.Array(t.Object({
+            id: t.String(),
+            amount: t.Number(),
+            status: t.String(),
+            payment_date: t.Any(),
+            method: t.String(),
+            reference: t.Optional(t.Union([t.String(), t.Null()])),
+            allocated_amount: t.Number(),
+            allocation_id: t.String(),
+            allocated_at: t.Any(),
+            user: t.Optional(t.Object({
+                id: t.String(),
+                name: t.String()
+            }))
+        })),
+        detail: { tags: ['App - Billing'], summary: 'List payments applied to an invoice' }
     });
