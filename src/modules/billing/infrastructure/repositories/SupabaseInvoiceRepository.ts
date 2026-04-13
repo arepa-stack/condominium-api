@@ -31,6 +31,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             unit_id: invoice.unit_id ?? null,
             building_id: invoice.building_id ?? null,
             amount: invoice.amount,
+            paid_amount: invoice.paid_amount,
             period: invoice.period,
             issue_date: invoice.issue_date,
             due_date: invoice.due_date,
