@@ -540,6 +540,140 @@ describe('ApprovePayment Use Case', () => {
         });
     });
 
+    describe('Approval against a CANCELLED invoice', () => {
+        // Reported from manual QA:
+        // 1) User reports a payment with an allocation to a CANCELLED invoice.
+        // 2) Admin tries to approve → first attempt throws (expected).
+        // 3) Admin tries again → the idempotency short-circuit returns success
+        //    even though the invoice state is still CANCELLED and the
+        //    allocation was never applied.
+        //
+        // Before the pre-flight validation fix, this produced a zombie state
+        // where payment.status was APPROVED but the invoice had not moved.
+        // After the fix, approve() throws BEFORE persisting the status
+        // change, so the payment stays PENDING and the admin can reject it
+        // or re-allocate to a valid invoice.
+
+        it('throws before persisting when any allocated invoice is CANCELLED, and leaves the payment PENDING', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+
+            const pending = new Payment({
+                id: 'payment-cancel',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.CASH,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(pending);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-cancelled',
+                payment_id: 'payment-cancel',
+                invoice_id: 'invoice-cancelled',
+                amount: 100
+            });
+
+            const cancelledInvoice = new Invoice({
+                id: 'invoice-cancelled',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.CANCELLED,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => cancelledInvoice);
+
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-cancel', approverId: 'admin-1' })
+            ).rejects.toThrow(/cancelled invoice/i);
+
+            // Critical: the payment status must still be PENDING. Without
+            // the pre-flight check, it would have been persisted as APPROVED
+            // and the next retry would short-circuit into a false success.
+            const reloaded = await paymentRepo.findById('payment-cancel');
+            expect(reloaded?.status).toBe(PaymentStatus.PENDING);
+
+            // No credit ledger writes happened either.
+            expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+
+        it('retrying approval on the same cancelled-invoice payment keeps failing cleanly (no zombie APPROVED)', async () => {
+            const admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                role: UserRole.ADMIN,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+
+            const pending = new Payment({
+                id: 'payment-retry',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.CASH,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(pending);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-retry',
+                payment_id: 'payment-retry',
+                invoice_id: 'invoice-retry',
+                amount: 100
+            });
+
+            const cancelledInvoice = new Invoice({
+                id: 'invoice-retry',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.CANCELLED,
+                type: InvoiceType.DEBT
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => cancelledInvoice);
+
+            // First attempt: throws.
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-retry', approverId: 'admin-1' })
+            ).rejects.toThrow();
+
+            // Second attempt: MUST also throw, not return success via the
+            // idempotency short-circuit. The payment is still PENDING so the
+            // short-circuit does not fire, and the pre-flight check catches
+            // the cancelled invoice again.
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-retry', approverId: 'admin-1' })
+            ).rejects.toThrow(/cancelled invoice/i);
+
+            const reloaded = await paymentRepo.findById('payment-retry');
+            expect(reloaded?.status).toBe(PaymentStatus.PENDING);
+        });
+    });
+
     describe('idempotency', () => {
         it('short-circuits and does not re-process allocations when payment is already APPROVED', async () => {
             const admin = new User({

@@ -1,7 +1,8 @@
 import { OverpaymentService } from '../../domain/services/OverpaymentService';
 import { IInvoiceRepository, ICreditLedgerRepository } from '../../domain/repository';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '../../domain/entities/CreditLedgerEntry';
-import { NotFoundError } from '@/core/errors';
+import { InvoiceStatus } from '../../domain/entities/Invoice';
+import { DomainError, NotFoundError } from '@/core/errors';
 
 export interface ProcessOverpaymentDTO {
     invoiceId: string;
@@ -21,6 +22,32 @@ export class ProcessInvoiceOverpayment {
         private creditLedgerRepo: ICreditLedgerRepository,
         private overpaymentService: OverpaymentService = new OverpaymentService()
     ) { }
+
+    /**
+     * Pre-flight validation. Throws if the invoice cannot accept a payment
+     * at the moment of the call. Intended to run BEFORE ApprovePayment
+     * persists the payment as APPROVED, so a bad allocation bails out
+     * without leaving behind a zombie state (payment APPROVED + invoice
+     * untouched + idempotency guard hiding recoveries).
+     *
+     * The pre-check exists as a defensive fix until ApprovePayment is
+     * wrapped in a real transaction (see REVIEW_BACKLOG.md item about
+     * transaction boundaries).
+     */
+    async assertInvoiceCanAcceptPayment(invoiceId: string): Promise<void> {
+        const invoice = await this.invoiceRepo.findById(invoiceId);
+        if (!invoice) {
+            throw new NotFoundError(`Invoice ${invoiceId} not found`);
+        }
+        if (invoice.status === InvoiceStatus.CANCELLED) {
+            throw new DomainError(
+                `Cannot accept payment on cancelled invoice ${invoiceId}. ` +
+                `Reject the payment or re-allocate it to an active invoice first.`,
+                'INVALID_INVOICE_STATE',
+                409
+            );
+        }
+    }
 
     async execute(dto: ProcessOverpaymentDTO): Promise<ProcessOverpaymentResult> {
         const invoice = await this.invoiceRepo.findById(dto.invoiceId);

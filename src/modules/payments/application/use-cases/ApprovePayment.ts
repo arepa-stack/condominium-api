@@ -41,10 +41,30 @@ export class ApprovePayment {
             return;
         }
 
+        const allocations = await this.allocationRepo.findByPaymentId(paymentId);
+
+        // Pre-flight validation: verify EVERY allocated invoice can accept a
+        // payment right now, BEFORE we persist payment.status = APPROVED.
+        //
+        // Without this, approving a payment that targets a CANCELLED invoice
+        // produces a zombie state:
+        //   1. payment.approve() + update → payment persisted as APPROVED.
+        //   2. Loop hits the CANCELLED invoice → invoice.updateStatus()
+        //      throws INVALID_STATE_TRANSITION (from aabf4dd).
+        //   3. Error propagates; payment stays APPROVED, invoice untouched,
+        //      allocation orphaned.
+        //   4. Retry short-circuits via the idempotency guard above and
+        //      returns success without actually fixing the partial state.
+        //
+        // Failing HERE leaves the payment in PENDING so the admin can reject
+        // it cleanly or re-allocate to a valid invoice.
+        for (const alloc of allocations) {
+            await this.processOverpayment.assertInvoiceCanAcceptPayment(alloc.invoice_id);
+        }
+
         payment.approve(approverId, notes);
         await this.paymentRepo.update(payment);
 
-        const allocations = await this.allocationRepo.findByPaymentId(paymentId);
         let totalAllocated = 0;
         for (const alloc of allocations) {
             await this.processOverpayment.execute({
