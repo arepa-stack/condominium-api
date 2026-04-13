@@ -119,6 +119,27 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         }),
         detail: { tags: ['App - Billing'], summary: 'Get credit balance for a unit' }
     })
+    // Invoice detail by id. Mirrors the admin endpoint at
+    // /admin/billing/invoices/:id but with ownership enforcement for
+    // residents — a resident can only fetch invoices belonging to one
+    // of their own units.
+    .get('/invoices/:id', async ({ params, profile }) => {
+        const invoice = await invoiceRepository.findById(params.id);
+        if (!invoice) throw new NotFoundError('Invoice not found');
+
+        if (profile.role === UserRole.RESIDENT) {
+            const ownsUnit = invoice.unit_id
+                && profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
+            if (!ownsUnit) {
+                throw new UnauthorizedError('You do not have access to this invoice');
+            }
+        }
+
+        return invoice.toJSON();
+    }, {
+        response: InvoiceSchema,
+        detail: { tags: ['App - Billing'], summary: 'Get invoice details' }
+    })
     // List payments allocated to a specific invoice. Mirrors the admin
     // endpoint at /admin/billing/invoices/:id/payments but with ownership
     // enforcement for residents — a resident can only see the payments
