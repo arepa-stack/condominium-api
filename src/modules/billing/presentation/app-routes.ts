@@ -5,7 +5,6 @@
 
 import { Elysia, t } from 'elysia';
 import { SupabaseInvoiceRepository } from '../infrastructure/repositories/SupabaseInvoiceRepository';
-import { SupabasePaymentAllocationRepository } from '../infrastructure/repositories/SupabasePaymentAllocationRepository';
 import { SupabaseCreditLedgerRepository } from '../infrastructure/repositories/SupabaseCreditLedgerRepository';
 import { GetUnitBalance } from '../application/use-cases/GetUnitBalance';
 import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
@@ -15,10 +14,9 @@ import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { UserRole, InvoiceTag } from '@/core/domain/enums';
 
 const invoiceRepository = new SupabaseInvoiceRepository();
-const allocationRepository = new SupabasePaymentAllocationRepository();
 const creditLedgerRepository = new SupabaseCreditLedgerRepository();
 
-const getUnitBalance = new GetUnitBalance(invoiceRepository, allocationRepository);
+const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
 
