@@ -45,12 +45,43 @@ export class ApprovePayment {
         await this.paymentRepo.update(payment);
 
         const allocations = await this.allocationRepo.findByPaymentId(paymentId);
+        let totalAllocated = 0;
         for (const alloc of allocations) {
             await this.processOverpayment.execute({
                 invoiceId: alloc.invoice_id,
                 paymentId: payment.id,
                 paymentAmount: alloc.amount
             });
+            totalAllocated += alloc.amount;
+        }
+
+        // Unallocated portion of the payment becomes a direct credit on the
+        // unit. This covers three real-world scenarios:
+        //
+        //   1. APK sends allocation.amount = invoice.amount (e.g. pay 100
+        //      against an invoice of 40 → allocation=40, surplus=60 → credit).
+        //   2. Resident reports a payment with no allocations (pure credit
+        //      deposit for future use).
+        //   3. Multi-invoice payment where sum(allocations) < payment.amount.
+        //
+        // `allocation.amount` is a first-class intent — "apply this much to
+        // this invoice" — not a fraction of the payment the backend has to
+        // split. The residue is what makes the arithmetic close.
+        const unallocatedSurplus = payment.amount - totalAllocated;
+        if (unallocatedSurplus > 0) {
+            if (payment.unit_id) {
+                await this.processOverpayment.processUnallocatedSurplus(
+                    payment.id,
+                    payment.unit_id,
+                    unallocatedSurplus
+                );
+            } else {
+                // Building-level payment with surplus — no unit to credit.
+                // Drop with a warning; spec does not define a destination.
+                console.warn(
+                    `[ApprovePayment] Dropping ${unallocatedSurplus} surplus on building-level payment ${payment.id} — no unit to credit.`
+                );
+            }
         }
     }
 

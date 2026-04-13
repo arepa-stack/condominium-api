@@ -107,4 +107,55 @@ export class ProcessInvoiceOverpayment {
             e.reason.includes(invoiceId)
         );
     }
+
+    /**
+     * Persists the unallocated portion of a payment as a direct credit on
+     * the unit. Called by ApprovePayment after the allocation loop has
+     * processed each invoice, when `payment.amount > sum(allocations)`.
+     *
+     * Semantically this is distinct from invoice-level overpayment:
+     * - Invoice overpayment = allocation.amount > invoice.remaining, split
+     *   by the domain via OverpaymentService.
+     * - Unallocated surplus = the resident paid more than they chose to
+     *   assign to specific invoices. The excess is their credit balance.
+     *
+     * Both land in `unit_credit_ledger` with reference_type=PAYMENT and
+     * reference_id=payment.id, but the `reason` string marks which is
+     * which so ReversePayment and audit queries can distinguish.
+     */
+    async processUnallocatedSurplus(paymentId: string, unitId: string, amount: number): Promise<void> {
+        if (amount <= 0) return;
+
+        if (await this.hasExistingSurplusForPayment(paymentId)) {
+            console.log(
+                `[ProcessInvoiceOverpayment] Skipping unallocated surplus — existing entry for payment=${paymentId}`
+            );
+            return;
+        }
+
+        const creditEntry = new CreditLedgerEntry({
+            id: crypto.randomUUID(),
+            unit_id: unitId,
+            amount,
+            reason: `Excedente no asignado del pago ${paymentId}`,
+            reference_type: CreditLedgerReferenceType.PAYMENT,
+            reference_id: paymentId
+        });
+
+        console.log(
+            `[ProcessInvoiceOverpayment] Persisting unallocated surplus: id=${creditEntry.id} unit=${unitId} amount=${amount}`
+        );
+        await this.creditLedgerRepo.addCredit(creditEntry);
+        console.log(
+            `[ProcessInvoiceOverpayment] Unallocated surplus persisted successfully`
+        );
+    }
+
+    private async hasExistingSurplusForPayment(paymentId: string): Promise<boolean> {
+        const existing = await this.creditLedgerRepo.findByReferenceId(paymentId);
+        return existing.some(e =>
+            e.reference_type === CreditLedgerReferenceType.PAYMENT &&
+            e.reason.startsWith('Excedente no asignado')
+        );
+    }
 }
