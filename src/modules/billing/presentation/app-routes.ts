@@ -49,6 +49,8 @@ const BalanceSchema = t.Object({
     unit: t.String(),
     totalDebt: t.Number(),
     pendingInvoices: t.Number(),
+    creditBalance: t.Number(),
+    netBalance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 
