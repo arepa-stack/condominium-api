@@ -45,6 +45,11 @@ export class ProcessInvoiceOverpayment {
         }
 
         if (generatedCredit > 0) {
+            console.log(
+                `[ProcessInvoiceOverpayment] Overpayment detected: invoice=${invoice.id} ` +
+                `unit_id=${invoice.unit_id ?? 'NULL'} applied=${appliedToInvoice} credit=${generatedCredit}`
+            );
+
             if (!invoice.unit_id) {
                 // TODO(spec): building-level PETTY_CASH overpayment policy is
                 // undefined. The excess is currently dropped. Surface it so
@@ -60,6 +65,9 @@ export class ProcessInvoiceOverpayment {
                 // ApprovePayment short-circuit when the payment is already
                 // APPROVED (done in cd6daed). This guard prevents the remaining
                 // race case where two parallel retries beat the short-circuit.
+                console.log(
+                    `[ProcessInvoiceOverpayment] Skipping addCredit — existing entry found for payment=${dto.paymentId} invoice=${invoice.id}`
+                );
             } else {
                 const creditEntry = new CreditLedgerEntry({
                     id: crypto.randomUUID(),
@@ -69,8 +77,18 @@ export class ProcessInvoiceOverpayment {
                     reference_type: CreditLedgerReferenceType.PAYMENT,
                     reference_id: dto.paymentId
                 });
+                console.log(
+                    `[ProcessInvoiceOverpayment] Persisting credit entry: id=${creditEntry.id} unit=${creditEntry.unit_id} amount=${creditEntry.amount}`
+                );
                 await this.creditLedgerRepo.addCredit(creditEntry);
+                console.log(
+                    `[ProcessInvoiceOverpayment] Credit entry persisted successfully`
+                );
             }
+        } else {
+            console.log(
+                `[ProcessInvoiceOverpayment] No overpayment: invoice=${invoice.id} applied=${appliedToInvoice} credit=0`
+            );
         }
 
         const balance = invoice.unit_id ? await this.creditLedgerRepo.getBalanceForUnit(invoice.unit_id) : 0;

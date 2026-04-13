@@ -11,6 +11,15 @@ export class GetUserById {
     constructor(private userRepo: IUserRepository) { }
 
     async execute({ targetId, requesterId }: GetUserByIdRequest): Promise<User> {
+        // Accept the literal "me" shorthand from route params. Without this
+        // shortcut, a caller hitting /users/me against an /:id route sends
+        // the string "me" straight into findById and gets a Postgres
+        // "invalid input syntax for type uuid" error. Normalize early so
+        // every downstream path can assume targetId is a real identifier.
+        if (targetId === 'me') {
+            targetId = requesterId;
+        }
+
         const requester = await this.userRepo.findById(requesterId);
         if (!requester) {
             // Technically this might be 401 if we trusted the token, but here it's 404 in domain
