@@ -12,6 +12,7 @@ import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/en
 
 const makeApprovedPayment = (id = 'pay-1') => new Payment({
     id,
+    user_id: 'user-1',
     amount: 100,
     status: PaymentStatus.APPROVED,
     method: PaymentMethod.CASH,
@@ -71,7 +72,7 @@ describe('ReversePayment', () => {
 
         // Payment reaches REJECTED with REVERSED note.
         expect(paymentRepo.update).toHaveBeenCalled();
-        const updatedPayment = paymentRepo.update.mock.calls[0][0] as Payment;
+        const updatedPayment = (paymentRepo.update.mock.calls as unknown as Payment[][])[0][0];
         expect(updatedPayment.status).toBe(PaymentStatus.REJECTED);
         expect(updatedPayment.notes).toContain('REVERSED');
 
@@ -155,7 +156,7 @@ describe('ReversePayment', () => {
         });
 
         expect(creditLedgerRepo.deductCredit).toHaveBeenCalledTimes(1);
-        const debit = creditLedgerRepo.deductCredit.mock.calls[0][0] as CreditLedgerEntry;
+        const debit = (creditLedgerRepo.deductCredit.mock.calls as unknown as CreditLedgerEntry[][])[0][0];
         expect(debit.amount).toBe(-20);
         expect(debit.isDebit).toBe(true);
         expect(debit.reference_type).toBe(CreditLedgerReferenceType.REVERSAL);

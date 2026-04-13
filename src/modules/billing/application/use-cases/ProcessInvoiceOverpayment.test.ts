@@ -42,7 +42,7 @@ describe('ProcessInvoiceOverpayment', () => {
 
         // Verify credit ledger was called
         expect(mockCreditRepo.addCredit).toHaveBeenCalled();
-        const callArgs = mockCreditRepo.addCredit.mock.calls[0][0] as CreditLedgerEntry;
+        const callArgs = (mockCreditRepo.addCredit.mock.calls as unknown as CreditLedgerEntry[][])[0][0];
         expect(callArgs.amount).toBe(20);
         expect(callArgs.unit_id).toBe('unit-1');
         expect(callArgs.reference_id).toBe('pay-456');

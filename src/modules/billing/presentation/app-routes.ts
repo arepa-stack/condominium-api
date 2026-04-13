@@ -9,7 +9,7 @@ import { SupabaseCreditLedgerRepository } from '../infrastructure/repositories/S
 import { GetUnitBalance } from '../application/use-cases/GetUnitBalance';
 import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
-import { UnauthorizedError, NotFoundError } from '@/core/errors';
+import { UnauthorizedError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { UserRole, InvoiceTag } from '@/core/domain/enums';
 

@@ -3,20 +3,16 @@ import { LoadDebt } from "@/modules/billing/application/use-cases/LoadDebt";
 import { GetUnitBalance } from "@/modules/billing/application/use-cases/GetUnitBalance";
 import {
     createMockInvoiceRepository,
-    createMockAllocationRepository,
     createMockCreditLedgerRepository
 } from "../../mocks/repositories";
 import { Invoice, InvoiceStatus, InvoiceType } from "@/modules/billing/domain/entities/Invoice";
-import { PaymentAllocation } from "@/modules/billing/domain/entities/PaymentAllocation";
 
 describe("Billing Use Cases", () => {
     let mockInvoiceRepo: ReturnType<typeof createMockInvoiceRepository>;
-    let mockAllocRepo: ReturnType<typeof createMockAllocationRepository>;
     let mockCreditLedgerRepo: ReturnType<typeof createMockCreditLedgerRepository>;
 
     beforeEach(() => {
         mockInvoiceRepo = createMockInvoiceRepository();
-        mockAllocRepo = createMockAllocationRepository();
         mockCreditLedgerRepo = createMockCreditLedgerRepository();
     });
 
