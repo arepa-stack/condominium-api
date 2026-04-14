@@ -52,18 +52,19 @@ export class GetPettyCashTransparency {
             })
         ]);
 
-        // Index active invoices by unit_id for O(1) lookup. CANCELLED
-        // invoices are filtered out — a cancelled quota is not part of
-        // the collection target and shouldn't inflate/deflate the %.
-        // If a unit somehow has multiple active invoices for the same
-        // period (shouldn't happen under normal flows), the last one
-        // wins. TODO: consider throwing on duplicates once we know the
-        // data model guarantees it.
-        const byUnit = new Map<string, Invoice>();
+        // Aggregate active invoices by unit_id. A single unit may have
+        // multiple PETTY_CASH invoices in the same period when the
+        // overage grows in stages (see GenerateAssessments) — each
+        // invoice represents an incremental assessment tranche.
+        // CANCELLED invoices are excluded — a cancelled quota is not
+        // part of the collection target.
+        const byUnit = new Map<string, Invoice[]>();
         for (const inv of invoices) {
             if (inv.status === InvoiceStatus.CANCELLED) continue;
             if (!inv.unit_id) continue;
-            byUnit.set(inv.unit_id, inv);
+            const bucket = byUnit.get(inv.unit_id);
+            if (bucket) bucket.push(inv);
+            else byUnit.set(inv.unit_id, [inv]);
         }
 
         const unitsTransparency: TransparencyUnitDTO[] = [];
@@ -71,23 +72,39 @@ export class GetPettyCashTransparency {
         let totalCollected = 0;
 
         for (const unit of buildingUnits) {
-            const unitInvoice = byUnit.get(unit.id);
+            const unitInvoices = byUnit.get(unit.id);
 
-            if (unitInvoice) {
-                const expectedAmount = unitInvoice.amount;
-                // RN1 & RN5: cap contribution at quota. Overpayments
-                // flow to the credit ledger, not into the collection %.
-                const coveredAmount = Math.min(unitInvoice.paid_amount, expectedAmount);
+            if (unitInvoices && unitInvoices.length > 0) {
+                let expectedAmount = 0;
+                let coveredAmount = 0;
+                for (const inv of unitInvoices) {
+                    expectedAmount += inv.amount;
+                    // RN1 & RN5: cap contribution per-invoice. Overpayments
+                    // flow to the credit ledger, not into the collection %.
+                    coveredAmount += Math.min(inv.paid_amount, inv.amount);
+                }
 
                 totalToCollect += expectedAmount;
                 totalCollected += coveredAmount;
+
+                // Derive combined status: PAID only if every tranche is
+                // fully covered; PENDING only if nothing has been paid;
+                // PARTIAL otherwise.
+                let status: TransparencyUnitStatus;
+                if (coveredAmount >= expectedAmount) {
+                    status = InvoiceStatus.PAID;
+                } else if (coveredAmount <= 0) {
+                    status = InvoiceStatus.PENDING;
+                } else {
+                    status = InvoiceStatus.PARTIAL;
+                }
 
                 unitsTransparency.push({
                     unit_id: unit.id,
                     unit_name: unit.name,
                     expected_amount: expectedAmount,
                     covered_amount: coveredAmount,
-                    status: unitInvoice.status as TransparencyUnitStatus
+                    status
                 });
             } else {
                 unitsTransparency.push({
