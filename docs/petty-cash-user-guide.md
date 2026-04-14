@@ -177,7 +177,7 @@ Esto permite a la Junta tener una vision completa de todos los movimientos finan
    - Lo pendiente por cobrar
    - Cuanto le corresponde a cada unidad (division equitativa)
 
-**Ejemplo**:
+**Ejemplo simple**:
 - Ingresos totales: $16,000
 - Gastos totales: $23,000
 - Balance del fondo: $0
@@ -186,13 +186,25 @@ Esto permite a la Junta tener una vision completa de todos los movimientos finan
 - Pendiente: $7,000
 - Unidades: 10 → $700 por unidad
 
+**Ejemplo con residuo (division no exacta)**:
+- Pendiente: $100
+- Unidades: 3
+- Distribucion: $33.34 + $33.33 + $33.33 = $100.00 exacto
+  (la primera unidad absorbe el centavo de residuo, asi el total
+  cierra siempre al centavo sin sobrar ni faltar)
+
 **Paso 2 — Generar las facturas**:
 1. Confirmar la generacion
 2. Se crea una factura PENDIENTE por cada unidad del edificio
 3. Las facturas aparecen con la etiqueta "Caja Chica" en la seccion de recibos
 4. Los residentes pueden ver estas facturas en su APK y reportar el pago
 
-**Nota**: Si no hay excedente pendiente, el sistema no permite generar facturas.
+**Notas**:
+- Si no hay excedente pendiente, el sistema no permite generar facturas.
+- Si el monto pendiente es tan bajo que no alcanza para dar al menos
+  $0.01 a cada unidad (ej. $0.08 entre 38 unidades), el sistema
+  rechaza la operacion. Es un monto que no puede repartirse
+  justamente y el boton queda deshabilitado en el admin web.
 
 ---
 

@@ -313,24 +313,41 @@ Preview:
 GET /api/v1/admin/petty-cash/funds/{buildingId}/assessments
 
 PreviewAssessments.execute(buildingId):
-  1. Obtener fondo y todas sus transacciones
-  2. Calcular:
-     - total_expenses = SUM(transactions type=EXPENSE)
-     - total_income = SUM(transactions type=INCOME)
-     - fund_balance = fund.current_balance
-     - total_overage = MAX(0, expenses - income - balance)
-  3. Obtener invoices PETTY_CASH con unit_id (ya cobrados a unidades)
-     - already_assessed = SUM(esos invoices)
-  4. pending_to_assess = MAX(0, overage - already_assessed)
-  5. Obtener unidades del edificio
-  6. per_unit = pending_to_assess / cantidad_unidades
-  7. Retorna desglose completo
+  NOTA: toda la aritmetica monetaria corre en centavos integer
+  (Math.round(n * 100)) para evitar drift de IEEE-754. Los floats
+  solo aparecen en los boundaries de entrada (lectura del repo) y
+  salida (DTO).
 
-Ejemplo:
+  1. Obtener fondo y todas sus transacciones
+  2. Calcular en centavos:
+     - expensesCents = SUM(transactions type=EXPENSE, en cents)
+     - incomeCents   = SUM(transactions type=INCOME,  en cents)
+     - fundBalanceCents = fund.current_balance en cents
+     - overageCents  = MAX(0, expenses - income - balance)
+  3. Obtener invoices PETTY_CASH con unit_id
+     - alreadyAssessedCents = SUM(invoices.amount en cents)
+  4. pendingCents = MAX(0, overage - already_assessed)
+  5. Clamp sub-centavo: si pendingCents < 1 → 0
+     (residuo contable de invoices legacy almacenadas como float)
+  6. Obtener unidades del edificio
+  7. Distribucion justa al centavo:
+     - base      = floor(pendingCents / unidades)
+     - remainder = pendingCents - base * unidades
+     - Las primeras `remainder` unidades reciben base+1 cent,
+       el resto recibe base. La sumatoria de unit amounts es
+       exactamente igual a pending_to_assess al centavo.
+  8. Retorna desglose completo (floats solo en el DTO)
+
+Ejemplo simple:
   Ingresos: $16,000 | Gastos: $23,000 | Balance: $0
   Overage: 23,000 - 16,000 - 0 = $7,000
   Ya cobrado: $0 | Pendiente: $7,000
   Unidades: 10 → $700 por unidad
+
+Ejemplo con residuo real:
+  Pending: $100 | Unidades: 3
+  pendingCents = 10000, base = 3333, remainder = 1
+  units = [33.34, 33.33, 33.33]  (suma = 100.00 exacto)
 ```
 
 ```
@@ -339,16 +356,21 @@ POST /api/v1/admin/petty-cash/funds/{buildingId}/assessments
 
 GenerateAssessments.execute(buildingId):
   1. Ejecuta PreviewAssessments para calcular montos
-  2. Valida: pending_to_assess > 0 (sino → 400)
-  3. Valida: units.length > 0 (sino → 400)
-  4. Por cada unidad, crea Invoice:
+  2. Valida: pending_to_assess > 0 (sino → 400 NO_PENDING_OVERAGE)
+  3. Valida: units.length > 0 (sino → 400 NO_UNITS)
+  4. Valida: pendingCents >= units.length
+     (necesita al menos 1 centavo por unidad — sino → 400
+      AMOUNT_TOO_SMALL_TO_DISTRIBUTE). Previene emitir facturas de
+     monto 0 o concentrar el residuo en una sola unidad.
+  5. Por cada unidad con amount > 0, crea Invoice:
      - unit_id = unidad, building_id = edificio
      - tag = PETTY_CASH, type = EXPENSE
      - status = PENDING
      - description = "Cuota reposicion caja chica - YYYY-MM"
-     - amount = pending_to_assess / cantidad_unidades
-  5. Guarda todos los invoices via createBatch
-  6. Retorna lista con invoice_id por unidad
+     - amount = el monto calculado por PreviewAssessments
+       (ya con la distribucion justa al centavo)
+  6. Guarda todos los invoices via createBatch
+  7. Retorna lista con invoice_id por unidad
 ```
 
 ---
