@@ -43,8 +43,20 @@ export class GenerateAssessments {
             );
         }
 
+        // Need at least 1 cent per unit, otherwise the distribution is
+        // meaningless: we'd either emit zero-amount invoices or
+        // concentrate the residue on a single unit.
+        const pendingCents = Math.round(preview.pending_to_assess * 100);
+        if (pendingCents < preview.units.length) {
+            throw new DomainError(
+                `Pending amount (${preview.pending_to_assess}) is too small to distribute across ${preview.units.length} units. Needs at least 1 cent per unit.`,
+                'AMOUNT_TOO_SMALL_TO_DISTRIBUTE',
+                400
+            );
+        }
+
         const period = new Date().toISOString().substring(0, 7);
-        const invoices: Invoice[] = [];
+        const invoicedUnits: { unit: typeof preview.units[number]; invoice: Invoice }[] = [];
 
         for (const unit of preview.units) {
             if (unit.amount <= 0) continue;
@@ -62,18 +74,20 @@ export class GenerateAssessments {
                 description: `Cuota reposición caja chica - ${period}`
             });
 
-            invoices.push(invoice);
+            invoicedUnits.push({ unit, invoice });
         }
 
-        const created = await this.invoiceRepo.createBatch(invoices);
+        const created = await this.invoiceRepo.createBatch(
+            invoicedUnits.map(x => x.invoice)
+        );
 
         return {
             building_id: buildingId,
             total_assessed: preview.pending_to_assess,
             invoices_created: created.length,
             invoices: created.map((inv, i) => ({
-                unit_id: preview.units[i].id,
-                unit_name: preview.units[i].name,
+                unit_id: invoicedUnits[i].unit.id,
+                unit_name: invoicedUnits[i].unit.name,
                 amount: inv.amount,
                 invoice_id: inv.id
             }))

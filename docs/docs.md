@@ -592,22 +592,33 @@ facturas a las unidades para cubrir el excedente.
 
 Preview:
 1. Board/Admin → GET /api/v1/admin/petty-cash/funds/{buildingId}/assessments
-2. El sistema calcula:
+2. El sistema calcula (toda la aritmética en centavos integer para
+   evitar drift de IEEE-754):
    - total_expenses: suma de todas las transacciones EXPENSE
    - total_income: suma de todas las transacciones INCOME
    - fund_balance: balance actual del fondo
    - total_overage: gastos - ingresos - balance = excedente real
    - already_assessed: lo ya cobrado a unidades (invoices PETTY_CASH con unit_id)
    - pending_to_assess: excedente - ya cobrado = pendiente por cobrar
-   - units: lista de unidades con el monto que le corresponde a cada una (split igual)
+     (si el residuo es menor a 1 centavo, se clampea a 0 — es ruido
+     contable de invoices legacy almacenadas como float)
+   - units: lista de unidades con el monto que le corresponde a cada
+     una. La distribución es justa al centavo: las primeras
+     `remainder` unidades reciben 1 centavo extra, de modo que la
+     sumatoria de unit amounts coincide exactamente con pending_to_assess.
 
 Generar facturas:
 1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/assessments
 2. Se crea un invoice PENDING por cada unidad del edificio:
    - tag = PETTY_CASH, type = EXPENSE, status = PENDING
-   - amount = pending_to_assess / cantidad de unidades
+   - amount = el monto calculado por el preview (distribución justa al centavo)
    - description = "Cuota reposición caja chica - YYYY-MM"
-3. Retorna 400 si no hay excedente pendiente o no hay unidades
+3. Retorna 400 si:
+   - no hay excedente pendiente (NO_PENDING_OVERAGE)
+   - no hay unidades en el edificio (NO_UNITS)
+   - el pendiente no alcanza para dar al menos 1 centavo a cada
+     unidad (AMOUNT_TOO_SMALL_TO_DISTRIBUTE) — previene emitir
+     facturas de $0 o concentrar el residuo en una sola unidad
 4. Los invoices generados aparecen filtrados con tag=PETTY_CASH
 ```
 
