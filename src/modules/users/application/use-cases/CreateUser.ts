@@ -14,6 +14,8 @@ export interface CreateUserDTO {
     unit_id?: string;
     building_id?: string; // Optional building for initial role
     password?: string;    // Required for auth creation
+    /** Cargo en la junta cuando `role` es BOARD (Presidente, Tesorero, etc.) */
+    board_position?: string;
 }
 
 export class CreateUser {

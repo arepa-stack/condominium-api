@@ -25,6 +25,7 @@ const BoardMemberSchema = t.Object({
     photo_url: t.Union([t.String(), t.Null()]),
     is_active: t.Boolean(),
     is_current_board: t.Boolean(),
+    profile_id: t.Optional(t.Union([t.String(), t.Null()])),
     created_at: t.Optional(t.Any()),
     updated_at: t.Optional(t.Any()),
 });

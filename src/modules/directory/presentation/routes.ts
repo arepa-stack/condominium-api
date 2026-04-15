@@ -12,11 +12,13 @@ import { CreateResidentialWorker } from '../application/use-cases/CreateResident
 import { UpdateResidentialWorker } from '../application/use-cases/UpdateResidentialWorker';
 import { DeleteResidentialWorker } from '../application/use-cases/DeleteResidentialWorker';
 import { GetResidentialWorkersByBuilding } from '../application/use-cases/GetResidentialWorkersByBuilding';
+import { SupabaseUserRepository } from '@/modules/users/infrastructure/repositories/SupabaseUserRepository';
 
 const boardMemberRepo = new SupabaseBoardMemberRepository();
 const workerRepo = new SupabaseResidentialWorkerRepository();
+const directoryUserRepo = new SupabaseUserRepository();
 
-const createBoardMember = new CreateBoardMember(boardMemberRepo);
+const createBoardMember = new CreateBoardMember(boardMemberRepo, directoryUserRepo);
 const updateBoardMember = new UpdateBoardMember(boardMemberRepo);
 const deleteBoardMember = new DeleteBoardMember(boardMemberRepo);
 const getBoardMembersByBuilding = new GetBoardMembersByBuilding(boardMemberRepo);
@@ -38,6 +40,7 @@ const BoardMemberSchema = t.Object({
     photo_url: t.Union([t.String(), t.Null()]),
     is_active: t.Boolean(),
     is_current_board: t.Boolean(),
+    profile_id: t.Optional(t.Union([t.String(), t.Null()])),
     created_at: t.Optional(t.Any()),
     updated_at: t.Optional(t.Any()),
 });
@@ -104,18 +107,20 @@ export const directoryAdminRoutes = new Elysia({ prefix: '/directory' })
             apartment_number: body.apartment_number,
             photo_url: body.photo_url,
             is_current_board: body.is_current_board,
+            profile_id: body.profile_id,
         });
         return created.toJSON();
     }, {
         body: t.Object({
-            first_name: t.String({ minLength: 1 }),
-            last_name: t.String({ minLength: 1 }),
+            first_name: t.Optional(t.String({ minLength: 1 })),
+            last_name: t.Optional(t.String({ minLength: 1 })),
             role: t.String({ minLength: 1 }),
             phone: t.Optional(t.Union([t.String(), t.Null()])),
             email: t.Optional(t.Union([t.String(), t.Null()])),
             apartment_number: t.Optional(t.Union([t.String(), t.Null()])),
             photo_url: t.Optional(t.Union([t.String(), t.Null()])),
             is_current_board: t.Optional(t.Boolean()),
+            profile_id: t.Optional(t.Union([t.String(), t.Null()])),
         }),
         response: BoardMemberSchema,
         detail: {
@@ -137,6 +142,7 @@ export const directoryAdminRoutes = new Elysia({ prefix: '/directory' })
             photo_url: body.photo_url,
             is_active: body.is_active,
             is_current_board: body.is_current_board,
+            profile_id: body.profile_id,
         });
         return updated.toJSON();
     }, {
@@ -150,6 +156,7 @@ export const directoryAdminRoutes = new Elysia({ prefix: '/directory' })
             photo_url: t.Optional(t.Union([t.String(), t.Null()])),
             is_active: t.Optional(t.Boolean()),
             is_current_board: t.Optional(t.Boolean()),
+            profile_id: t.Optional(t.Union([t.String(), t.Null()])),
         }),
         response: BoardMemberSchema,
         detail: {

@@ -9,6 +9,12 @@ import { ApproveUser } from '../application/use-cases/ApproveUser';
 import { DeleteUser } from '../application/use-cases/DeleteUser';
 import { UnauthorizedError } from '@/core/errors';
 import { supabase } from '@/infrastructure/supabase';
+import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
+import { GetUserUnits } from '../application/use-cases/GetUserUnits';
+import { UpdateBuildingRole } from '../application/use-cases/UpdateBuildingRole';
+import { SupabaseBoardMemberRepository } from '@/modules/directory/infrastructure/repositories/SupabaseBoardMemberRepository';
+import { CreateBoardMember } from '@/modules/directory/application/use-cases/CreateBoardMember';
+import { DeactivateBoardMemberForProfile } from '@/modules/directory/application/use-cases/DeactivateBoardMemberForProfile';
 
 // Initialize Repository and Use Cases
 // In a real DI system context, these would be injected
@@ -21,14 +27,18 @@ const approveUser = new ApproveUser(userRepo);
 const deleteUser = new DeleteUser(userRepo);
 const createUser = new CreateUser(userRepo, authRepo);
 
-// New Phase 2 Use Cases
-import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
-import { GetUserUnits } from '../application/use-cases/GetUserUnits';
-import { UpdateBuildingRole } from '../application/use-cases/UpdateBuildingRole';
-
 const assignUnitToUser = new AssignUnitToUser(userRepo);
 const getUserUnits = new GetUserUnits(userRepo);
 const updateBuildingRole = new UpdateBuildingRole(userRepo);
+
+const boardMemberRepo = new SupabaseBoardMemberRepository();
+const createBoardMemberFromUser = new CreateBoardMember(boardMemberRepo, userRepo);
+const deactivateBoardMemberForProfile = new DeactivateBoardMemberForProfile(boardMemberRepo);
+
+function boardDirectoryRole(boardPosition?: string | null): string {
+    const t = boardPosition?.trim();
+    return t && t.length > 0 ? t : 'Miembro de la junta';
+}
 
 const UserUnitSchema = t.Object({
     unit_id: t.String(),
@@ -202,13 +212,21 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             buildingRole: body.building_role,
             isPrimary: body.is_primary ?? false
         });
+        if (body.building_role === 'board') {
+            await createBoardMemberFromUser.execute({
+                building_id: body.building_id,
+                profile_id: params.id,
+                role: boardDirectoryRole(body.board_position),
+            });
+        }
         return { success: true };
     }, {
         body: t.Object({
             unit_id: t.String(),
             building_id: t.String(),
             building_role: t.Optional(t.String()),
-            is_primary: t.Optional(t.Boolean())
+            is_primary: t.Optional(t.Boolean()),
+            board_position: t.Optional(t.String()),
         }),
         response: SuccessResponse,
         detail: {
@@ -217,17 +235,38 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             security: [{ BearerAuth: [] }]
         }
     })
-    .post('/:id/roles', async ({ params, body }) => {
+    .post('/:id/roles', async ({ user, params, body }) => {
+        const existingTarget = await getUserById.execute({
+            targetId: params.id,
+            requesterId: user.id,
+        });
+        const prevRole = existingTarget.buildingRoles.find(
+            (r) => r.building_id === body.building_id
+        )?.role;
+
         await updateBuildingRole.execute({
             userId: params.id,
             buildingId: body.building_id,
-            role: body.role
+            role: body.role,
+            board_position: body.board_position,
         });
-        return await getUserById.execute({ targetId: params.id, requesterId: params.id }); // Return updated user as requested
+
+        if (body.role === 'board') {
+            await createBoardMemberFromUser.execute({
+                building_id: body.building_id,
+                profile_id: params.id,
+                role: boardDirectoryRole(body.board_position),
+            });
+        } else if (prevRole === 'board') {
+            await deactivateBoardMemberForProfile.execute(params.id, body.building_id);
+        }
+
+        return await getUserById.execute({ targetId: params.id, requesterId: user.id });
     }, {
         body: t.Object({
             building_id: t.String(),
-            role: t.String()
+            role: t.String(),
+            board_position: t.Optional(t.String()),
         }),
         response: UserResponse,
         detail: {
@@ -237,15 +276,24 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         }
     })
     .post('/', async ({ body }) => {
-        return await createUser.execute({
+        const created = await createUser.execute({
             email: body.email,
             name: body.name,
             role: body.role as any,
             building_id: body.building_id,
             unit_id: body.unit_id,
             phone: body.phone,
-            password: body.password
+            password: body.password,
+            board_position: body.board_position,
         });
+        if (body.role === 'board' && body.building_id) {
+            await createBoardMemberFromUser.execute({
+                building_id: body.building_id,
+                profile_id: created.id,
+                role: boardDirectoryRole(body.board_position),
+            });
+        }
+        return created;
     }, {
         body: t.Object({
             email: t.String(),
@@ -254,7 +302,8 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             role: t.Union([t.Literal('admin'), t.Literal('board'), t.Literal('resident')]),
             building_id: t.String(),
             unit_id: t.Optional(t.String()),
-            phone: t.Optional(t.String())
+            phone: t.Optional(t.String()),
+            board_position: t.Optional(t.String()),
         }),
         response: UserResponse,
         detail: {

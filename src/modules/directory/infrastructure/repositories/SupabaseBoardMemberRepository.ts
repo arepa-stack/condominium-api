@@ -20,6 +20,7 @@ export class SupabaseBoardMemberRepository implements IBoardMemberRepository {
             photo_url: (row.photo_url as string) ?? null,
             is_active: row.is_active as boolean,
             is_current_board: row.is_current_board as boolean,
+            profile_id: (row.profile_id as string) ?? null,
             created_at: new Date(row.created_at as string),
             updated_at: new Date(row.updated_at as string),
         };
@@ -40,6 +41,7 @@ export class SupabaseBoardMemberRepository implements IBoardMemberRepository {
             photo_url: j.photo_url,
             is_active: j.is_active,
             is_current_board: j.is_current_board,
+            profile_id: j.profile_id ?? null,
             updated_at: j.updated_at,
         };
     }
@@ -58,6 +60,7 @@ export class SupabaseBoardMemberRepository implements IBoardMemberRepository {
             photo_url: j.photo_url,
             is_active: j.is_active,
             is_current_board: j.is_current_board,
+            profile_id: j.profile_id ?? null,
         };
 
         const { data, error } = await supabase.from('board_members').insert(row).select().single();
@@ -90,6 +93,28 @@ export class SupabaseBoardMemberRepository implements IBoardMemberRepository {
             if (error.code === 'PGRST116') return null;
             throw new DomainError('Error fetching board member', 'DB_ERROR', 500);
         }
+        return this.toDomain(data as Record<string, unknown>);
+    }
+
+    async findByProfileAndBuilding(
+        profileId: string,
+        buildingId: string
+    ): Promise<BoardMember | null> {
+        const { data, error } = await supabase
+            .from('board_members')
+            .select('*')
+            .eq('profile_id', profileId)
+            .eq('building_id', buildingId)
+            .maybeSingle();
+
+        if (error) {
+            throw new DomainError(
+                'Error fetching board member by profile: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        if (!data) return null;
         return this.toDomain(data as Record<string, unknown>);
     }
 

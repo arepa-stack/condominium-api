@@ -11,6 +11,7 @@ export interface IBoardMemberRepository {
     update(member: BoardMember): Promise<BoardMember>;
     findById(id: string): Promise<BoardMember | null>;
     findByBuildingId(buildingId: string, filters?: BoardMemberListFilters): Promise<BoardMember[]>;
+    findByProfileAndBuilding(profileId: string, buildingId: string): Promise<BoardMember | null>;
 }
 
 export interface ResidentialWorkerListFilters {

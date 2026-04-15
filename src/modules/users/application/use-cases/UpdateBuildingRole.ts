@@ -6,6 +6,8 @@ export interface UpdateBuildingRoleDTO {
     userId: string;
     buildingId: string;
     role: string;
+    /** Cargo en directorio de junta al asignar `board` (la capa HTTP lo usa al sincronizar `board_members`). */
+    board_position?: string;
 }
 
 export class UpdateBuildingRole {

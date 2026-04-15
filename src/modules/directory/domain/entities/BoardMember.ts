@@ -12,6 +12,8 @@ export interface BoardMemberProps {
     photo_url: string | null;
     is_active: boolean;
     is_current_board: boolean;
+    /** Vinculación opcional con `profiles.id` cuando el miembro es usuario del sistema. */
+    profile_id?: string | null;
     created_at?: Date;
     updated_at?: Date;
 }
@@ -82,6 +84,10 @@ export class BoardMember {
         return this.props.updated_at!;
     }
 
+    get profile_id(): string | null {
+        return this.props.profile_id ?? null;
+    }
+
     deactivate(): void {
         this.props.is_active = false;
         this.props.updated_at = new Date();
@@ -97,6 +103,7 @@ export class BoardMember {
         if (updates.photo_url !== undefined) this.props.photo_url = updates.photo_url;
         if (updates.is_active !== undefined) this.props.is_active = updates.is_active;
         if (updates.is_current_board !== undefined) this.props.is_current_board = updates.is_current_board;
+        if (updates.profile_id !== undefined) this.props.profile_id = updates.profile_id;
         this.props.updated_at = new Date();
         this.validate();
     }

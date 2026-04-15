@@ -12,6 +12,7 @@ export interface UpdateBoardMemberDTO {
     photo_url?: string | null;
     is_active?: boolean;
     is_current_board?: boolean;
+    profile_id?: string | null;
 }
 
 export class UpdateBoardMember {
@@ -32,6 +33,7 @@ export class UpdateBoardMember {
             photo_url: dto.photo_url,
             is_active: dto.is_active,
             is_current_board: dto.is_current_board,
+            profile_id: dto.profile_id,
         });
         return this.repo.update(existing);
     }
