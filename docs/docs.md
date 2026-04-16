@@ -1,7 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
-> **Última actualización**: 2026-04-13 — Refleja el estado post-PR `fix/invoices`.
-> Cambios arquitectónicos destacados: el dominio es dueño de `invoice.paid_amount` y del status (triggers de BD dropeados — "Camino 2"), estado `PARTIAL` funcional, dos canales de credit ledger (invoice-overpayment + unallocated surplus), P0 de seguridad en payments admin cerrado, y nuevos endpoints de reverse y petty cash transparency.
+> **Última actualización**: 2026-04-16 — Refleja el estado post-PR `feat/pagination-and-board-directory` (#19).
+> Cambios destacados de esta iteración: paginación en `/admin/billing/invoices` con metadata (`total`, `page`, `limit`, `totalPages`, `hasNextPage`, `hasPrevPage`), nuevo módulo **Directory** con endpoint de miembros de junta (`/directory/buildings/:id/board`) expuesto en APK y Web Admin, vista SQL `board_members_directory` con `DISTINCT ON` para evitar duplicados de profile, y fix de validación TypeBox permitiendo `null` en campos opcionales del schema de `Payment` (`reference`, `bank`, `proof_url`, `notes`, `building_id`).
+> Cambios arquitectónicos previos vigentes: el dominio es dueño de `invoice.paid_amount` y del status (triggers de BD dropeados — "Camino 2"), estado `PARTIAL` funcional, dos canales de credit ledger (invoice-overpayment + unallocated surplus), P0 de seguridad en payments admin cerrado, y endpoints de reverse y petty cash transparency.
 
 ## 1. Visión General
 
@@ -252,6 +253,24 @@ FROM unit_credit_ledger GROUP BY unit_id
 
 **Read-only**. El backend lee de `unit_credit_balance` para obtener el total actual y de `unit_credit_ledger` para el historial detallado.
 
+#### Directorio de Junta — Vista (`board_members_directory`)
+**Vista SQL** que consolida los miembros de junta (`building_members.role = 'board'`) con los datos de su perfil y la unidad asignada. Una fila por miembro: `DISTINCT ON (bm.id) ... ORDER BY bm.id, pu.created_at DESC` elige la unidad más recientemente asignada cuando el profile tiene varias vinculadas por `profile_units`. Si el profile no tiene unit asignada, las columnas `unit_*` quedan en NULL (el backend traduce eso en `unit: undefined`).
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `member_id` | UUID | ID de la fila en `building_members` |
+| `role` | TEXT | Siempre `'board'` (la vista filtra por ese rol) |
+| `building_id` | UUID | Edificio al que pertenece la membresía |
+| `profile_id` | UUID | ID del perfil |
+| `profile_name` | TEXT | Nombre del miembro |
+| `profile_email` | TEXT | Email del miembro |
+| `profile_phone` | TEXT (nullable) | Teléfono |
+| `unit_id` | UUID (nullable) | Unidad más recientemente asignada al miembro |
+| `unit_name` | TEXT (nullable) | Nombre/número de la unidad |
+| `unit_assigned_at` | TIMESTAMPTZ (nullable) | `profile_units.created_at` de la unidad elegida |
+
+**Grants**: `SELECT` concedido a `authenticated` y `service_role`.
+
 #### Lead (`leads`)
 Registros de personas interesadas en la aplicación (módulo de captación).
 
@@ -316,6 +335,7 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/buildings/:id` | GET | Buildings | Detalle de un edificio. Mirror del endpoint público. |
 | `/buildings/:id/units` | GET | Units | Listado de unidades de un edificio. Mirror del endpoint público. |
 | `/buildings/units/:id` | GET | Units | Detalle de una unidad. Mirror del endpoint público. |
+| `/directory/buildings/:id/board` | GET | Directory | Listado de miembros de junta del edificio (profile + unit asignada). Retorna array de `BoardMember`. Misma ruta se expone en Web Admin bajo `/api/v1/admin/directory/...`. |
 
 #### Rutas Web Admin — `/api/v1/admin/`
 **Exclusivas para Board y Admin.** Si un Resident intenta acceder, recibe 403. Toda la gestión administrativa se concentra aquí.
@@ -324,7 +344,7 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/billing/invoices?tag=` | GET | Todos los invoices (filtrable por tag: NORMAL, PETTY_CASH) |
+| `/billing/invoices?tag=&page=&limit=` | GET | Lista **paginada** de invoices. Query params: `page` (default `1`), `limit` (default `10`), `unit_id`, `building_id`, `status`, `period`, `year`, `user_id`, `tag` (NORMAL / PETTY_CASH). Response: `{ data: AdminInvoice[], metadata: { total, page, limit, totalPages, hasNextPage, hasPrevPage } }`. |
 | `/billing/invoices/preview` | POST | Pre-visualizar facturas desde Excel |
 | `/billing/invoices/confirm` | POST | Confirmar y cargar facturas desde Excel |
 | `/billing/debt` | POST | Cargar deuda manual a una unidad |
@@ -368,6 +388,12 @@ El grupo `/payments/admin/*` está gated por `.use(requireRole([ADMIN, BOARD]))`
 | `/buildings/:id` | PATCH | Actualizar edificio |
 | `/buildings/:id/units` | POST | Crear unidad individual |
 | `/buildings/:id/units/batch` | POST | Crear unidades en lote |
+
+**Directorio (Directory)** — disponible tanto en APK como en Web Admin (la ruta APK va sin el check de `requireRole`; la admin queda gated por `requireRole([ADMIN, BOARD])` a nivel del plugin):
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/directory/buildings/:id/board` | GET | Lista de miembros de junta (`role = 'board'` en `building_members`) de un edificio. Response: array de `{ member_id, role, building_id, profile: { id, name, email, phone? }, unit?: { id, name } }`. Lee de la vista `board_members_directory` — una fila por miembro (la `DISTINCT ON` elige la unidad más recientemente asignada por `profile_units.created_at DESC`). |
 
 **Usuarios (Admin - Users)**:
 
@@ -852,6 +878,10 @@ Relación caja chica → cobro a unidades:
   
 Relación pagos → crédito:
   Aprobación de pago con sobrepago → crea entrada en unit_credit_ledger
+
+Directorio de junta:
+  board_members_directory → VIEW sobre building_members + profiles + profile_units + units
+    (DISTINCT ON por member_id, pick la unidad más reciente)
 ```
 
 ---
