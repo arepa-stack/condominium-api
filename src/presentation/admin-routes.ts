@@ -16,6 +16,7 @@ import { paymentRoutes } from '@/modules/payments/presentation/routes';
 import { pettyCashRoutes } from '@/modules/petty-cash/presentation/routes';
 import { buildingAdminRoutes } from '@/modules/buildings/presentation/routes';
 import { userAdminRoutes } from '@/modules/users/presentation/routes';
+import { directoryAdminRoutes } from '@/modules/directory/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -23,4 +24,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(paymentRoutes)          // all payments + approve/reject
     .use(pettyCashRoutes)        // fund read + write + assessments
     .use(buildingAdminRoutes)    // create, update, delete buildings/units
-    .use(userAdminRoutes);       // user management, approve, roles
+    .use(userAdminRoutes)        // user management, approve, roles
+    .use(directoryAdminRoutes);  // building members directory

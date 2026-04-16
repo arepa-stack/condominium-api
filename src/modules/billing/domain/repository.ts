@@ -2,6 +2,7 @@ import { Invoice } from './entities/Invoice';
 import { PaymentAllocation } from './entities/PaymentAllocation';
 import { CreditLedgerEntry } from './entities/CreditLedgerEntry';
 import { InvoiceTag } from '@/core/domain/enums';
+import { PaginatedResult, PaginationFilters } from '@/core/domain/pagination';
 
 export interface AdminInvoiceResult {
     id: string;
@@ -40,7 +41,7 @@ export interface PaymentAllocationResult {
     };
 }
 
-export interface FindAllInvoicesFilters {
+export interface FindAllInvoicesFilters extends PaginationFilters {
     unit_id?: string;
     building_id?: string;
     user_id?: string;
@@ -54,8 +55,8 @@ export interface IInvoiceRepository {
     create(invoice: Invoice): Promise<Invoice>;
     findById(id: string): Promise<Invoice | null>;
     findAll(filters?: FindAllInvoicesFilters): Promise<Invoice[]>;
-    findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]>;
-    findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]>;
+    findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>>;
+    findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>>;
     update(invoice: Invoice): Promise<Invoice>;
     createBatch(invoices: Invoice[]): Promise<Invoice[]>;
 }

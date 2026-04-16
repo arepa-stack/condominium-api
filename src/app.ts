@@ -38,7 +38,8 @@ export const app = new Elysia()
                 { name: 'Admin - Payments', description: 'Payments — Web Admin (Board + Admin)' },
                 { name: 'Admin - Petty Cash', description: 'Petty Cash — Web Admin (Board + Admin)' },
                 { name: 'Admin - Buildings', description: 'Buildings — Web Admin (Board + Admin)' },
-                { name: 'Admin - Users', description: 'User management — Web Admin (Board + Admin)' }
+                { name: 'Admin - Users', description: 'User management — Web Admin (Board + Admin)' },
+                { name: 'Directory', description: 'Building members and board directory' }
             ],
             components: {
                 securitySchemes: {
