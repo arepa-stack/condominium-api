@@ -12,9 +12,11 @@ import { billingAppRoutes } from '@/modules/billing/presentation/app-routes';
 import { paymentAppRoutes } from '@/modules/payments/presentation/routes';
 import { pettyCashAppRoutes } from '@/modules/petty-cash/presentation/routes';
 import { userAppRoutes } from '@/modules/users/presentation/routes';
+import { directoryRoutes } from '@/modules/directory/presentation/routes';
 
 export const appRoutes = new Elysia({ prefix: '/api/v1/app' })
     .use(billingAppRoutes)     // invoices, balance, credit (read + filtered by own unit)
     .use(paymentAppRoutes)     // payment history, summary, report payment
     .use(pettyCashAppRoutes)   // fund balance + transaction history (read-only)
-    .use(userAppRoutes);       // /users/me — get and update own profile
+    .use(userAppRoutes)        // /users/me — get and update own profile
+    .use(directoryRoutes);     // building board members directory

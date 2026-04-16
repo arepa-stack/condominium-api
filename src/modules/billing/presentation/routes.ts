@@ -96,6 +96,18 @@ const BalanceSchema = t.Object({
     details: t.Array(BalanceDetailSchema)
 });
 
+const PaginatedAdminInvoiceSchema = t.Object({
+    data: t.Array(AdminInvoiceSchema),
+    metadata: t.Object({
+        total: t.Number(),
+        page: t.Number(),
+        limit: t.Number(),
+        totalPages: t.Number(),
+        hasNextPage: t.Boolean(),
+        hasPrevPage: t.Boolean()
+    })
+});
+
 export const billingRoutes = new Elysia({ prefix: '/billing' })
     .derive(async ({ request }) => {
         const authHeader = request.headers.get('Authorization');
@@ -153,6 +165,8 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         });
     }, {
         query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Numeric()),
             unit_id: t.Optional(t.String()),
             building_id: t.Optional(t.String()),
             status: t.Optional(t.String()),
@@ -165,7 +179,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 t.Literal(InvoiceTag.PETTY_CASH)
             ]))
         }),
-        response: t.Array(AdminInvoiceSchema),
+        response: PaginatedAdminInvoiceSchema,
         detail: {
             tags: ['Admin - Billing'],
             summary: 'List all invoices with filters (Admin)',

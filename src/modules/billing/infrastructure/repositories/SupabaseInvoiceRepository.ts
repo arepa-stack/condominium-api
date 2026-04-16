@@ -1,4 +1,5 @@
 import { IInvoiceRepository, FindAllInvoicesFilters, AdminInvoiceResult } from '../../domain/repository';
+import { PaginatedResult } from '@/core/domain/pagination';
 import { Invoice, InvoiceProps, InvoiceStatus, InvoiceType } from '../../domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
@@ -179,41 +180,30 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
     }
 
     // Admin view with joins
-    async findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]> {
-        // We select invoice fields + unit details + profile details (via profile_units? No, invoices map to units. Units map to... profiles?
-        // Wait, User <-> Unit is N:N via profile_units.
-        // Who acts as the "User" for an invoice? The Invoice is on the Unit.
-        // Usually we want to show the "Owner" or "Resident" of that unit.
-        // We can join units -> profile_units -> profiles.
-        // We filter profile_units where role = 'owner' specifically? Or just list all assigned.
-        // User request: "user": { "id": "...", "name": "Juan Pérez" }
-        // We'll pick the PRIMARY owner or the first assigned user if no primary.
+    async findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>> {
+        const limit = filters?.limit || 10;
+        const page = filters?.page || 1;
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
 
-        // Supabase Query:
-        // invoices (*), units (id, name, building_id), profile_units (is_primary, profiles (id, name))
-
-        // Use left join on units so PETTY_CASH invoices without unit_id are included
-        let query = supabase
-            .from('invoices')
-            .select(`
-                *,
-                units (
-                    id,
-                    name,
-                    building_id,
-                    profile_units (
-                        is_primary,
-                        profiles (id, name, email)
-                    )
+        const selectStr = `
+            *,
+            units (
+                id,
+                name,
+                building_id,
+                profile_units (
+                    is_primary,
+                    profiles (id, name, email)
                 )
-            `)
-            .order('created_at', { ascending: false });
+            )
+        `;
 
-        if (filters?.unit_id) query = query.eq('unit_id', filters.unit_id);
+        let data: any[] = [];
+        let total = 0;
 
         if (filters?.building_id && !filters?.unit_id) {
-            // Supabase .or() doesn't support joined table columns.
-            // Split into two queries and merge results.
+            // Complex case mapping to building_id or joined unit's building_id
             const applyCommonFilters = (q: any) => {
                 if (filters?.status) q = q.eq('status', filters.status);
                 if (filters?.period) q = q.eq('period', filters.period);
@@ -222,46 +212,65 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                 return q;
             };
 
-            const selectStr = `*, units (id, name, building_id, profile_units (is_primary, profiles (id, name, email)))`;
-
-            let q1 = supabase.from('invoices').select(selectStr)
-                .eq('building_id', filters.building_id)
-                .order('created_at', { ascending: false });
+            let q1 = supabase.from('invoices').select(selectStr).eq('building_id', filters.building_id);
             q1 = applyCommonFilters(q1);
 
             let q2 = supabase.from('invoices').select(selectStr)
                 .not('unit_id', 'is', null)
-                .eq('units.building_id', filters.building_id)
-                .order('created_at', { ascending: false });
+                .eq('units.building_id', filters.building_id);
             q2 = applyCommonFilters(q2);
 
             const [r1, r2] = await Promise.all([q1, q2]);
-            if (r1.error) throw new DomainError('Error fetching admin invoices: ' + r1.error.message, 'DB_ERROR', 500);
-            if (r2.error) throw new DomainError('Error fetching admin invoices: ' + r2.error.message, 'DB_ERROR', 500);
+            if (r1.error) throw new DomainError('Error fetching admin invoices (q1): ' + r1.error.message, 'DB_ERROR', 500);
+            if (r2.error) throw new DomainError('Error fetching admin invoices (q2): ' + r2.error.message, 'DB_ERROR', 500);
 
             const seen = new Set<string>();
-            const data = [...(r1.data || []), ...(r2.data || [])].filter(d => {
+            const merged = [...(r1.data || []), ...(r2.data || [])].filter(d => {
                 if (seen.has(d.id)) return false;
                 seen.add(d.id);
                 return true;
             });
 
-            return (data || []).map((inv) => this.toAdminResult(inv));
+            // Re-apply sorting by created_at desc (merged results might lose order)
+            merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+            total = merged.length;
+            data = merged.slice(from, from + limit);
+        } else {
+            // Simple case
+            let query = supabase
+                .from('invoices')
+                .select(selectStr, { count: 'exact' })
+                .order('created_at', { ascending: false });
+
+            if (filters?.unit_id) query = query.eq('unit_id', filters.unit_id);
+            if (filters?.building_id) query = query.eq('building_id', filters.building_id);
+            if (filters?.status) query = query.eq('status', filters.status);
+            if (filters?.period) query = query.eq('period', filters.period);
+            if (filters?.tag) query = query.eq('tag', filters.tag);
+            if (filters?.user_id) query = query.eq('units.profile_units.profiles.id', filters.user_id);
+
+            const { data: qData, count, error } = await query.range(from, to);
+            if (error) throw new DomainError('Error fetching admin invoices: ' + error.message, 'DB_ERROR', 500);
+
+            data = qData || [];
+            total = count || 0;
         }
 
-        if (filters?.building_id) query = query.eq('building_id', filters.building_id);
-        if (filters?.status) query = query.eq('status', filters.status);
-        if (filters?.period) query = query.eq('period', filters.period);
-        if (filters?.tag) query = query.eq('tag', filters.tag);
+        const items = data.map((inv) => this.toAdminResult(inv));
+        const totalPages = Math.ceil(total / limit);
 
-        if (filters?.user_id) {
-            query = query.eq('units.profile_units.profiles.id', filters.user_id);
-        }
-
-        const { data, error } = await query;
-        if (error) throw new DomainError('Error fetching admin invoices: ' + error.message, 'DB_ERROR', 500);
-
-        return (data || []).map((inv) => this.toAdminResult(inv));
+        return {
+            data: items,
+            metadata: {
+                total,
+                page,
+                limit,
+                totalPages,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            }
+        };
     }
 
     private toAdminResult(inv: any): AdminInvoiceResult {
@@ -301,7 +310,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
         };
     }
 
-    async findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<AdminInvoiceResult[]> {
+    async findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>> {
         return this.findInvoicesForAdmin({ ...filters, building_id: buildingId });
     }
 }
