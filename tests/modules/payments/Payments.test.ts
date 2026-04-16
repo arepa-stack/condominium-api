@@ -19,16 +19,21 @@ describe("Payments Use Cases", () => {
     });
 
     describe("RegisterPayment", () => {
+        const validTransferDto = () => ({
+            userId: "user-1",
+            unitId: "unit-1",
+            amount: 100,
+            method: PaymentMethod.TRANSFER,
+            paymentDate: new Date(),
+            reference: "REF-123",
+            bank: "Banesco",
+            proofUrl: "https://storage/proof.jpg"
+        });
+
         test("should register a payment without allocation", async () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
-            const result = await useCase.execute({
-                userId: "user-1",
-                unitId: "unit-1",
-                amount: 100,
-                method: PaymentMethod.TRANSFER,
-                paymentDate: new Date(),
-            });
+            const result = await useCase.execute(validTransferDto());
 
             expect(mockPaymentRepo.create).toHaveBeenCalled();
             expect(result.amount).toBe(100);
@@ -44,11 +49,7 @@ describe("Payments Use Cases", () => {
             });
 
             await useCase.execute({
-                userId: "user-1",
-                unitId: "unit-1",
-                amount: 100,
-                method: PaymentMethod.TRANSFER,
-                paymentDate: new Date(),
+                ...validTransferDto(),
                 allocations: [{ invoiceId: "inv-1", amount: 50 }]
             });
 
@@ -59,13 +60,75 @@ describe("Payments Use Cases", () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
             expect(useCase.execute({
-                userId: "user-1",
-                unitId: "unit-1",
-                amount: 100,
-                method: PaymentMethod.TRANSFER,
-                paymentDate: new Date(),
+                ...validTransferDto(),
                 allocations: [{ invoiceId: "inv-1", amount: 150 }]
             })).rejects.toThrow("Allocated amount cannot exceed payment amount");
+        });
+
+        test("should throw FUTURE_DATE if paymentDate is after now", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+            const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+            expect(useCase.execute({
+                ...validTransferDto(),
+                paymentDate: tomorrow
+            })).rejects.toThrow("Payment date cannot be in the future");
+        });
+
+        test("should throw MISSING_PROOF if proofUrl is absent", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+
+            expect(useCase.execute({
+                ...validTransferDto(),
+                proofUrl: undefined
+            })).rejects.toThrow("Payment proof is required");
+        });
+
+        test("should throw MISSING_BANK_INFO for TRANSFER without reference", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+
+            expect(useCase.execute({
+                ...validTransferDto(),
+                reference: undefined
+            })).rejects.toThrow("Reference is required");
+        });
+
+        test("should throw MISSING_BANK_INFO for PAGO_MOVIL without bank", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+
+            expect(useCase.execute({
+                ...validTransferDto(),
+                method: PaymentMethod.PAGO_MOVIL,
+                bank: undefined
+            })).rejects.toThrow("Bank is required");
+        });
+
+        test("should register CASH payment without reference/bank (only proof required)", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+
+            const result = await useCase.execute({
+                userId: "user-1",
+                unitId: "unit-1",
+                amount: 50,
+                method: PaymentMethod.CASH,
+                paymentDate: new Date(),
+                proofUrl: "https://storage/cash-receipt.jpg"
+            });
+
+            expect(result.amount).toBe(50);
+            expect(mockPaymentRepo.create).toHaveBeenCalled();
+        });
+
+        test("should throw MISSING_PROOF for CASH without proof", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+
+            expect(useCase.execute({
+                userId: "user-1",
+                unitId: "unit-1",
+                amount: 50,
+                method: PaymentMethod.CASH,
+                paymentDate: new Date()
+            })).rejects.toThrow("Payment proof is required");
         });
     });
 

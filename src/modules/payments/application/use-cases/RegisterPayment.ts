@@ -38,6 +38,9 @@ export class RegisterPayment {
 
     async execute(dto: RegisterPaymentDTO): Promise<Payment> {
         this.validateAmount(dto.amount);
+        this.validatePaymentDate(dto.paymentDate);
+        this.validateProof(dto.proofUrl);
+        this.validateBankFields(dto);
         this.validateAllocations(dto);
 
         const payment = this.initializePayment(dto);
@@ -51,6 +54,39 @@ export class RegisterPayment {
     private validateAmount(amount: number): void {
         if (amount <= 0) {
             throw new DomainError('Payment amount must be positive', 'VALIDATION_ERROR', 400);
+        }
+    }
+
+    private validatePaymentDate(paymentDate: Date): void {
+        if (!(paymentDate instanceof Date) || isNaN(paymentDate.getTime())) {
+            throw new DomainError('Payment date is invalid', 'VALIDATION_ERROR', 400);
+        }
+        if (paymentDate.getTime() > Date.now()) {
+            throw new DomainError('Payment date cannot be in the future', 'FUTURE_DATE', 400);
+        }
+    }
+
+    private validateProof(proofUrl?: string): void {
+        if (!proofUrl || proofUrl.trim().length === 0) {
+            throw new DomainError('Payment proof is required', 'MISSING_PROOF', 400);
+        }
+    }
+
+    private validateBankFields(dto: RegisterPaymentDTO): void {
+        if (dto.method === PaymentMethod.CASH) return;
+        if (!dto.reference || dto.reference.trim().length === 0) {
+            throw new DomainError(
+                'Reference is required for PAGO_MOVIL and TRANSFER payments',
+                'MISSING_BANK_INFO',
+                400
+            );
+        }
+        if (!dto.bank || dto.bank.trim().length === 0) {
+            throw new DomainError(
+                'Bank is required for PAGO_MOVIL and TRANSFER payments',
+                'MISSING_BANK_INFO',
+                400
+            );
         }
     }
 
