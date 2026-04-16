@@ -331,6 +331,10 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/payments` | POST | App - Payments | Reportar pago con comprobante. `allocations[]` es un array de intenciones explícitas — cada entrada dice "aplicar N a esta invoice"; el excedente entre `payment.amount` y `sum(allocations)` se convierte en credit. |
 | `/petty-cash/funds/:buildingId` | GET | App - Petty Cash | Balance caja chica (lectura) |
 | `/petty-cash/funds/:buildingId/transactions` | GET | App - Petty Cash | Historial de movimientos (lectura) |
+| `/buildings` | GET | Buildings | Lista de edificios disponibles. Mirror del endpoint público — expuesto también bajo `/api/v1/app/` para que el cliente APK autenticado no salga del prefijo. |
+| `/buildings/:id` | GET | Buildings | Detalle de un edificio. Mirror del endpoint público. |
+| `/buildings/:id/units` | GET | Units | Listado de unidades de un edificio. Mirror del endpoint público. |
+| `/buildings/units/:id` | GET | Units | Detalle de una unidad. Mirror del endpoint público. |
 | `/directory/buildings/:id/board` | GET | Directory | Listado de miembros de junta del edificio (profile + unit asignada). Retorna array de `BoardMember`. Misma ruta se expone en Web Admin bajo `/api/v1/admin/directory/...`. |
 
 #### Rutas Web Admin — `/api/v1/admin/`
