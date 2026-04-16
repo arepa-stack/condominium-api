@@ -16,7 +16,8 @@
     "db:migration:new": "supabase migration new",
     "db:migration:up": "supabase db push",
     "db:reset": "supabase db reset",
-    "db:diff": "supabase db diff -f"
+    "db:diff": "supabase db diff -f",
+    "seed:admin": "bun run database/seeds/create-admin.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
