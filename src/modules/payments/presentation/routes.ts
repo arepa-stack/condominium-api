@@ -247,16 +247,25 @@ function createUserRoutes(tag: string) {
         return payment.toJSON();
     }, {
         body: t.Object({
-            amount: t.Union([t.Number(), t.String()], { minimum: 0, examples: [50.00, '75.50', 100] }),
-            date: t.String({ examples: ['2026-01-15', '2026-01-29'] }),
+            amount: t.Union([t.Number(), t.String()], { exclusiveMinimum: 0, examples: [50.00, '75.50', 100] }),
+            date: t.String({
+                pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+                examples: ['2026-01-15', '2026-01-29'],
+                description: 'Payment date in ISO-8601 YYYY-MM-DD format. Must not be in the future.'
+            }),
             method: t.Union([
                 t.Literal('PAGO_MOVIL'),
                 t.Literal('TRANSFER'),
                 t.Literal('CASH')
             ], { examples: ['PAGO_MOVIL'] }),
+            // reference + bank are required for PAGO_MOVIL / TRANSFER.
+            // Keeping them optional at the schema layer so multipart parsing stays
+            // flat; the RegisterPayment use case enforces the per-method rule.
             reference: t.Optional(t.String({ examples: ['123456789', 'REF-2024-001'] })),
             bank: t.Optional(t.String({ examples: ['Banco de Venezuela', 'Banesco', 'Mercantil'] })),
-            proof_image: t.Optional(t.File()),
+            proof_image: t.File({
+                description: 'Proof image. Required for ALL methods (PAGO_MOVIL/TRANSFER: bank receipt; CASH: photo of the cash receipt).'
+            }),
             building_id: t.Optional(t.String()),
             unit_id: t.Optional(t.String()),
             notes: t.Optional(t.String()),

@@ -513,10 +513,25 @@ CANCELLED → (terminal — ninguna transición)
 
 **Modelo de allocations**: una `PaymentAllocation` es una **intención explícita** — "aplicar N unidades de este pago a esta invoice". No es una fracción que el backend divida. El cliente (APK / Web Admin) decide cómo distribuir el pago entre las invoices, y la suma de allocations **puede ser menor** que `payment.amount`. La diferencia = **unallocated surplus** → credit automático a la unit.
 
+**Contrato de entrada (`POST /payments`, multipart/form-data)**:
+
+| Campo | Tipo | Requerido | Regla |
+|---|---|---|---|
+| `amount` | number \| string | sí | `exclusiveMinimum: 0` — no acepta `0` ni negativos |
+| `date` | string | sí | ISO-8601 `YYYY-MM-DD` (pattern enforced). **No puede ser futura**: `date > now` → 400 `FUTURE_DATE` |
+| `method` | literal | sí | `PAGO_MOVIL` \| `TRANSFER` \| `CASH` |
+| `reference` | string | sí para `PAGO_MOVIL` / `TRANSFER`, ignorado en `CASH` | Enforced en el use case → 400 `MISSING_BANK_INFO` si falta |
+| `bank` | string | sí para `PAGO_MOVIL` / `TRANSFER`, ignorado en `CASH` | Enforced en el use case → 400 `MISSING_BANK_INFO` si falta |
+| `proof_image` | file | sí **para todos los métodos** | PAGO_MOVIL/TRANSFER: captura bancaria. CASH: foto del recibo. Enforced en el schema + use case → 400 `MISSING_PROOF` si falta |
+| `unit_id` | string | no | Se infiere del `primary unit` del residente si falta |
+| `building_id` | string | no | Se infiere del unit si falta |
+| `notes` | string | no | |
+| `allocations` | array | no | Lista de `{ invoice_id, amount }` positivos. `sum(allocations) <= payment.amount` o 400. Sin allocations → todo va a credit |
+
 ```
 1. Residente reporta pago → POST /payments
-   Body (multipart): amount, date, method, reference, bank, proof_image?, unit_id?,
-                     building_id?, notes?, allocations?
+   Body (multipart): amount, date, method, proof_image, reference?, bank?,
+                     unit_id?, building_id?, notes?, allocations?
    - payment.amount = monto total que el residente entregó.
    - allocations[] = lista de asignaciones explícitas { invoice_id, amount }.
    - Validación: sum(allocations.amount) <= payment.amount. Positivos obligatorios.
