@@ -3,7 +3,7 @@ import { UserUnit } from '../../domain/entities/UserUnit';
 import { BuildingRole } from '../../domain/entities/BuildingRole';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { UserRole, UserStatus, AppRole } from '@/core/domain/enums';
 import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
 
 export class SupabaseUserRepository implements IUserRepository {
@@ -19,6 +19,7 @@ export class SupabaseUserRepository implements IUserRepository {
             units: units,
             buildingRoles: buildingRoles,
             role: data.role as UserRole,
+            app_role: (data.app_role ?? undefined) as AppRole | undefined,
             status: data.status as UserStatus || UserStatus.PENDING,
             created_at: new Date(data.created_at),
             updated_at: new Date(data.updated_at),
@@ -27,12 +28,16 @@ export class SupabaseUserRepository implements IUserRepository {
     }
 
     private toPersistence(user: User): any {
+        // Dual-write during transition: keep legacy `role` in sync with `app_role`
+        // so RLS helpers and any code still reading profiles.role keep working
+        // until Phase 4 drops the legacy column.
         return {
             id: user.id,
             email: user.email,
             name: user.name,
             phone: user.phone,
             role: user.role,
+            app_role: user.app_role,
             status: user.status,
             updated_at: user.updated_at
         };
@@ -47,7 +52,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .insert(persistenceData)
-            .select('id, email, name, phone, role, status, created_at, updated_at')
+            .select('id, email, name, phone, role, app_role, status, created_at, updated_at')
             .single();
 
         if (error) {
@@ -70,7 +75,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, role, status, created_at, updated_at, 
+                id, email, name, phone, role, app_role, status, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -90,7 +95,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, role, status, created_at, updated_at, 
+                id, email, name, phone, role, app_role, status, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -179,7 +184,7 @@ export class SupabaseUserRepository implements IUserRepository {
     async findAll(filters?: FindAllUsersFilters): Promise<User[]> {
         // Base query with joins
         let query = supabase.from('profiles').select(`
-            id, email, name, phone, role, status, created_at, updated_at, 
+            id, email, name, phone, role, app_role, status, created_at, updated_at, 
             profile_units(*, units(name, building_id, buildings(name))),
             building_members(*, buildings(name))
         `);

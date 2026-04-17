@@ -165,15 +165,14 @@ function createUserRoutes(tag: string) {
 
         // Authorization Logic:
         // 1. Admin has full access
-        if (userProfile.role === UserRole.ADMIN) return payment.toJSON();
+        if (userProfile.isAdmin()) return payment.toJSON();
 
-        // 2. Board can see payments for their building
-        if (userProfile.role === UserRole.BOARD) {
-            const unitBuildings = userProfile.units.map(u => u.building_id);
-            const roleBuildings = userProfile.buildingRoles.map(r => r.building_id);
-            const authorizedBuildings = Array.from(new Set([...unitBuildings, ...roleBuildings]))
-                .filter((id): id is string => !!id);
-
+        // 2. Board can see payments in any building where they have a board role.
+        //    Source of truth: building_members (via user.buildingRoles). Units are
+        //    NOT a source of board authority — having a unit in a building makes
+        //    someone a resident there, not a board.
+        if (userProfile.isBoardMemberAnywhere()) {
+            const authorizedBuildings = userProfile.getBuildingsWhereBoard();
             if (payment.building_id && authorizedBuildings.includes(payment.building_id)) {
                 return payment.toJSON();
             }

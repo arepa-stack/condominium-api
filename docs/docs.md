@@ -1,8 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
-> **Última actualización**: 2026-04-16 — Refleja el estado post-PR `feat/pagination-and-board-directory` (#19).
-> Cambios destacados de esta iteración: paginación en `/admin/billing/invoices` con metadata (`total`, `page`, `limit`, `totalPages`, `hasNextPage`, `hasPrevPage`), nuevo módulo **Directory** con endpoint de miembros de junta (`/directory/buildings/:id/board`) expuesto en APK y Web Admin, vista SQL `board_members_directory` con `DISTINCT ON` para evitar duplicados de profile, y fix de validación TypeBox permitiendo `null` en campos opcionales del schema de `Payment` (`reference`, `bank`, `proof_url`, `notes`, `building_id`).
-> Cambios arquitectónicos previos vigentes: el dominio es dueño de `invoice.paid_amount` y del status (triggers de BD dropeados — "Camino 2"), estado `PARTIAL` funcional, dos canales de credit ledger (invoice-overpayment + unallocated surplus), P0 de seguridad en payments admin cerrado, y endpoints de reverse y petty cash transparency.
+> **Última actualización**: 2026-04-17 — Refleja el estado post-PR Phase 2 de separación de roles (`feat/app-role-phase-2`).
+> Cambios destacados de esta iteración: nueva columna `profiles.app_role` (`admin` | `user`) como fuente de verdad del rol **global**; `building_members.role` es la fuente per-edificio (sólo `board` hoy, con CHECK constraint); `profile_units` implica "resident" en esos edificios. La función SQL `get_my_role()` fue reescrita para derivar del nuevo modelo manteniendo su contrato de retorno (`admin|board|resident`) — las RLS policies existentes siguen funcionando sin cambios. El backend TypeScript lee `app_role` y `building_members` directamente; los guards (`requireRole`, `requireBuildingAccess`) y use cases ahora resuelven roles desde este modelo. `profiles.role` queda como columna legacy (se drop en Phase 4). La respuesta de `/auth/login` y `/auth/register` ahora incluye `app_role` junto al `role` legacy.
+> Cambios arquitectónicos previos vigentes: paginación en `/admin/billing/invoices` con metadata, módulo **Directory**, vista SQL `board_members_directory`, el dominio es dueño de `invoice.paid_amount` y del status, estado `PARTIAL`, dos canales de credit ledger, endpoints de reverse y petty cash transparency, contrato endurecido en `POST /payments` (proof required, reference/bank por método, date ISO no-futura).
 
 ## 1. Visión General
 
@@ -20,17 +20,39 @@
 
 ## 2. Sistema de Roles
 
-El sistema tiene **3 roles** con jerarquía de permisos clara:
+### 2.0 Modelo (Phase 2)
 
-### 2.1 Admin (`admin`)
+El rol de un usuario se **descompone en tres dimensiones independientes**:
+
+| Columna / Tabla | Significado | Valores | Fuente de verdad para |
+|---|---|---|---|
+| `profiles.app_role` | Capacidad global de sistema | `admin` \| `user` | "¿Es staff de la plataforma?" |
+| `building_members.role` | Rol de gobierno en un edificio específico | `board` (CHECK constraint; extensible a futuro) | "¿Es board en el edificio X?" |
+| `profile_units` | Relación user ↔ unidad | — (pivot) | "¿Es residente del edificio X?" (se infiere por tener una unidad ahí) |
+
+`profiles.role` existe todavía como columna **legacy** (se dropea en Phase 4). Hoy se sincroniza con `app_role` via dual-write — todo código nuevo debe ignorarla.
+
+Esto permite que un mismo usuario sea, por ejemplo, **residente en edificio A y board en edificio B** simultáneamente — algo imposible con el modelo single-column anterior.
+
+**Derivación del "rol efectivo"** (implementada en el guard `requireRole` y en la función SQL `get_my_role()`):
+
+```
+app_role = 'admin'                     → efectivo = 'admin'
+cualquier building_members(role=board) → efectivo = 'board'
+ninguno de los anteriores              → efectivo = 'resident'
+```
+
+La función SQL `get_my_role()` preserva el contrato de retorno `admin|board|resident` para que las RLS policies sigan funcionando sin cambios.
+
+### 2.1 Admin (`app_role = 'admin'`)
 - **Descripción**: Administrador general de la plataforma.
-- **Alcance**: Acceso total a todos los edificios y todas las operaciones.
+- **Alcance**: Acceso total a todos los edificios y todas las operaciones. El guard `requireBuildingAccess` bypassea el chequeo de building membership cuando `app_role = 'admin'`.
 - **Permisos**:
   - CRUD completo de edificios y unidades
   - Crear, actualizar y eliminar usuarios
   - Cambiar roles de usuarios
   - Ver y gestionar todos los pagos de todos los edificios
-  - Aprobar o rechazar pagos
+  - Aprobar o rechazar pagos, revertir pagos APPROVED
   - Cargar deuda (facturas/invoices) a unidades
   - Carga masiva de facturas desde Excel
   - Gestionar caja chica (ingresos y egresos)
@@ -38,9 +60,9 @@ El sistema tiene **3 roles** con jerarquía de permisos clara:
   - Ver recibos unificados (normales + caja chica) con filtro por etiqueta
 - **Acceso**: Solo Panel Web Admin. No usa la APK.
 
-### 2.2 Board / Junta (`board`)
-- **Descripción**: Miembro de la junta de condominio de un edificio específico.
-- **Alcance**: Acceso limitado al(los) edificio(s) donde tiene el rol de junta.
+### 2.2 Board / Junta (al menos una fila en `building_members` con `role='board'`)
+- **Descripción**: Miembro de la junta de condominio de **un edificio específico**. `app_role = 'user'` + entry(ies) en `building_members`.
+- **Alcance**: Exclusivamente los edificios donde tiene entry en `building_members`. La lista se carga una sola vez en el guard `requireRole` como `profile.boardBuildingIds[]` y `requireBuildingAccess` la consume desde el context (sin round-trip extra a la DB).
 - **Permisos desde Web Admin** (operaciones administrativas):
   - Aprobar usuarios de su edificio
   - Ver y gestionar usuarios de su edificio
@@ -50,11 +72,10 @@ El sistema tiene **3 roles** con jerarquía de permisos clara:
   - Gestionar caja chica de su edificio (registrar ingresos y gastos)
   - Ver recibos unificados (normales + caja chica) con filtro por etiqueta
   - Ver crédito/saldo a favor de unidades de su edificio
-- **Restricción**: Solo opera sobre edificios donde tiene membresía con rol `board` en la tabla `building_members`. El sistema valida membresía por edificio en cada operación mediante el guard `requireBuildingAccess`.
-- **Acceso**: Solo Panel Web Admin. No usa la APK.
+- **Acceso**: Panel Web Admin. Un mismo usuario puede también acceder a la APK si tiene `profile_units` en algún edificio (es resident ahí) — los dos roles coexisten.
 
-### 2.3 Resident / Residente (`resident`)
-- **Descripción**: Residente de una o más unidades.
+### 2.3 Resident / Residente (`app_role = 'user'` + sin entries `board` + `profile_units` en el edificio)
+- **Descripción**: Residente de una o más unidades. Un user es "resident de edificio X" si tiene al menos una fila en `profile_units` cuya `unit` pertenezca a X.
 - **Alcance**: Solo puede operar sobre su propia información y sus unidades asignadas.
 - **Permisos**:
   - Ver y editar su propio perfil (nombre, teléfono)
@@ -66,8 +87,8 @@ El sistema tiene **3 roles** con jerarquía de permisos clara:
   - Ver crédito/saldo a favor de su propia unidad
   - Ver balance e historial de caja chica de su edificio (solo lectura, transparencia)
   - **No puede** registrar ingresos ni gastos de caja chica
-  - **No puede** acceder al Panel Web Admin
-- **Acceso**: Solo Aplicación Móvil (APK).
+  - **No puede** acceder al Panel Web Admin (salvo que además sea board en algún edificio)
+- **Acceso**: Aplicación Móvil (APK). Si el usuario también tiene `building_members` en otro edificio, puede entrar al panel admin para ese edificio pero sigue siendo resident en éste.
 
 ---
 
