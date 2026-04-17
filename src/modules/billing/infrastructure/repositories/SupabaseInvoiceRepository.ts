@@ -201,6 +201,19 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             )
         `;
 
+        const selectStrInner = `
+            *,
+            units!inner (
+                id,
+                name,
+                building_id,
+                profile_units (
+                    is_primary,
+                    profiles (id, name, email)
+                )
+            )
+        `;
+
         let data: any[] = [];
         let total = 0;
 
@@ -217,7 +230,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             let q1 = supabase.from('invoices').select(selectStr).eq('building_id', filters.building_id);
             q1 = applyCommonFilters(q1);
 
-            let q2 = supabase.from('invoices').select(selectStr)
+            let q2 = supabase.from('invoices').select(selectStrInner)
                 .not('unit_id', 'is', null)
                 .eq('units.building_id', filters.building_id);
             q2 = applyCommonFilters(q2);
