@@ -32,6 +32,7 @@ export interface PettyCashRepository {
 
     // ── Entries (append-only ledger) ──────────────────────────────────────
     addEntry(entry: PettyCashEntry): Promise<PettyCashEntry>;
+    findEntryById(entryId: string): Promise<PettyCashEntry | null>;
     findEntriesByFundId(
         fundId: string,
         filters: EntryHistoryFilters

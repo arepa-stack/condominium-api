@@ -17,15 +17,9 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
     // ── Mapping helpers ───────────────────────────────────────────────────
 
     private fundToDomain(data: any): PettyCashFund {
-        // Phase 2 doesn't drop the legacy columns yet (that's Phase 3),
-        // so current_balance + currency are still in the row. We ignore
-        // them and use the balance view instead; currency is hardcoded
-        // here until the column is removed.
         return new PettyCashFund(
             data.id,
             data.building_id,
-            0,                // legacy field — irrelevant; view is the truth
-            'VES',            // legacy field — dropped in Phase 3
             new Date(data.updated_at)
         );
     }
@@ -150,6 +144,24 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
                 500
             );
         }
+        return this.entryToDomain(data);
+    }
+
+    async findEntryById(entryId: string): Promise<PettyCashEntry | null> {
+        const { data, error } = await supabase
+            .from('petty_cash_entries')
+            .select('*')
+            .eq('id', entryId)
+            .maybeSingle();
+
+        if (error) {
+            throw new DomainError(
+                'Error fetching petty cash entry: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        if (!data) return null;
         return this.entryToDomain(data);
     }
 

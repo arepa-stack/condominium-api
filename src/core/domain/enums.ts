@@ -37,11 +37,6 @@ export enum SolvencyStatus {
     OVERDUE = 'OVERDUE'
 }
 
-export enum PettyCashTransactionType {
-    INCOME = 'INCOME',
-    EXPENSE = 'EXPENSE'
-}
-
 /**
  * Type of a petty-cash ledger entry (petty_cash_entries.type).
  * Mirrors the SQL CHECK constraint on that column.
