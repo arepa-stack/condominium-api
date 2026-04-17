@@ -5,12 +5,18 @@ import {
     PettyCashEntryType,
     PettyCashCategory,
 } from '@/core/domain/enums';
+import { PaginationFilters } from '@/core/domain/pagination';
 
 export interface EntryHistoryFilters {
     type?: PettyCashEntryType;
     category?: PettyCashCategory;
     limit?: number;
     offset?: number;
+}
+
+export interface EntryFilters {
+    type?: PettyCashEntryType;
+    category?: PettyCashCategory;
 }
 
 export interface PettyCashRepository {
@@ -37,6 +43,12 @@ export interface PettyCashRepository {
         fundId: string,
         filters: EntryHistoryFilters
     ): Promise<PettyCashEntry[]>;
+
+    findEntriesByFundIdPaginated(
+        fundId: string,
+        filters: EntryFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: PettyCashEntry[]; total: number }>;
 
     /**
      * Entries that reference a given external id (invoice or another

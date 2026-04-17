@@ -5,6 +5,7 @@ import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { UserStatus, AppRole } from '@/core/domain/enums';
 import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class SupabaseUserRepository implements IUserRepository {
     private toDomain(data: any): User {
@@ -236,5 +237,48 @@ export class SupabaseUserRepository implements IUserRepository {
         if (error) {
             throw new DomainError('Error deleting user', 'DB_ERROR', 500);
         }
+    }
+
+    /**
+     * Paginated variant of findAll.
+     *
+     * Trade-off flagged: the building_id / unit_id / role=board|resident
+     * filters are evaluated in application code AFTER the SQL query,
+     * because Supabase/PostgREST can't filter `profiles` rows against
+     * joined `profile_units` / `building_members`. To keep the returned
+     * metadata.total consistent with the post-filtered set, this method
+     * fetches ALL rows that match the SQL-level filters (app_role,
+     * status, ordering), applies the post-filters in memory, and only
+     * then slices the page window. For a small-to-medium profiles
+     * table this is acceptable; if it grows, this needs to move to a
+     * database view or RPC that performs the filtering server-side.
+     */
+    async findAllPaginated(
+        filters: FindAllUsersFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: User[]; total: number }> {
+        const all = await this.findAll(filters);
+        const { from, to } = toRange(pagination);
+        const slice = all.slice(from, to + 1);
+        return { items: slice, total: all.length };
+    }
+
+    async findUnitsByProfilePaginated(
+        profileId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: UserUnit[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        const { data, count, error } = await supabase
+            .from('profile_units')
+            .select('*, units(name, building_id, buildings(name))', { count: 'exact' })
+            .eq('profile_id', profileId)
+            .range(from, to);
+
+        if (error) {
+            throw new DomainError('Error fetching user units: ' + error.message, 'DB_ERROR', 500);
+        }
+
+        const items = this.mapUnitsFromPersistence(data || []);
+        return { items, total: count || 0 };
     }
 }

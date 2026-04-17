@@ -3,6 +3,7 @@ import { IPaymentRepository, FindAllPaymentsFilters } from '../../domain/reposit
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { PaymentStatus, PaymentMethod } from '@/core/domain/enums';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 const SELECT_QUERY = '*, user:profiles!user_id(id, name), processor:profiles!processed_by(id, name)';
 
@@ -152,6 +153,29 @@ export class SupabasePaymentRepository implements IPaymentRepository {
         if (error) throw new DomainError('Error fetching payments', 'DB_ERROR', 500);
 
         return data.map(this.toDomain);
+    }
+
+    async findAllPaginated(
+        filters: FindAllPaymentsFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: Payment[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        let query = supabase
+            .from('payments')
+            .select(SELECT_QUERY, { count: 'exact' })
+            .order('created_at', { ascending: false });
+
+        if (filters) {
+            query = this.applyFilters(query, filters);
+        }
+
+        const { data, count, error } = await query.range(from, to);
+        if (error) throw new DomainError('Error fetching payments: ' + error.message, 'DB_ERROR', 500);
+
+        return {
+            items: (data || []).map(d => this.toDomain(d)),
+            total: count || 0,
+        };
     }
 
     private applyFilters(query: any, filters: FindAllPaymentsFilters): any {

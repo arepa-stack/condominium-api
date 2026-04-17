@@ -28,9 +28,9 @@ describe("GetAllPayments Building Filter", () => {
         });
 
         mockUserRepo.findById = mock(async () => boardMember);
-        mockPaymentRepo.findAll = mock(async (f) => {
+        mockPaymentRepo.findAllPaginated = mock(async (f) => {
             expect(f?.building_id).toBe("building-B");
-            return [];
+            return { items: [], total: 0 };
         });
 
         const result = await useCase.execute({
@@ -38,8 +38,9 @@ describe("GetAllPayments Building Filter", () => {
             filters: { building_id: "building-B" }
         });
 
-        expect(result).toBeArray();
-        expect(mockPaymentRepo.findAll).toHaveBeenCalled();
+        expect(result.data).toBeArray();
+        expect(result.metadata).toBeDefined();
+        expect(mockPaymentRepo.findAllPaginated).toHaveBeenCalled();
     });
 
     test("should default to first building if none specified for Board member", async () => {
@@ -54,11 +55,44 @@ describe("GetAllPayments Building Filter", () => {
         });
 
         mockUserRepo.findById = mock(async () => boardMember);
-        mockPaymentRepo.findAll = mock(async (f) => {
+        mockPaymentRepo.findAllPaginated = mock(async (f) => {
             expect(f?.building_id).toBe("building-B");
-            return [];
+            return { items: [], total: 0 };
         });
 
         await useCase.execute({ requesterId: "board-1" });
+    });
+
+    test("paginates through the repo when explicit page + limit are provided", async () => {
+        const admin = new User({
+            id: "admin-1",
+            email: "admin@test.com",
+            name: "Admin",
+            app_role: 'admin' as const,
+            status: UserStatus.ACTIVE,
+            units: [],
+            buildingRoles: [],
+        });
+
+        mockUserRepo.findById = mock(async () => admin);
+        mockPaymentRepo.findAllPaginated = mock(async () => ({ items: [], total: 0 }));
+
+        const result = await useCase.execute({
+            requesterId: "admin-1",
+            filters: { page: 2, limit: 5 },
+        });
+
+        expect(mockPaymentRepo.findAllPaginated).toHaveBeenCalled();
+        const secondArg = (mockPaymentRepo.findAllPaginated as any).mock.calls[0][1];
+        expect(secondArg).toMatchObject({ page: 2, limit: 5, isAll: false });
+        expect(result.data).toBeArray();
+        expect(result.metadata).toMatchObject({
+            total: expect.any(Number),
+            page: expect.any(Number),
+            limit: expect.any(Number),
+            totalPages: expect.any(Number),
+            hasNextPage: expect.any(Boolean),
+            hasPrevPage: expect.any(Boolean),
+        });
     });
 });

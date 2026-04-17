@@ -2,6 +2,11 @@ import { IPaymentRepository, FindAllPaymentsFilters } from '../../domain/reposit
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { Payment } from '../../domain/entities/Payment';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
+import {
+    PaginatedResult,
+    buildPaginatedResult,
+    parsePaginationFilters,
+} from '@/core/domain/pagination';
 
 export interface GetAllPaymentsRequest {
     requesterId: string;
@@ -11,6 +16,8 @@ export interface GetAllPaymentsRequest {
         period?: string;
         year?: string;
         unit_id?: string;
+        page?: number | string;
+        limit?: number | string;
     };
 }
 
@@ -20,7 +27,7 @@ export class GetAllPayments {
         private userRepo: IUserRepository
     ) { }
 
-    async execute(request: GetAllPaymentsRequest): Promise<Payment[]> {
+    async execute(request: GetAllPaymentsRequest): Promise<PaginatedResult<Payment>> {
         const requester = await this.userRepo.findById(request.requesterId);
         if (!requester) {
             throw new NotFoundError('Requester not found');
@@ -43,6 +50,11 @@ export class GetAllPayments {
             filters.building_id = request.filters.building_id;
         }
 
+        const pagination = parsePaginationFilters({
+            page: request.filters?.page,
+            limit: request.filters?.limit,
+        });
+
         // Enforce building scope for Board members.
         //
         // Authority comes exclusively from building_members (via
@@ -52,14 +64,14 @@ export class GetAllPayments {
             const validBuildings = requester.getBuildingsWhereBoard();
 
             if (validBuildings.length === 0) {
-                return [];
+                return buildPaginatedResult<Payment>([], 0, pagination);
             }
 
             // If specific building requested, validate access
             if (filters.building_id) {
                 if (!validBuildings.includes(filters.building_id)) {
                     // For listing, if board member requests building they don't have access to, return empty
-                    return [];
+                    return buildPaginatedResult<Payment>([], 0, pagination);
                 }
             } else {
                 // If no building specified, default to first building they have access to
@@ -67,6 +79,7 @@ export class GetAllPayments {
             }
         }
 
-        return await this.paymentRepo.findAll(filters);
+        const { items, total } = await this.paymentRepo.findAllPaginated(filters, pagination);
+        return buildPaginatedResult(items, total, pagination);
     }
 }

@@ -56,6 +56,25 @@ const UserResponse = t.Object({
     updated_at: t.Optional(t.Any())
 });
 
+const PaginationMetadataSchema = t.Object({
+    total: t.Number(),
+    page: t.Number(),
+    limit: t.Number(),
+    totalPages: t.Number(),
+    hasNextPage: t.Boolean(),
+    hasPrevPage: t.Boolean()
+});
+
+const PaginatedUserResponse = t.Object({
+    data: t.Array(UserResponse),
+    metadata: PaginationMetadataSchema
+});
+
+const PaginatedUserUnitResponse = t.Object({
+    data: t.Array(UserUnitSchema),
+    metadata: PaginationMetadataSchema
+});
+
 const SuccessResponse = t.Object({
     success: t.Boolean()
 });
@@ -116,7 +135,9 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
                 building_id: query.building_id,
                 unit_id: query.unit_id,
                 role: query.role,
-                status: query.status
+                status: query.status,
+                page: query.page,
+                limit: query.limit
             }
         });
     }, {
@@ -125,8 +146,10 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             unit_id: t.Optional(t.String()),
             role: t.Optional(t.String()),
             status: t.Optional(t.String()),
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
         }),
-        response: t.Array(UserResponse),
+        response: PaginatedUserResponse,
         detail: {
             tags: ['Admin - Users'],
             summary: 'List all users (Admin/Board)',
@@ -187,10 +210,17 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             security: [{ BearerAuth: [] }]
         }
     })
-    .get('/:id/units', async ({ params }) => {
-        return await getUserUnits.execute(params.id);
+    .get('/:id/units', async ({ params, query }) => {
+        return await getUserUnits.execute(params.id, {
+            page: query.page,
+            limit: query.limit,
+        });
     }, {
-        response: t.Array(UserUnitSchema),
+        query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
+        }),
+        response: PaginatedUserUnitResponse,
         detail: {
             tags: ['Admin - Users'],
             summary: 'Get user units',

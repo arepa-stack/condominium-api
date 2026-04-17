@@ -1,6 +1,11 @@
 import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
 import { User } from '../../domain/entities/User';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
+import {
+    PaginatedResult,
+    buildPaginatedResult,
+    parsePaginationFilters,
+} from '@/core/domain/pagination';
 
 interface GetUsersRequest {
     requesterId: string;
@@ -9,13 +14,15 @@ interface GetUsersRequest {
         unit_id?: string;
         role?: string;
         status?: string;
+        page?: number | string;
+        limit?: number | string;
     };
 }
 
 export class GetUsers {
     constructor(private userRepo: IUserRepository) { }
 
-    async execute(request: GetUsersRequest): Promise<User[]> {
+    async execute(request: GetUsersRequest): Promise<PaginatedResult<User>> {
         const requester = await this.userRepo.findById(request.requesterId);
         if (!requester) {
             throw new NotFoundError('Requester not found');
@@ -38,11 +45,16 @@ export class GetUsers {
         // getBuildingsWhereBoard). A user who merely has a unit in building Y
         // does NOT get board-level visibility over Y — that was a leak in the
         // previous dual-scoping logic.
+        const pagination = parsePaginationFilters({
+            page: request.filters?.page,
+            limit: request.filters?.limit,
+        });
+
         if (requester.isBoardMember()) {
             const validBuildings = requester.getBuildingsWhereBoard();
 
             if (validBuildings.length === 0) {
-                return [];
+                return buildPaginatedResult<User>([], 0, pagination);
             }
 
             // If board member requests a specific building, check if they have access to it
@@ -65,6 +77,7 @@ export class GetUsers {
             filters.unit_id = request.filters.unit_id;
         }
 
-        return await this.userRepo.findAll(filters);
+        const { items, total } = await this.userRepo.findAllPaginated(filters, pagination);
+        return buildPaginatedResult(items, total, pagination);
     }
 }

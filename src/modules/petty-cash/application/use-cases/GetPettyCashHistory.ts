@@ -1,39 +1,54 @@
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { PettyCashEntryType, PettyCashCategory } from '@/core/domain/enums';
+import {
+    PaginatedResult,
+    buildPaginatedResult,
+    parsePaginationFilters,
+} from '@/core/domain/pagination';
 
 export interface GetPettyCashHistoryFilters {
     type?: PettyCashEntryType;
     category?: PettyCashCategory;
-    page?: number;
-    limit?: number;
+    page?: number | string;
+    limit?: number | string;
 }
 
 /**
  * Read the ledger history for a building's petty cash fund.
  * Returns entries ordered by created_at desc (newest first).
  *
- * If the fund doesn't exist yet, returns an empty array rather than
- * 404 — semantically "this building has no activity yet" is not
- * an error condition.
+ * If the fund doesn't exist yet, returns an empty paginated result
+ * rather than 404 — semantically "this building has no activity yet" is
+ * not an error condition.
  */
 export class GetPettyCashHistory {
     constructor(private pettyCashRepo: PettyCashRepository) { }
 
-    async execute(buildingId: string, filters: GetPettyCashHistoryFilters) {
-        const fund = await this.pettyCashRepo.findFundByBuildingId(buildingId);
-        if (!fund) return [];
-
-        const limit = filters.limit || 10;
-        const page = filters.page || 1;
-        const offset = (page - 1) * limit;
-
-        const entries = await this.pettyCashRepo.findEntriesByFundId(fund.id, {
-            type: filters.type,
-            category: filters.category,
-            limit,
-            offset,
+    async execute(
+        buildingId: string,
+        filters: GetPettyCashHistoryFilters
+    ): Promise<PaginatedResult<Record<string, unknown>>> {
+        const pagination = parsePaginationFilters({
+            page: filters.page,
+            limit: filters.limit,
         });
 
-        return entries.map(e => e.toJSON());
+        const fund = await this.pettyCashRepo.findFundByBuildingId(buildingId);
+        if (!fund) return buildPaginatedResult<Record<string, unknown>>([], 0, pagination);
+
+        const { items, total } = await this.pettyCashRepo.findEntriesByFundIdPaginated(
+            fund.id,
+            {
+                type: filters.type,
+                category: filters.category,
+            },
+            pagination
+        );
+
+        return buildPaginatedResult(
+            items.map(e => e.toJSON() as Record<string, unknown>),
+            total,
+            pagination
+        );
     }
 }

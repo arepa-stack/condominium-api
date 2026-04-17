@@ -28,6 +28,14 @@ class MockUserRepository implements IUserRepository {
     async findAll(): Promise<User[]> {
         return Array.from(this.users.values());
     }
+    async findAllPaginated() {
+        return { items: Array.from(this.users.values()), total: this.users.size };
+    }
+    async findUnitsByProfilePaginated(profileId: string) {
+        const user = this.users.get(profileId);
+        const units = user?.units ?? [];
+        return { items: units, total: units.length };
+    }
     async delete(id: string): Promise<void> {
         this.users.delete(id);
     }

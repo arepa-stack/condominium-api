@@ -9,6 +9,10 @@ class MockUnitRepository implements IUnitRepository {
     public units: Unit[] = [];
     async create(unit: Unit) { this.units.push(unit); return unit; }
     async findByBuildingId(id: string) { return this.units.filter(u => u.building_id === id); }
+    async findByBuildingIdPaginated(id: string) {
+        const items = this.units.filter(u => u.building_id === id);
+        return { items, total: items.length };
+    }
     async findById(id: string) { return this.units.find(u => u.id === id) || null; }
     async update(unit: Unit) { return unit; }
     async delete(_id: string) { }
@@ -27,6 +31,7 @@ class MockBuildingRepository implements IBuildingRepository {
     }
     async create(b: Building) { return b; }
     async findAll() { return []; }
+    async findAllPaginated() { return { items: [], total: 0 }; }
     async update(b: Building) { return b; }
     async delete(_id: string) { }
 }

@@ -31,19 +31,23 @@ describe('ApprovePayment Use Case', () => {
             delete: mock(),
             findByInvoiceId: mock(),
             findPaymentsByInvoiceId: mock(),
-            findInvoicesByPaymentId: mock()
+            findInvoicesByPaymentId: mock(),
+            findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),
+            findInvoicesByPaymentIdPaginated: mock(async () => ({ items: [], total: 0 }))
         };
         invoiceRepo = {
             findById: mock(async () => null),
             create: mock(),
             findAll: mock(),
-            findInvoicesForAdmin: mock(),
-            findByBuildingId: mock(async () => []),
+            findAllPaginated: mock(async () => ({ items: [], total: 0 })),
+            findInvoicesForAdmin: mock(async () => ({ items: [], total: 0 })),
+            findByBuildingId: mock(async () => ({ items: [], total: 0 })),
             update: mock(async (inv: Invoice) => inv),
             createBatch: mock()
         };
         creditLedgerRepo = {
             addCredit: mock(async (entry: CreditLedgerEntry) => entry),
+            deductCredit: mock(async (entry: CreditLedgerEntry) => entry),
             getBalanceForUnit: mock(async () => 0),
             getEntriesForUnit: mock(async () => []),
             findByReferenceId: mock(async () => [])
@@ -52,6 +56,8 @@ describe('ApprovePayment Use Case', () => {
             findOrCreateFund: mock(async () => ({ id: 'fund-x' })),
             addEntry: mock(async (e: PettyCashEntry) => e),
             findEntriesByReference: mock(async () => []),
+            findEntriesByFundId: mock(async () => []),
+            findEntriesByFundIdPaginated: mock(async () => ({ items: [], total: 0 })),
         };
         const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
         approvePayment = new ApprovePayment(

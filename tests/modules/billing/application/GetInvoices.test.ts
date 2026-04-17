@@ -35,8 +35,9 @@ const createMockRepo = (): IInvoiceRepository => ({
     create: mock(async (inv: Invoice) => inv),
     findById: mock(async (_id: string) => null),
     findAll: mock(async (_filters?: FindAllInvoicesFilters) => []),
-    findInvoicesForAdmin: mock(async (_filters?: FindAllInvoicesFilters) => []),
-    findByBuildingId: mock(async (_buildingId: string, _filters?: FindAllInvoicesFilters) => []),
+    findAllPaginated: mock(async () => ({ items: [], total: 0 })),
+    findInvoicesForAdmin: mock(async () => ({ items: [], total: 0 })),
+    findByBuildingId: mock(async () => ({ items: [], total: 0 })),
     update: mock(async (inv: Invoice) => inv),
     createBatch: mock(async (invoices: Invoice[]) => invoices),
 });
@@ -44,33 +45,51 @@ const createMockRepo = (): IInvoiceRepository => ({
 describe('GetAllInvoices — tag filter', () => {
     let mockRepo: IInvoiceRepository;
 
+    const firstCallFilters = (spy: any) => (spy.mock.calls[0] ?? [])[0];
+    const firstCallPagination = (spy: any) => (spy.mock.calls[0] ?? [])[1];
+
     beforeEach(() => {
         mockRepo = createMockRepo();
     });
 
-    it('should call findInvoicesForAdmin without tag when no filters provided', async () => {
+    it('returns a PaginatedResult wrapper with six metadata fields', async () => {
+        const useCase = new GetAllInvoices(mockRepo);
+        const result = await useCase.execute();
+        expect(Array.isArray(result.data)).toBe(true);
+        expect(result.metadata).toMatchObject({
+            total: expect.any(Number),
+            page: expect.any(Number),
+            limit: expect.any(Number),
+            totalPages: expect.any(Number),
+            hasNextPage: expect.any(Boolean),
+            hasPrevPage: expect.any(Boolean),
+        });
+    });
+
+    it('should call findInvoicesForAdmin with empty filters when no filters provided', async () => {
         const useCase = new GetAllInvoices(mockRepo);
         await useCase.execute();
-        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith(undefined);
+        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalled();
+        expect(firstCallFilters(mockRepo.findInvoicesForAdmin)).toEqual({});
     });
 
     it('should forward tag filter to findInvoicesForAdmin', async () => {
         const useCase = new GetAllInvoices(mockRepo);
         await useCase.execute({ tag: InvoiceTag.PETTY_CASH });
-        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith({ tag: InvoiceTag.PETTY_CASH });
+        expect(firstCallFilters(mockRepo.findInvoicesForAdmin)).toEqual({ tag: InvoiceTag.PETTY_CASH });
     });
 
     it('should forward tag NORMAL to findInvoicesForAdmin', async () => {
         const useCase = new GetAllInvoices(mockRepo);
         await useCase.execute({ tag: InvoiceTag.NORMAL });
-        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith({ tag: InvoiceTag.NORMAL });
+        expect(firstCallFilters(mockRepo.findInvoicesForAdmin)).toEqual({ tag: InvoiceTag.NORMAL });
     });
 
     it('should forward combined filters including tag', async () => {
         const useCase = new GetAllInvoices(mockRepo);
         const filters = { building_id: 'bldg-1', tag: InvoiceTag.PETTY_CASH, status: 'PENDING' };
         await useCase.execute(filters);
-        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith(filters);
+        expect(firstCallFilters(mockRepo.findInvoicesForAdmin)).toEqual(filters);
     });
 
     it('forwards pagination params (page + limit) to the repo', async () => {
@@ -80,7 +99,15 @@ describe('GetAllInvoices — tag filter', () => {
         // back to page=1, limit=10 regardless of what the client sent.
         const useCase = new GetAllInvoices(mockRepo);
         await useCase.execute({ page: 3, limit: 25 });
-        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith({ page: 3, limit: 25 });
+        const pagination = firstCallPagination(mockRepo.findInvoicesForAdmin);
+        expect(pagination).toMatchObject({ page: 3, limit: 25, isAll: false });
+    });
+
+    it('honors limit="all" by flagging isAll on the pagination passed to the repo', async () => {
+        const useCase = new GetAllInvoices(mockRepo);
+        await useCase.execute({ limit: 'all' });
+        const pagination = firstCallPagination(mockRepo.findInvoicesForAdmin);
+        expect(pagination.isAll).toBe(true);
     });
 });
 
@@ -91,21 +118,33 @@ describe('GetUnitInvoices — tag filter', () => {
         mockRepo = createMockRepo();
     });
 
-    it('should call findAll with unit_id only when no tag provided', async () => {
+    it('paginated path forwards unit_id only when no tag provided', async () => {
         const useCase = new GetUnitInvoices(mockRepo);
-        await useCase.execute('unit-1');
-        expect(mockRepo.findAll).toHaveBeenCalledWith({ unit_id: 'unit-1' });
+        const result = await useCase.execute('unit-1');
+        expect(mockRepo.findAllPaginated).toHaveBeenCalled();
+        const firstCall = (mockRepo.findAllPaginated as any).mock.calls[0];
+        expect(firstCall[0]).toEqual({ unit_id: 'unit-1' });
+        expect(result.data).toBeArray();
+        expect(result.metadata).toBeDefined();
     });
 
-    it('should forward tag filter along with unit_id to findAll', async () => {
+    it('paginated path forwards tag + unit_id together', async () => {
         const useCase = new GetUnitInvoices(mockRepo);
-        await useCase.execute('unit-1', InvoiceTag.PETTY_CASH);
-        expect(mockRepo.findAll).toHaveBeenCalledWith({ unit_id: 'unit-1', tag: InvoiceTag.PETTY_CASH });
+        await useCase.execute('unit-1', { tag: InvoiceTag.PETTY_CASH });
+        const firstCall = (mockRepo.findAllPaginated as any).mock.calls[0];
+        expect(firstCall[0]).toEqual({ unit_id: 'unit-1', tag: InvoiceTag.PETTY_CASH });
     });
 
-    it('should forward tag NORMAL along with unit_id to findAll', async () => {
+    it('paginated path honors explicit page + limit', async () => {
         const useCase = new GetUnitInvoices(mockRepo);
-        await useCase.execute('unit-1', InvoiceTag.NORMAL);
+        await useCase.execute('unit-1', { page: 2, limit: 5 });
+        const firstCall = (mockRepo.findAllPaginated as any).mock.calls[0];
+        expect(firstCall[1]).toMatchObject({ page: 2, limit: 5, isAll: false });
+    });
+
+    it('executeAll keeps the legacy array shape used by the APK', async () => {
+        const useCase = new GetUnitInvoices(mockRepo);
+        await useCase.executeAll('unit-1', InvoiceTag.NORMAL);
         expect(mockRepo.findAll).toHaveBeenCalledWith({ unit_id: 'unit-1', tag: InvoiceTag.NORMAL });
     });
 });
@@ -121,8 +160,16 @@ describe('GetAllInvoices — findByBuildingId delegation', () => {
         expect(typeof mockRepo.findByBuildingId).toBe('function');
     });
 
-    it('findByBuildingId should be callable with buildingId and optional filters', async () => {
-        await mockRepo.findByBuildingId!('bldg-1', { tag: InvoiceTag.PETTY_CASH });
-        expect(mockRepo.findByBuildingId).toHaveBeenCalledWith('bldg-1', { tag: InvoiceTag.PETTY_CASH });
+    it('findByBuildingId should be callable with buildingId, filters and pagination', async () => {
+        await mockRepo.findByBuildingId!(
+            'bldg-1',
+            { tag: InvoiceTag.PETTY_CASH },
+            { page: 1, limit: 20, isAll: false }
+        );
+        expect(mockRepo.findByBuildingId).toHaveBeenCalledWith(
+            'bldg-1',
+            { tag: InvoiceTag.PETTY_CASH },
+            { page: 1, limit: 20, isAll: false }
+        );
     });
 });

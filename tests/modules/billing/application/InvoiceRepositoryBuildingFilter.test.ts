@@ -64,13 +64,14 @@ function createMockRepo(buildingInvoices: Invoice[], unitInvoices: Invoice[]): I
                 (inv.unit_id && unitInvoices.includes(inv))
             );
         }),
-        findInvoicesForAdmin: mock(async (filters?: FindAllInvoicesFilters) => {
-            if (!filters?.building_id) return [];
+        findAllPaginated: mock(async () => ({ items: [], total: 0 })),
+        findInvoicesForAdmin: mock(async (filters: FindAllInvoicesFilters) => {
+            if (!filters?.building_id) return { items: [], total: 0 };
             const matching = allInvoices.filter(inv =>
                 inv.building_id === filters.building_id ||
                 (inv.unit_id && unitInvoices.includes(inv))
             );
-            return matching.map(inv => ({
+            const items = matching.map(inv => ({
                 id: inv.id,
                 amount: inv.amount,
                 paid_amount: 0,
@@ -79,11 +80,13 @@ function createMockRepo(buildingInvoices: Invoice[], unitInvoices: Invoice[]): I
                 year: 2024,
                 month: 1,
                 issue_date: inv.issue_date.toISOString(),
+                created_at: inv.issue_date.toISOString(),
                 unit: { id: inv.unit_id ?? '', name: '' },
                 user: null,
             }));
+            return { items, total: items.length };
         }),
-        findByBuildingId: mock(async () => []),
+        findByBuildingId: mock(async () => ({ items: [], total: 0 })),
         update: mock(async (inv: Invoice) => inv),
         createBatch: mock(async (invoices: Invoice[]) => invoices),
     };
@@ -103,7 +106,9 @@ describe('Invoice building_id filter — PETTY_CASH invoices must be included', 
         // GetAllInvoices uses findInvoicesForAdmin internally
         await useCase.execute({ building_id: BUILDING_A });
 
-        expect(repo.findInvoicesForAdmin).toHaveBeenCalledWith({ building_id: BUILDING_A });
+        expect(repo.findInvoicesForAdmin).toHaveBeenCalled();
+        const firstCall = (repo.findInvoicesForAdmin as any).mock.calls[0];
+        expect(firstCall[0]).toEqual({ building_id: BUILDING_A });
     });
 
     it('PETTY_CASH invoice has unit_id=undefined and building_id set directly', () => {
@@ -120,7 +125,7 @@ describe('Invoice building_id filter — PETTY_CASH invoices must be included', 
 
         // Simulated OR filter: direct building_id match should include PETTY_CASH invoice
         const results = await (repo.findInvoicesForAdmin as ReturnType<typeof mock>)({ building_id: BUILDING_A });
-        const ids = results.map((r: any) => r.id);
+        const ids = results.items.map((r: any) => r.id);
         expect(ids).toContain(pettyCashInv.id);
     });
 
@@ -130,7 +135,7 @@ describe('Invoice building_id filter — PETTY_CASH invoices must be included', 
         const repo = createMockRepo([pettyCashInvA, pettyCashInvB], []);
 
         const results = await (repo.findInvoicesForAdmin as ReturnType<typeof mock>)({ building_id: BUILDING_A });
-        const ids = results.map((r: any) => r.id);
+        const ids = results.items.map((r: any) => r.id);
         expect(ids).toContain(pettyCashInvA.id);
         expect(ids).not.toContain(pettyCashInvB.id);
     });

@@ -30,9 +30,10 @@ function makeUnitInvoice(unitId: string, amount: number, status: InvoiceStatus =
 function mockInvoiceRepo(invoices: Invoice[]) {
     return {
         findAll: mock(() => Promise.resolve(invoices)),
+        findAllPaginated: mock(() => Promise.resolve({ items: [], total: 0 })),
         findById: mock(() => Promise.resolve(null)),
-        findInvoicesForAdmin: mock(() => Promise.resolve([])),
-        findByBuildingId: mock(() => Promise.resolve([])),
+        findInvoicesForAdmin: mock(() => Promise.resolve({ items: [], total: 0 })),
+        findByBuildingId: mock(() => Promise.resolve({ items: [], total: 0 })),
         create: mock((inv: Invoice) => Promise.resolve(inv)),
         update: mock((inv: Invoice) => Promise.resolve(inv)),
         createBatch: mock((invs: Invoice[]) => Promise.resolve(invs)),
@@ -42,6 +43,7 @@ function mockInvoiceRepo(invoices: Invoice[]) {
 function mockUnitRepo(units: ReturnType<typeof makeUnit>[]) {
     return {
         findByBuildingId: mock(() => Promise.resolve(units)),
+        findByBuildingIdPaginated: mock(() => Promise.resolve({ items: units, total: units.length })),
         findById: mock(() => Promise.resolve(null)),
         create: mock(() => Promise.resolve(units[0])),
         update: mock(() => Promise.resolve(units[0])),
@@ -61,6 +63,7 @@ function mockPettyCashRepo(options: {
         getBalance: mock(() => Promise.resolve(options.balance ?? 0)),
         addEntry: mock((e: any) => Promise.resolve(e)),
         findEntriesByFundId: mock(() => Promise.resolve([])),
+        findEntriesByFundIdPaginated: mock(() => Promise.resolve({ items: [], total: 0 })),
         findEntriesByReference: mock(() => Promise.resolve([])),
         createAssessment: mock((a: PettyCashAssessment) => Promise.resolve(
             new PettyCashAssessment({

@@ -1,5 +1,6 @@
 import { IPaymentRepository, FindAllPaymentsFilters } from '@/modules/payments/domain/repository';
 import { Payment } from '@/modules/payments/domain/entities/Payment';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class MockPaymentRepository implements IPaymentRepository {
     private payments: Payment[] = [];
@@ -62,6 +63,15 @@ export class MockPaymentRepository implements IPaymentRepository {
         }
 
         return filtered.sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+    }
+
+    async findAllPaginated(
+        filters: FindAllPaymentsFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: Payment[]; total: number }> {
+        const all = await this.findAll(filters);
+        const { from, to } = toRange(pagination);
+        return { items: all.slice(from, to + 1), total: all.length };
     }
 
     async delete(id: string): Promise<void> {

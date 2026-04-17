@@ -29,15 +29,15 @@ describe("GetUsers Building Filter", () => {
         });
 
         mockRepo.findById = mock(async () => boardXresidentY);
-        const findAllMock = mock(async () => []);
-        mockRepo.findAll = findAllMock;
+        const findAllPaginatedMock = mock(async () => ({ items: [], total: 0 }));
+        mockRepo.findAllPaginated = findAllPaginatedMock;
 
         // No building_id in filters → use case must default to a building the
         // requester governs (building-X), never building-Y.
         await useCase.execute({ requesterId: "requester-1" });
 
-        expect(findAllMock).toHaveBeenCalled();
-        const calls = findAllMock.mock.calls as any[];
+        expect(findAllPaginatedMock).toHaveBeenCalled();
+        const calls = findAllPaginatedMock.mock.calls as any[];
         expect(calls[0][0].building_id).toBe("building-X");
     });
 
@@ -93,10 +93,10 @@ describe("GetUsers Building Filter", () => {
         ];
 
         mockRepo.findById = mock(async () => admin);
-        mockRepo.findAll = mock(async (f) => {
+        mockRepo.findAllPaginated = mock(async (f) => {
             // Verify filters were passed correctly
             expect(f?.building_id).toBe("building-A");
-            return usersInBuilding;
+            return { items: usersInBuilding, total: usersInBuilding.length };
         });
 
         const result = await useCase.execute({
@@ -104,8 +104,41 @@ describe("GetUsers Building Filter", () => {
             filters: { building_id: "building-A" }
         });
 
-        expect(result.length).toBe(2);
-        expect(result[0].id).toBe("user-1");
-        expect(result[1].id).toBe("user-2");
+        expect(result.data.length).toBe(2);
+        expect(result.data[0].id).toBe("user-1");
+        expect(result.data[1].id).toBe("user-2");
+    });
+
+    test("paginates through the repo when explicit page + limit are provided", async () => {
+        const admin = new User({
+            id: "admin-1",
+            email: "admin@test.com",
+            name: "Admin",
+            app_role: 'admin' as const,
+            status: UserStatus.ACTIVE,
+            units: [],
+            buildingRoles: [],
+        });
+
+        mockRepo.findById = mock(async () => admin);
+        mockRepo.findAllPaginated = mock(async () => ({ items: [], total: 0 }));
+
+        const result = await useCase.execute({
+            requesterId: "admin-1",
+            filters: { page: 2, limit: 5 },
+        });
+
+        expect(mockRepo.findAllPaginated).toHaveBeenCalled();
+        const call = (mockRepo.findAllPaginated as any).mock.calls[0];
+        expect(call[1]).toMatchObject({ page: 2, limit: 5, isAll: false });
+        expect(result.data).toBeArray();
+        expect(result.metadata).toMatchObject({
+            total: expect.any(Number),
+            page: expect.any(Number),
+            limit: expect.any(Number),
+            totalPages: expect.any(Number),
+            hasNextPage: expect.any(Boolean),
+            hasPrevPage: expect.any(Boolean),
+        });
     });
 });

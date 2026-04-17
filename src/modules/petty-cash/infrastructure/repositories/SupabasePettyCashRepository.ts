@@ -1,7 +1,9 @@
 import {
     PettyCashRepository,
     EntryHistoryFilters,
+    EntryFilters,
 } from '../../domain/repositories/PettyCashRepository';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 import { PettyCashFund } from '../../domain/entities/PettyCashFund';
 import { PettyCashEntry } from '../../domain/entities/PettyCashEntry';
 import { PettyCashAssessment } from '../../domain/entities/PettyCashAssessment';
@@ -196,6 +198,36 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             );
         }
         return (data ?? []).map(d => this.entryToDomain(d));
+    }
+
+    async findEntriesByFundIdPaginated(
+        fundId: string,
+        filters: EntryFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: PettyCashEntry[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        let query = supabase
+            .from('petty_cash_entries')
+            .select('*', { count: 'exact' })
+            .eq('fund_id', fundId);
+
+        if (filters.type) query = query.eq('type', filters.type);
+        if (filters.category) query = query.eq('category', filters.category);
+
+        query = query.order('created_at', { ascending: false }).range(from, to);
+
+        const { data, count, error } = await query;
+        if (error) {
+            throw new DomainError(
+                'Error fetching petty cash entries: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        return {
+            items: (data ?? []).map(d => this.entryToDomain(d)),
+            total: count ?? 0,
+        };
     }
 
     async findEntriesByReference(

@@ -31,6 +31,7 @@ function createRepoMock(overrides: any = {}) {
         addEntry: mock(async (e: PettyCashEntry) => e),
         findEntryById: mock(async () => null),
         findEntriesByFundId: mock(async () => []),
+        findEntriesByFundIdPaginated: mock(async () => ({ items: [], total: 0 })),
         findEntriesByReference: mock(async () => []),
         createAssessment: mock(async () => ({} as any)),
         findAssessmentsByFundId: mock(async () => []),

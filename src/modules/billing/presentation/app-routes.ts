@@ -112,7 +112,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) throw new UnauthorizedError('Unauthorized');
         }
-        const invoices = await getUnitInvoices.execute(params.id, query.tag as InvoiceTag | undefined);
+        const invoices = await getUnitInvoices.executeAll(params.id, query.tag as InvoiceTag | undefined);
         return invoices.map(inv => inv.toJSON());
     }, {
         query: t.Object({

@@ -1,5 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
+> **Última actualización**: 2026-04-20 — Refleja el estado post-PR `feat/normalize-pagination`.
+> **Paginación uniforme** en los 10 endpoints de listado. Response shape estándar `{ data: [...], metadata: { total, page, limit, totalPages, hasNextPage, hasPrevPage } }`. Query params estándar: `?page=<1-indexed>&limit=<number|"all">`. Defaults: `page=1`, `limit=20`. Cap numérico `100` (silent clamp); `limit=all` truncado a `10000` (el metadata señaliza truncación via `hasNextPage`). Filtros preexistentes intactos. Ver "Paginación estándar" abajo y `docs/petty-cash-client-handoff.md` para el contrato completo. **Breaking** para cualquier cliente que leía `data[]` directo del body — ahora debe desenvolver `response.data`.
+> Cambios anteriores (caja chica, roles, auth, payments) siguen vigentes — ver más abajo.
 > **Última actualización**: 2026-04-19 — Refleja el estado post-PR Phase 3 (final) del rediseño de Caja Chica (`feat/petty-cash-ledger-phase-3`).
 > Cambios destacados de Phase 3: se **dropearon** `petty_cash_transactions`, `petty_cash_fund.current_balance` y `petty_cash_fund.currency`. El entity `PettyCashFund` ahora es solo metadata (`id`, `building_id`, `updated_at`). Balance vive exclusivamente en la vista `petty_cash_balance`. Nuevo endpoint `POST /petty-cash/funds/:buildingId/entries/:entryId/reverse` para emitir counter-asientos manuales sobre cualquier entry — idempotente, append-only, rechaza reversar una reversal. Secciones 4.1/7.5/7.6/7.9 de este doc reescritas al estado final.
 > Cambios de Phase 2 vigentes: modelo **ledger-based** (append-only). `petty_cash_entries` reemplaza a `petty_cash_transactions`; el balance se deriva de la vista `petty_cash_balance`. Los **egresos permiten balance negativo** (overdraft): el excedente vive en el ledger como `amount < 0`, sin invoices fantasma PAID building-level. Los **assessments son batches con nombre**: tabla `petty_cash_assessment` + campo `invoices.assessment_id`. El admin llama `POST /petty-cash/funds/:id/assessments` con `{ description, amount, category? }` y se crea 1 invoice PENDING por unit linkeada al batch. **Auto-collection**: cuando un resident paga una invoice PETTY_CASH con unit_id, `ApprovePayment` genera automáticamente una entry `collection` en el ledger; `ReversePayment` genera el counter-asiento. Transparencia desglosada por assessment.
@@ -492,6 +495,79 @@ El query param `tag` es opcional en los endpoints de invoices:
 | Endpoint | Método | Autenticación | Descripción |
 |----------|--------|---------------|-------------|
 | `/api/register-download` | POST | ❌ Pública | Registrar interés de descarga de la app. Campos: `fullName`, `contact`, `email`, `buildingName`, `location`, `estimatedUsers` |
+
+### 5.4 Paginación estándar
+
+Todos los endpoints de **listado del panel admin** devuelven el mismo shape. Los endpoints de **detalle** (`GET /:id`) devuelven el objeto plano, sin envolver.
+
+#### Query params
+
+| Param | Tipo | Default | Reglas |
+|---|---|---|---|
+| `page` | number (1-indexed) | `1` | Cualquier valor `< 1` se trata como `1` |
+| `limit` | number \| `"all"` | `20` | Numérico → clamp silencioso a `[1..100]`. `"all"` → devuelve hasta `10000` rows (cap hard); si el total excede el cap, `metadata.hasNextPage = true` para indicar truncación |
+
+Filtros preexistentes de cada endpoint (ej: `status`, `building_id`, `period`, `tag`) **siguen funcionando y componen** con `page`/`limit`. `metadata.total` refleja el total del conjunto filtrado, no el total absoluto de la tabla.
+
+#### Response shape
+
+```json
+{
+  "data": [...],
+  "metadata": {
+    "total": 142,            // rows totales que matchean filtros
+    "page": 3,               // página devuelta
+    "limit": 20,             // items por página (o items.length si limit=all)
+    "totalPages": 8,         // Math.ceil(total/limit). 0 si total=0
+    "hasNextPage": true,     // page < totalPages
+    "hasPrevPage": true      // page > 1
+  }
+}
+```
+
+#### Edge cases
+
+- **Lista vacía** → `{ data: [], metadata: { total: 0, page: 1, limit: 20, totalPages: 0, hasNextPage: false, hasPrevPage: false } }`.
+- **page > totalPages** → `data: []` con metadata correcto (sigue siendo 200, no 404).
+- **limit fuera de rango** → clamp silencioso al max (100 numérico; 10k para `all`).
+- **limit=all con total > 10000** → `data` trunca a 10000 items; `metadata.hasNextPage=true` señala que hay más.
+- **page o limit no numéricos** (y no `"all"`) → 400 `VALIDATION_ERROR` por Elysia schema validation.
+
+#### Endpoints paginados (10)
+
+| Endpoint | Notas |
+|---|---|
+| `GET /api/v1/admin/billing/invoices` | Primer endpoint paginado. `ORDER BY created_at DESC` |
+| `GET /api/v1/admin/billing/invoices/:id/payments` | Pagos aplicados a una invoice |
+| `GET /api/v1/admin/billing/payments/:id/invoices` | Invoices cubiertos por un payment |
+| `GET /api/v1/admin/billing/units/:id/invoices` | Invoices de una unidad |
+| `GET /api/v1/admin/users` | Ver nota sobre post-filter de scoping |
+| `GET /api/v1/admin/users/:id/units` | Unidades asignadas al user |
+| `GET /api/v1/admin/payments/admin/payments` | Historial de payments (admin) |
+| `GET /api/v1/admin/petty-cash/funds/:buildingId/entries` | Ledger entries |
+| `GET /api/v1/admin/buildings` | Edificios |
+| `GET /api/v1/admin/buildings/:id/units` | Unidades de un edificio |
+
+**Notas importantes**:
+- Los endpoints de **detalle** (`GET /users/:id`, `GET /billing/units/:id/balance`, etc.) devuelven el objeto plano, sin `{data,metadata}`.
+- Las **rutas públicas** `/buildings`, `/buildings/:id`, `/buildings/:id/units` (sin prefijo `/admin`) y los **mirrors APK** bajo `/api/v1/app/buildings/*` **mantienen array plano** — se usan para el flujo de registro sin auth. No tocarlas.
+- `GET /api/v1/app/payments` (APK, historial del propio resident) **no está paginado** — devuelve array plano. Volumen esperado pequeño.
+- **`GET /admin/users` scoping tangled**: el post-filter por building (Board scoping) corre en memoria después del SELECT — `metadata.total` refleja el set post-filtrado pero el `range()` de Supabase se aplica antes del post-filter. Para casos de board con pocos users esto es correcto; si el universo SQL-level crece mucho, migrar a una vista o RPC. Comentario en `SupabaseUserRepository.findAllPaginated`.
+
+#### Ejemplo de consumo (cliente)
+
+```js
+const res = await fetch('/api/v1/admin/billing/invoices?page=2&limit=20&status=PENDING');
+const { data: invoices, metadata } = await res.json();
+console.log(`Mostrando ${invoices.length} de ${metadata.total} (página ${metadata.page}/${metadata.totalPages})`);
+
+// "Dame todo sin paginar" — útil para exports, autocompletes, dropdowns.
+const all = await fetch('/api/v1/admin/users?limit=all');
+const { data: users, metadata: meta } = await all.json();
+if (meta.hasNextPage) {
+    console.warn(`Truncado: el servidor devolvió los primeros ${meta.limit} de ${meta.total}`);
+}
+```
 
 ---
 

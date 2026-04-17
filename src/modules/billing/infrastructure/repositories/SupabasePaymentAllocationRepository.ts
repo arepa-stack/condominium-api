@@ -2,6 +2,7 @@ import { IPaymentAllocationRepository, PaymentAllocationResult } from '../../dom
 import { PaymentAllocation } from '../../domain/entities/PaymentAllocation';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class SupabasePaymentAllocationRepository implements IPaymentAllocationRepository {
     private toDomain(data: unknown): PaymentAllocation {
@@ -104,5 +105,51 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
                 allocated_at: allocation.created_at
             };
         });
+    }
+
+    async findPaymentsByInvoiceIdPaginated(
+        invoiceId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: PaymentAllocationResult[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        const { data, count, error } = await supabase
+            .from('payment_allocations')
+            .select('*, payments(*)', { count: 'exact' })
+            .eq('invoice_id', invoiceId)
+            .range(from, to);
+
+        if (error) throw new DomainError('Error fetching payments for invoice', 'DB_ERROR', 500);
+
+        const items = (data || []).map((allocation: any) => ({
+            ...allocation.payments,
+            allocated_amount: allocation.amount,
+            allocation_id: allocation.id,
+            allocated_at: allocation.created_at,
+        }));
+
+        return { items, total: count || 0 };
+    }
+
+    async findInvoicesByPaymentIdPaginated(
+        paymentId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: any[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        const { data, count, error } = await supabase
+            .from('payment_allocations')
+            .select('*, invoices(*)', { count: 'exact' })
+            .eq('payment_id', paymentId)
+            .range(from, to);
+
+        if (error) throw new DomainError('Error fetching invoices for payment', 'DB_ERROR', 500);
+
+        const items = (data || []).map((allocation: any) => ({
+            ...allocation.invoices,
+            allocated_amount: allocation.amount,
+            allocation_id: allocation.id,
+            allocated_at: allocation.created_at,
+        }));
+
+        return { items, total: count || 0 };
     }
 }

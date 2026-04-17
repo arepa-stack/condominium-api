@@ -1,5 +1,7 @@
 import { IUserRepository, FindAllUsersFilters } from '@/modules/users/domain/repository';
 import { User } from '@/modules/users/domain/entities/User';
+import { UserUnit } from '@/modules/users/domain/entities/UserUnit';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class MockUserRepository implements IUserRepository {
     public users: User[] = [];
@@ -31,6 +33,25 @@ export class MockUserRepository implements IUserRepository {
             filtered = filtered.filter(u => u.units.some(unit => unit.building_id === filters.building_id));
         }
         return filtered;
+    }
+
+    async findAllPaginated(
+        filters: FindAllUsersFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: User[]; total: number }> {
+        const all = await this.findAll(filters);
+        const { from, to } = toRange(pagination);
+        return { items: all.slice(from, to + 1), total: all.length };
+    }
+
+    async findUnitsByProfilePaginated(
+        profileId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: UserUnit[]; total: number }> {
+        const user = await this.findById(profileId);
+        const units = user?.units ?? [];
+        const { from, to } = toRange(pagination);
+        return { items: units.slice(from, to + 1), total: units.length };
     }
 
     async delete(id: string): Promise<void> {
