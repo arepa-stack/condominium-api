@@ -117,6 +117,30 @@ describe("User - Multi-Building Board Permissions", () => {
         expect(user.isAdmin()).toBe(true);
     });
 
+    test("getAffiliatedBuildings returns the union of unit and board-role buildings", () => {
+        const user = new User({
+            id: "user-aff",
+            email: "aff@example.com",
+            name: "Aff",
+            role: UserRole.BOARD,
+            status: UserStatus.ACTIVE,
+            units: [
+                new UserUnit({ unit_id: "u-a", building_id: "building-A", is_primary: true }),
+                new UserUnit({ unit_id: "u-c", building_id: "building-C", is_primary: false }),
+            ],
+            buildingRoles: [
+                new BuildingRole({ building_id: "building-A", role: "board" }),
+                new BuildingRole({ building_id: "building-B", role: "board" }),
+            ],
+        });
+
+        const affiliated = user.getAffiliatedBuildings().sort();
+        expect(affiliated).toEqual(["building-A", "building-B", "building-C"]);
+
+        // And the strictly-governance one only yields board buildings:
+        expect(user.getBuildingsWhereBoard().sort()).toEqual(["building-A", "building-B"]);
+    });
+
     test("BuildingRole entity", () => {
         const boardRole = new BuildingRole({
             building_id: "building-1",

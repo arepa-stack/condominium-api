@@ -14,6 +14,51 @@ describe("GetUsers Building Filter", () => {
         useCase = new GetUsers(mockRepo);
     });
 
+    test("board-in-X + resident-in-Y requester is scoped to X only (no leak of Y)", async () => {
+        // Phase 3 regression guard: previously the scoping merged
+        // [...units, ...buildingRoles], so this requester could list users of
+        // building-Y as well — a leak.
+        const boardXresidentY = new User({
+            id: "requester-1",
+            email: "mixed@test.com",
+            name: "Board-in-X Resident-in-Y",
+            role: UserRole.BOARD,
+            status: UserStatus.ACTIVE,
+            units: [{ unit_id: "u-y", building_id: "building-Y", is_primary: true } as any],
+            buildingRoles: [new BuildingRole({ building_id: "building-X", role: "board" })],
+        });
+
+        mockRepo.findById = mock(async () => boardXresidentY);
+        const findAllMock = mock(async () => []);
+        mockRepo.findAll = findAllMock;
+
+        // No building_id in filters → use case must default to a building the
+        // requester governs (building-X), never building-Y.
+        await useCase.execute({ requesterId: "requester-1" });
+
+        expect(findAllMock).toHaveBeenCalled();
+        expect((findAllMock.mock.calls[0][0] as any).building_id).toBe("building-X");
+    });
+
+    test("board-in-X + resident-in-Y requesting users of Y → 403 (no board authority over Y)", async () => {
+        const boardXresidentY = new User({
+            id: "requester-2",
+            email: "mixed2@test.com",
+            name: "Board-in-X Resident-in-Y",
+            role: UserRole.BOARD,
+            status: UserStatus.ACTIVE,
+            units: [{ unit_id: "u-y", building_id: "building-Y", is_primary: true } as any],
+            buildingRoles: [new BuildingRole({ building_id: "building-X", role: "board" })],
+        });
+
+        mockRepo.findById = mock(async () => boardXresidentY);
+        mockRepo.findAll = mock(async () => []);
+
+        await expect(
+            useCase.execute({ requesterId: "requester-2", filters: { building_id: "building-Y" } })
+        ).rejects.toThrow("You do not have access to this building");
+    });
+
     test("should filter users by building_id including detached roles", async () => {
         const admin = new User({
             id: "admin-1",

@@ -152,6 +152,27 @@ export class User {
         return this.buildingRoles.some(r => r.isBoardMember());
     }
 
+    /**
+     * Every building this user is affiliated with: either owns/occupies a unit
+     * there OR holds a board role there. Use this when deciding whether a TARGET
+     * user is reachable by a board requester — a target can be connected to a
+     * building via a unit or via a board role, not just units.
+     *
+     * NOT to be used for requester-side authority checks. For that, use
+     * getBuildingsWhereBoard() which is strictly the buildings where this user
+     * may govern (i.e. scoping for listing/approving/modifying resources).
+     */
+    getAffiliatedBuildings(): string[] {
+        const ids = new Set<string>();
+        for (const u of this.units) {
+            if (u.building_id) ids.add(u.building_id);
+        }
+        for (const r of this.buildingRoles) {
+            if (r.building_id) ids.add(r.building_id);
+        }
+        return Array.from(ids);
+    }
+
     toJSON(): UserProps {
         return {
             ...this.props,

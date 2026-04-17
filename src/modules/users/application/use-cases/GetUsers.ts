@@ -33,12 +33,14 @@ export class GetUsers {
         if (request.filters?.role) filters.role = request.filters.role as any; // Cast for now, validation in Controller
         if (request.filters?.status) filters.status = request.filters.status as any;
 
-        // Enforce building scope for Board members
+        // Enforce building scope for Board members.
+        //
+        // Authority comes exclusively from building_members (via
+        // getBuildingsWhereBoard). A user who merely has a unit in building Y
+        // does NOT get board-level visibility over Y — that was a leak in the
+        // previous dual-scoping logic.
         if (requester.isBoardMember()) {
-            const unitBuildings = requester.units.map(u => u.building_id);
-            const roleBuildings = requester.buildingRoles.map(r => r.building_id);
-            const validBuildings = Array.from(new Set([...unitBuildings, ...roleBuildings]))
-                .filter((id): id is string => !!id);
+            const validBuildings = requester.getBuildingsWhereBoard();
 
             if (validBuildings.length === 0) {
                 return [];
