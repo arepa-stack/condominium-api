@@ -178,6 +178,8 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }
 
         return await getAllInvoices.execute({
+            page: query.page,
+            limit: query.limit,
             unit_id: query.unit_id,
             building_id: query.building_id,
             status: query.status,
