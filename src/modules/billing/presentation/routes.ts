@@ -7,6 +7,8 @@ import { GetUnitBalance } from '../application/use-cases/GetUnitBalance';
 import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
 import { GetAllInvoices } from '../application/use-cases/GetAllInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
+import { GetInvoicePayments } from '../application/use-cases/GetInvoicePayments';
+import { GetPaymentInvoices } from '../application/use-cases/GetPaymentInvoices';
 import { UnauthorizedError, NotFoundError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { InvoiceTag } from '@/core/domain/enums';
@@ -27,6 +29,8 @@ const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerReposit
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getAllInvoices = new GetAllInvoices(invoiceRepository);
 const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
+const getInvoicePayments = new GetInvoicePayments(allocationRepository);
+const getPaymentInvoices = new GetPaymentInvoices(allocationRepository);
 const previewInvoices = new PreviewInvoicesFromExcel(unitRepository, excelParser);
 const bulkLoadInvoices = new BulkLoadInvoicesFromExcel(invoiceRepository, unitRepository);
 
@@ -96,16 +100,66 @@ const BalanceSchema = t.Object({
     details: t.Array(BalanceDetailSchema)
 });
 
+const PaginationMetadataSchema = t.Object({
+    total: t.Number(),
+    page: t.Number(),
+    limit: t.Number(),
+    totalPages: t.Number(),
+    hasNextPage: t.Boolean(),
+    hasPrevPage: t.Boolean()
+});
+
 const PaginatedAdminInvoiceSchema = t.Object({
     data: t.Array(AdminInvoiceSchema),
-    metadata: t.Object({
-        total: t.Number(),
-        page: t.Number(),
-        limit: t.Number(),
-        totalPages: t.Number(),
-        hasNextPage: t.Boolean(),
-        hasPrevPage: t.Boolean()
-    })
+    metadata: PaginationMetadataSchema
+});
+
+const InvoicePaymentSchema = t.Object({
+    id: t.String(),
+    amount: t.Number(),
+    status: t.String(),
+    payment_date: t.String(),
+    method: t.String(),
+    reference: t.Optional(t.String()),
+    allocated_amount: t.Number(),
+    allocation_id: t.String(),
+    allocated_at: t.Any(),
+    user: t.Optional(t.Object({
+        id: t.String(),
+        name: t.String()
+    }))
+});
+
+const PaginatedInvoicePaymentSchema = t.Object({
+    data: t.Array(InvoicePaymentSchema),
+    metadata: PaginationMetadataSchema
+});
+
+const PaymentInvoiceSchema = t.Object({
+    id: t.String(),
+    unit_id: t.String(),
+    amount: t.Number(),
+    period: t.String(),
+    description: t.Optional(t.Union([t.String(), t.Null()])),
+    receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
+    status: t.String(),
+    paid_amount: t.Optional(t.Number()),
+    due_date: t.Optional(t.Any()),
+    created_at: t.Optional(t.Any()),
+    updated_at: t.Optional(t.Any()),
+    allocated_amount: t.Number(),
+    allocation_id: t.String(),
+    allocated_at: t.Any()
+});
+
+const PaginatedPaymentInvoiceSchema = t.Object({
+    data: t.Array(PaymentInvoiceSchema),
+    metadata: PaginationMetadataSchema
+});
+
+const PaginatedInvoiceSchema = t.Object({
+    data: t.Array(InvoiceSchema),
+    metadata: PaginationMetadataSchema
 });
 
 export const billingRoutes = new Elysia({ prefix: '/billing' })
@@ -190,7 +244,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     }, {
         query: t.Object({
             page: t.Optional(t.Numeric()),
-            limit: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
             unit_id: t.Optional(t.String()),
             building_id: t.Optional(t.String()),
             status: t.Optional(t.String()),
@@ -345,16 +399,25 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see invoices');
         }
 
-        const invoices = await getUnitInvoices.execute(params.id, query.tag as InvoiceTag | undefined);
-        return invoices.map(inv => inv.toJSON());
+        const result = await getUnitInvoices.execute(params.id, {
+            tag: query.tag as InvoiceTag | undefined,
+            page: query.page,
+            limit: query.limit,
+        });
+        return {
+            data: result.data.map(inv => inv.toJSON()),
+            metadata: result.metadata,
+        };
     }, {
         query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
             tag: t.Optional(t.Union([
                 t.Literal(InvoiceTag.NORMAL),
                 t.Literal(InvoiceTag.PETTY_CASH)
             ]))
         }),
-        response: t.Array(InvoiceSchema),
+        response: PaginatedInvoiceSchema,
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Get all invoices for a unit',
@@ -405,7 +468,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }
     })
     // 4. Get Payments (allocations) for an Invoice
-    .get('/invoices/:id/payments', async ({ params, profile }) => {
+    .get('/invoices/:id/payments', async ({ params, query, profile }) => {
         // Auth: Admin or Board (or resident if they own the unit of this invoice)
         // For now, simpler: Admin or Board
         if (!profile.isAdmin && !profile.isBoardAnywhere) {
@@ -413,24 +476,16 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             // but for simplicity return allocations. Repository handles basic fetch.
         }
 
-        return await allocationRepository.findPaymentsByInvoiceId(params.id);
+        return await getInvoicePayments.execute(params.id, {
+            page: query.page,
+            limit: query.limit,
+        });
     }, {
-        response: t.Array(t.Object({
-            id: t.String(),
-            amount: t.Number(),
-            status: t.String(),
-            payment_date: t.String(),
-            method: t.String(),
-            reference: t.Optional(t.String()),
-            allocated_amount: t.Number(),
-            allocation_id: t.String(),
-            allocated_at: t.Any(),
-            user: t.Optional(t.Object({
-                id: t.String(),
-                name: t.String()
-            }))
-            // Add other payment fields if needed
-        })),
+        query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')]))
+        }),
+        response: PaginatedInvoicePaymentSchema,
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Get all payments for a specific invoice',
@@ -438,30 +493,22 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }
     })
     // 4.5. Get Invoices for a Payment
-    .get('/payments/:id/invoices', async ({ params, profile }) => {
+    .get('/payments/:id/invoices', async ({ params, query, profile }) => {
         // Auth: Admin or Board
         if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can see payment allocations');
         }
 
-        return await allocationRepository.findInvoicesByPaymentId(params.id);
+        return await getPaymentInvoices.execute(params.id, {
+            page: query.page,
+            limit: query.limit,
+        });
     }, {
-        response: t.Array(t.Object({
-            id: t.String(),
-            unit_id: t.String(),
-            amount: t.Number(),
-            period: t.String(),
-            description: t.Optional(t.Union([t.String(), t.Null()])),
-            receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
-            status: t.String(),
-            paid_amount: t.Optional(t.Number()),
-            due_date: t.Optional(t.Any()),
-            created_at: t.Optional(t.Any()),
-            updated_at: t.Optional(t.Any()),
-            allocated_amount: t.Number(),
-            allocation_id: t.String(),
-            allocated_at: t.Any()
-        })),
+        query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')]))
+        }),
+        response: PaginatedPaymentInvoiceSchema,
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Get all invoices for a specific payment',

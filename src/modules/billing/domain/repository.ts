@@ -2,7 +2,7 @@ import { Invoice } from './entities/Invoice';
 import { PaymentAllocation } from './entities/PaymentAllocation';
 import { CreditLedgerEntry } from './entities/CreditLedgerEntry';
 import { InvoiceTag } from '@/core/domain/enums';
-import { PaginatedResult, PaginationFilters } from '@/core/domain/pagination';
+import { PaginationFilters } from '@/core/domain/pagination';
 
 export interface AdminInvoiceResult {
     id: string;
@@ -41,7 +41,7 @@ export interface PaymentAllocationResult {
     };
 }
 
-export interface FindAllInvoicesFilters extends PaginationFilters {
+export interface FindAllInvoicesFilters {
     unit_id?: string;
     building_id?: string;
     user_id?: string;
@@ -49,14 +49,27 @@ export interface FindAllInvoicesFilters extends PaginationFilters {
     period?: string;
     type?: string;
     tag?: InvoiceTag;
+    page?: number | string;
+    limit?: number | string;
 }
 
 export interface IInvoiceRepository {
     create(invoice: Invoice): Promise<Invoice>;
     findById(id: string): Promise<Invoice | null>;
     findAll(filters?: FindAllInvoicesFilters): Promise<Invoice[]>;
-    findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>>;
-    findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>>;
+    findAllPaginated(
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: Invoice[]; total: number }>;
+    findInvoicesForAdmin(
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: AdminInvoiceResult[]; total: number }>;
+    findByBuildingId(
+        buildingId: string,
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: AdminInvoiceResult[]; total: number }>;
     update(invoice: Invoice): Promise<Invoice>;
     createBatch(invoices: Invoice[]): Promise<Invoice[]>;
 }
@@ -76,4 +89,12 @@ export interface IPaymentAllocationRepository {
     findByInvoiceId(invoiceId: string): Promise<PaymentAllocation[]>;
     findPaymentsByInvoiceId(invoiceId: string): Promise<PaymentAllocationResult[]>; // Returns Payment details joined
     findInvoicesByPaymentId(paymentId: string): Promise<any[]>; // Returns Invoice details joined
+    findPaymentsByInvoiceIdPaginated(
+        invoiceId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: PaymentAllocationResult[]; total: number }>;
+    findInvoicesByPaymentIdPaginated(
+        paymentId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: any[]; total: number }>;
 }

@@ -1,5 +1,5 @@
 import { IInvoiceRepository, FindAllInvoicesFilters, AdminInvoiceResult } from '../../domain/repository';
-import { PaginatedResult } from '@/core/domain/pagination';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 import { Invoice, InvoiceProps, InvoiceStatus, InvoiceType } from '../../domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
@@ -182,11 +182,11 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
     }
 
     // Admin view with joins
-    async findInvoicesForAdmin(filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>> {
-        const limit = filters?.limit || 10;
-        const page = filters?.page || 1;
-        const from = (page - 1) * limit;
-        const to = from + limit - 1;
+    async findInvoicesForAdmin(
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: AdminInvoiceResult[]; total: number }> {
+        const { from, to } = toRange(pagination);
 
         const selectStr = `
             *,
@@ -237,7 +237,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
             total = merged.length;
-            data = merged.slice(from, from + limit);
+            data = merged.slice(from, to + 1);
         } else {
             // Simple case
             let query = supabase
@@ -260,18 +260,68 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
         }
 
         const items = data.map((inv) => this.toAdminResult(inv));
-        const totalPages = Math.ceil(total / limit);
+        return { items, total };
+    }
+
+    async findAllPaginated(
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: Invoice[]; total: number }> {
+        const { from, to } = toRange(pagination);
+
+        if (filters?.building_id && !filters?.unit_id) {
+            // Mirror findAll's split logic for building-level + unit-level invoices.
+            const applyCommonFilters = (q: any) => {
+                if (filters?.status) q = q.eq('status', filters.status);
+                if (filters?.period) q = q.eq('period', filters.period);
+                if (filters?.type) q = q.eq('type', filters.type);
+                if (filters?.tag) q = q.eq('tag', filters.tag);
+                return q;
+            };
+
+            let q1 = supabase.from('invoices').select('*, units(building_id)')
+                .eq('building_id', filters.building_id);
+            q1 = applyCommonFilters(q1);
+
+            let q2 = supabase.from('invoices').select('*, units!inner(building_id)')
+                .eq('units.building_id', filters.building_id)
+                .not('unit_id', 'is', null);
+            q2 = applyCommonFilters(q2);
+
+            const [r1, r2] = await Promise.all([q1, q2]);
+            if (r1.error) throw new DomainError('Error fetching invoices: ' + r1.error.message, 'DB_ERROR', 500);
+            if (r2.error) throw new DomainError('Error fetching invoices: ' + r2.error.message, 'DB_ERROR', 500);
+
+            const seen = new Set<string>();
+            const merged = [...(r1.data || []), ...(r2.data || [])].filter(d => {
+                if (seen.has(d.id)) return false;
+                seen.add(d.id);
+                return true;
+            });
+            merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+            const total = merged.length;
+            const sliced = merged.slice(from, to + 1);
+            return { items: sliced.map(d => this.toDomain(d)), total };
+        }
+
+        let query = supabase.from('invoices')
+            .select('*, units(building_id)', { count: 'exact' })
+            .order('created_at', { ascending: false });
+
+        if (filters?.unit_id) query = query.eq('unit_id', filters.unit_id);
+        if (filters?.building_id) query = query.eq('building_id', filters.building_id);
+        if (filters?.status) query = query.eq('status', filters.status);
+        if (filters?.period) query = query.eq('period', filters.period);
+        if (filters?.type) query = query.eq('type', filters.type);
+        if (filters?.tag) query = query.eq('tag', filters.tag);
+
+        const { data, count, error } = await query.range(from, to);
+        if (error) throw new DomainError('Error fetching invoices: ' + error.message, 'DB_ERROR', 500);
 
         return {
-            data: items,
-            metadata: {
-                total,
-                page,
-                limit,
-                totalPages,
-                hasNextPage: page < totalPages,
-                hasPrevPage: page > 1
-            }
+            items: (data || []).map(d => this.toDomain(d)),
+            total: count || 0,
         };
     }
 
@@ -312,7 +362,11 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
         };
     }
 
-    async findByBuildingId(buildingId: string, filters?: FindAllInvoicesFilters): Promise<PaginatedResult<AdminInvoiceResult>> {
-        return this.findInvoicesForAdmin({ ...filters, building_id: buildingId });
+    async findByBuildingId(
+        buildingId: string,
+        filters: FindAllInvoicesFilters,
+        pagination: PaginationFilters
+    ): Promise<{ items: AdminInvoiceResult[]; total: number }> {
+        return this.findInvoicesForAdmin({ ...filters, building_id: buildingId }, pagination);
     }
 }

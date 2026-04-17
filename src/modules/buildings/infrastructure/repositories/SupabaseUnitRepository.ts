@@ -2,6 +2,7 @@ import { IUnitRepository } from '../../domain/repository';
 import { Unit, UnitProps } from '../../domain/entities/Unit';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class SupabaseUnitRepository implements IUnitRepository {
     private toDomain(data: Record<string, unknown>): Unit {
@@ -80,6 +81,28 @@ export class SupabaseUnitRepository implements IUnitRepository {
         }
 
         return data.map(this.toDomain);
+    }
+
+    async findByBuildingIdPaginated(
+        buildingId: string,
+        pagination: PaginationFilters
+    ): Promise<{ items: Unit[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        const { data, count, error } = await supabase
+            .from('units')
+            .select('*', { count: 'exact' })
+            .eq('building_id', buildingId)
+            .order('name', { ascending: true })
+            .range(from, to);
+
+        if (error) {
+            throw new DomainError('Error fetching units: ' + error.message, 'DB_ERROR', 500);
+        }
+
+        return {
+            items: (data || []).map(d => this.toDomain(d)),
+            total: count || 0,
+        };
     }
 
     async findById(id: string): Promise<Unit | null> {

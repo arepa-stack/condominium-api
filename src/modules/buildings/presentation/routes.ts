@@ -54,6 +54,25 @@ const BatchUnitsResponse = t.Object({
     units: t.Array(UnitSchema)
 });
 
+const PaginationMetadataSchema = t.Object({
+    total: t.Number(),
+    page: t.Number(),
+    limit: t.Number(),
+    totalPages: t.Number(),
+    hasNextPage: t.Boolean(),
+    hasPrevPage: t.Boolean()
+});
+
+const PaginatedBuildingSchema = t.Object({
+    data: t.Array(BuildingSchema),
+    metadata: PaginationMetadataSchema
+});
+
+const PaginatedUnitSchema = t.Object({
+    data: t.Array(UnitSchema),
+    metadata: PaginationMetadataSchema
+});
+
 // Public routes — no auth required (used for registration flow)
 export const buildingPublicRoutes = new Elysia({ prefix: '/buildings' })
     .get('/', async () => {
@@ -106,6 +125,48 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (error || !user) throw new UnauthorizedError('Invalid token');
         return { user };
+    })
+    .get('/', async ({ query }) => {
+        const result = await getBuildings.executePaginated({
+            page: query.page,
+            limit: query.limit,
+        });
+        return {
+            data: result.data.map(b => b.toJSON()),
+            metadata: result.metadata,
+        };
+    }, {
+        query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
+        }),
+        response: PaginatedBuildingSchema,
+        detail: {
+            tags: ['Admin - Buildings'],
+            summary: 'List all buildings (Admin/Board, paginated)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .get('/:id/units', async ({ params, query }) => {
+        const result = await getUnitsByBuilding.executePaginated(params.id, {
+            page: query.page,
+            limit: query.limit,
+        });
+        return {
+            data: result.data.map(u => u.toJSON()),
+            metadata: result.metadata,
+        };
+    }, {
+        query: t.Object({
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
+        }),
+        response: PaginatedUnitSchema,
+        detail: {
+            tags: ['Admin - Buildings'],
+            summary: 'List units for a building (Admin/Board, paginated)',
+            security: [{ BearerAuth: [] }]
+        }
     })
     .post('/', async ({ body, user }) => {
         return await createBuilding.execute({

@@ -14,6 +14,8 @@ export const createMockUserRepository = (): IUserRepository => ({
     findByEmail: mock(async (email: string) => null),
     update: mock(async (user: User) => user),
     findAll: mock(async () => []),
+    findAllPaginated: mock(async () => ({ items: [], total: 0 })),
+    findUnitsByProfilePaginated: mock(async () => ({ items: [], total: 0 })),
     delete: mock(async () => { })
 });
 
@@ -21,8 +23,9 @@ export const createMockInvoiceRepository = (): IInvoiceRepository => ({
     create: mock(async (invoice: Invoice) => invoice),
     findById: mock(async (id: string) => null),
     findAll: mock(async () => []),
-    findInvoicesForAdmin: mock(async () => []),
-    findByBuildingId: mock(async () => []),
+    findAllPaginated: mock(async () => ({ items: [], total: 0 })),
+    findInvoicesForAdmin: mock(async () => ({ items: [], total: 0 })),
+    findByBuildingId: mock(async () => ({ items: [], total: 0 })),
     update: mock(async (invoice: Invoice) => invoice),
     createBatch: mock(async (invoices: Invoice[]) => invoices)
 });
@@ -31,6 +34,7 @@ export const createMockPaymentRepository = (): IPaymentRepository => ({
     create: mock(async (payment: Payment) => payment),
     findById: mock(async (id: string) => null),
     findAll: mock(async () => []),
+    findAllPaginated: mock(async () => ({ items: [], total: 0 })),
     update: mock(async (payment: Payment) => payment),
     findByUserId: mock(async () => []),
     findByUnit: mock(async () => []),
@@ -43,7 +47,9 @@ export const createMockAllocationRepository = (): IPaymentAllocationRepository =
     findByPaymentId: mock(async (id: string) => []),
     findByInvoiceId: mock(async (id: string) => []),
     findPaymentsByInvoiceId: mock(async (id: string) => []),
-    findInvoicesByPaymentId: mock(async (id: string) => [])
+    findInvoicesByPaymentId: mock(async (id: string) => []),
+    findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),
+    findInvoicesByPaymentIdPaginated: mock(async () => ({ items: [], total: 0 }))
 });
 
 export const createMockCreditLedgerRepository = (): ICreditLedgerRepository => ({

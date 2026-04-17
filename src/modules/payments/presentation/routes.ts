@@ -113,6 +113,20 @@ const PaymentSummarySchema = t.Object({
     recent_transactions: t.Array(PaymentTransactionSchema)
 });
 
+const PaginationMetadataSchema = t.Object({
+    total: t.Number(),
+    page: t.Number(),
+    limit: t.Number(),
+    totalPages: t.Number(),
+    hasNextPage: t.Boolean(),
+    hasPrevPage: t.Boolean()
+});
+
+const PaginatedPaymentSchema = t.Object({
+    data: t.Array(PaymentSchema),
+    metadata: PaginationMetadataSchema
+});
+
 const SuccessResponse = t.Object({
     success: t.Boolean()
 });
@@ -309,25 +323,32 @@ function createUserRoutes(tag: string) {
 const paymentAdminRoutes = new Elysia()
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
     .get('/admin/payments', async ({ profile, query }) => {
-        const payments = await getAllPayments.execute({
+        const result = await getAllPayments.execute({
             requesterId: profile.id,
             filters: {
                 building_id: query.building_id,
                 status: query.status,
                 year: query.year,
-                unit_id: query.unit_id
+                unit_id: query.unit_id,
+                page: query.page,
+                limit: query.limit
             }
         });
 
-        return payments.map(p => p.toJSON());
+        return {
+            data: result.data.map(p => p.toJSON()),
+            metadata: result.metadata,
+        };
     }, {
         query: t.Object({
             building_id: t.Optional(t.String()),
             status: t.Optional(t.String()),
             year: t.Optional(t.String()),
             unit_id: t.Optional(t.String()),
+            page: t.Optional(t.Numeric()),
+            limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
         }),
-        response: t.Array(PaymentSchema),
+        response: PaginatedPaymentSchema,
         detail: {
             tags: ['Admin - Payments'],
             summary: 'List all payments (Admin/Board)',

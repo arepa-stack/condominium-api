@@ -1,5 +1,6 @@
 import { IBuildingRepository } from '@/modules/buildings/domain/repository';
 import { Building } from '@/modules/buildings/domain/entities/Building';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class MockBuildingRepository implements IBuildingRepository {
     private buildings: Building[] = [];
@@ -11,6 +12,16 @@ export class MockBuildingRepository implements IBuildingRepository {
 
     async findAll(): Promise<Building[]> {
         return this.buildings;
+    }
+
+    async findAllPaginated(
+        pagination: PaginationFilters
+    ): Promise<{ items: Building[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        return {
+            items: this.buildings.slice(from, to + 1),
+            total: this.buildings.length,
+        };
     }
 
     async findById(id: string): Promise<Building | null> {

@@ -123,6 +123,20 @@ const TransparencySchema = t.Object({
     collection_percentage: t.Number(),
 });
 
+const PaginationMetadataSchema = t.Object({
+    total: t.Number(),
+    page: t.Number(),
+    limit: t.Number(),
+    totalPages: t.Number(),
+    hasNextPage: t.Boolean(),
+    hasPrevPage: t.Boolean(),
+});
+
+const PaginatedPettyCashEntrySchema = t.Object({
+    data: t.Array(PettyCashEntrySchema),
+    metadata: PaginationMetadataSchema,
+});
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 function createReadRoutes(tag: string) {
@@ -136,20 +150,21 @@ function createReadRoutes(tag: string) {
             detail: { tags: [tag], summary: 'Get fund balance for a building' },
         })
         .get('/funds/:buildingId/entries', async ({ params, query }) => {
-            return await getHistory.execute(params.buildingId, {
+            const result = await getHistory.execute(params.buildingId, {
                 type: query.type as PettyCashEntryType,
                 category: query.category as PettyCashCategory,
-                page: query.page ? Number(query.page) : 1,
-                limit: query.limit ? Number(query.limit) : 10,
+                page: query.page,
+                limit: query.limit,
             });
+            return result as any;
         }, {
             query: t.Object({
                 type: t.Optional(t.String()),
                 category: t.Optional(t.String()),
                 page: t.Optional(t.Numeric()),
-                limit: t.Optional(t.Numeric()),
+                limit: t.Optional(t.Union([t.Numeric(), t.Literal('all')])),
             }),
-            response: t.Array(PettyCashEntrySchema),
+            response: PaginatedPettyCashEntrySchema,
             detail: { tags: [tag], summary: 'List ledger entries for a building fund' },
         })
         .get('/funds/:buildingId/transparency', async ({ params, query }) => {

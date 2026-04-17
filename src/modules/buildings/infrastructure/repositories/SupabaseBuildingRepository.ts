@@ -2,6 +2,7 @@ import { Building, BuildingProps } from '../../domain/entities/Building';
 import { IBuildingRepository } from '../../domain/repository';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
+import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class SupabaseBuildingRepository implements IBuildingRepository {
     private toDomain(data: any): Building {
@@ -54,6 +55,26 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
         }
 
         return data.map(this.toDomain);
+    }
+
+    async findAllPaginated(
+        pagination: PaginationFilters
+    ): Promise<{ items: Building[]; total: number }> {
+        const { from, to } = toRange(pagination);
+        const { data, count, error } = await supabase
+            .from('buildings')
+            .select('*', { count: 'exact' })
+            .order('name', { ascending: true })
+            .range(from, to);
+
+        if (error) {
+            throw new DomainError('Error fetching buildings: ' + error.message, 'DB_ERROR', 500);
+        }
+
+        return {
+            items: (data || []).map(d => this.toDomain(d)),
+            total: count || 0,
+        };
     }
 
     async findById(id: string): Promise<Building | null> {
