@@ -1,6 +1,5 @@
 import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
 import { User } from '../../domain/entities/User';
-import { UserRole } from '@/core/domain/enums';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
 
 interface GetUsersRequest {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { User } from "@/modules/users/domain/entities/User";
 import { UserUnit } from "@/modules/users/domain/entities/UserUnit";
 import { BuildingRole } from "@/modules/users/domain/entities/BuildingRole";
-import { UserRole, UserStatus } from "@/core/domain/enums";
+import { UserStatus } from "@/core/domain/enums";
 
 describe("User - Multi-Building Board Permissions", () => {
     test("User can be board in Building A and resident (no specific role) in Building B", () => {
@@ -10,7 +10,7 @@ describe("User - Multi-Building Board Permissions", () => {
             id: "user-1",
             email: "john@example.com",
             name: "John Doe",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [
                 new UserUnit({
@@ -48,7 +48,7 @@ describe("User - Multi-Building Board Permissions", () => {
             id: "user-2",
             email: "jane@example.com",
             name: "Jane Smith",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [
                 new UserUnit({
@@ -79,7 +79,7 @@ describe("User - Multi-Building Board Permissions", () => {
             id: "user-3",
             email: "resident@example.com",
             name: "Regular Resident",
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [
                 new UserUnit({
@@ -101,7 +101,7 @@ describe("User - Multi-Building Board Permissions", () => {
             id: "admin-1",
             email: "admin@example.com",
             name: "System Admin",
-            role: UserRole.ADMIN,
+            app_role: 'admin' as const,
             status: UserStatus.ACTIVE,
             units: [],
             buildingRoles: [
@@ -122,7 +122,7 @@ describe("User - Multi-Building Board Permissions", () => {
             id: "user-aff",
             email: "aff@example.com",
             name: "Aff",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [
                 new UserUnit({ unit_id: "u-a", building_id: "building-A", is_primary: true }),

@@ -10,6 +10,9 @@ const userRepo = new SupabaseUserRepository();
 const registerResidentUseCase = new RegisterResident(authRepo, userRepo);
 const loginUserUseCase = new LoginUser(authRepo, userRepo);
 
+// Phase 4 contract: the legacy `role` field is GONE. Clients read
+// `app_role` for global capability and `buildingRoles[]` for per-building
+// roles. Panel-admin gate rule: `app_role === 'admin' || buildingRoles.length > 0`.
 const AuthResponse = t.Object({
     access_token: t.String(),
     refresh_token: t.String(),
@@ -17,7 +20,6 @@ const AuthResponse = t.Object({
     user: t.Object({
         id: t.String(),
         email: t.Optional(t.String()),
-        role: t.String(), // Legacy. Kept until Phase 4. Clients should migrate to app_role + buildingRoles.
         app_role: t.Union([t.Literal('admin'), t.Literal('user')]),
         units: t.Array(t.Object({
             unit_id: t.String(),
@@ -45,7 +47,6 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
             ...session,
             user: {
                 ...session.user,
-                role: 'RESIDENT', // Legacy — new residents have app_role='user' and no buildingRoles.
                 app_role: 'user' as const,
                 units: [],
                 buildingRoles: []
@@ -75,10 +76,9 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
             user: {
                 id: user.id,
                 email: user.email,
-                role: user.role,
                 app_role: user.app_role,
-                units: user.units.map(u => u.toJSON()),  // Include units
-                buildingRoles: user.buildingRoles.map(r => r.toJSON()) // Include detached roles
+                units: user.units.map(u => u.toJSON()),
+                buildingRoles: user.buildingRoles.map(r => r.toJSON())
             }
         };
     }, {

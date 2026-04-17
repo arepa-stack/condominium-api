@@ -1,7 +1,7 @@
 import { IAuthRepository, AuthSession } from '../repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
-import { User } from '@/modules/users/domain/entities/User'; // Updated import
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { User } from '@/modules/users/domain/entities/User';
+import { UserStatus } from '@/core/domain/enums';
 
 interface RegisterRequest {
     name: string;
@@ -22,12 +22,14 @@ export class RegisterResident {
         // 1. Create Auth User in Supabase
         const authUser = await this.authRepo.signUp(request.email, request.password);
 
-        // 2. Create Public Profile
+        // 2. Create Public Profile.
+        //    New residents land as app_role='user' with no buildingRoles.
+        //    Their resident status is implied by the profile_units row below.
         const user = new User({
             id: authUser.id,
             email: request.email,
             name: request.name,
-            role: UserRole.RESIDENT,
+            app_role: 'user',
             status: UserStatus.PENDING
         });
 

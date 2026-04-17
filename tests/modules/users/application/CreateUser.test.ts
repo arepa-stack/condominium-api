@@ -3,7 +3,6 @@ import { CreateUser } from '@/modules/users/application/use-cases/CreateUser';
 import { MockUserRepository } from '../mocks';
 import { MockAuthRepository } from '../../auth/mocks';
 import { UserRole, UserStatus } from '@/core/domain/enums';
-import { User } from '@/modules/users/domain/entities/User';
 
 describe('CreateUser Use Case', () => {
     let userRepo: MockUserRepository;
@@ -19,6 +18,8 @@ describe('CreateUser Use Case', () => {
     });
 
     it('should create a new user with detached building role for board members', async () => {
+        // CreateUser's DTO still takes the ergonomic `role: UserRole` input —
+        // the use case translates it: BOARD → app_role='user' + buildingRole row.
         const newUser = await useCase.execute({
             email: 'board@test.com',
             name: 'Board Member',
@@ -29,6 +30,7 @@ describe('CreateUser Use Case', () => {
 
         expect(newUser.email).toBe('board@test.com');
         expect(newUser.status).toBe(UserStatus.ACTIVE);
+        expect(newUser.app_role).toBe('user');
 
         // Check units
         expect(newUser.units.length).toBe(1);
@@ -51,5 +53,6 @@ describe('CreateUser Use Case', () => {
 
         expect(newUser.units.length).toBe(1);
         expect(newUser.buildingRoles.length).toBe(0);
+        expect(newUser.app_role).toBe('user');
     });
 });

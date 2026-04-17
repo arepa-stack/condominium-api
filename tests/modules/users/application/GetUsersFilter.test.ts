@@ -1,7 +1,7 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import { GetUsers } from "@/modules/users/application/use-cases/GetUsers";
 import { User } from "@/modules/users/domain/entities/User";
-import { UserRole, UserStatus } from "@/core/domain/enums";
+import { UserStatus } from "@/core/domain/enums";
 import { createMockUserRepository } from "../../../mocks/repositories";
 import { BuildingRole } from "@/modules/users/domain/entities/BuildingRole";
 
@@ -22,7 +22,7 @@ describe("GetUsers Building Filter", () => {
             id: "requester-1",
             email: "mixed@test.com",
             name: "Board-in-X Resident-in-Y",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [{ unit_id: "u-y", building_id: "building-Y", is_primary: true } as any],
             buildingRoles: [new BuildingRole({ building_id: "building-X", role: "board" })],
@@ -37,7 +37,8 @@ describe("GetUsers Building Filter", () => {
         await useCase.execute({ requesterId: "requester-1" });
 
         expect(findAllMock).toHaveBeenCalled();
-        expect((findAllMock.mock.calls[0][0] as any).building_id).toBe("building-X");
+        const calls = findAllMock.mock.calls as any[];
+        expect(calls[0][0].building_id).toBe("building-X");
     });
 
     test("board-in-X + resident-in-Y requesting users of Y → 403 (no board authority over Y)", async () => {
@@ -45,7 +46,7 @@ describe("GetUsers Building Filter", () => {
             id: "requester-2",
             email: "mixed2@test.com",
             name: "Board-in-X Resident-in-Y",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [{ unit_id: "u-y", building_id: "building-Y", is_primary: true } as any],
             buildingRoles: [new BuildingRole({ building_id: "building-X", role: "board" })],
@@ -64,7 +65,7 @@ describe("GetUsers Building Filter", () => {
             id: "admin-1",
             email: "admin@test.com",
             name: "Admin",
-            role: UserRole.ADMIN,
+            app_role: 'admin' as const,
             status: UserStatus.ACTIVE,
             units: [],
             buildingRoles: []
@@ -75,7 +76,7 @@ describe("GetUsers Building Filter", () => {
                 id: "user-1",
                 email: "u1@test.com",
                 name: "User 1",
-                role: UserRole.RESIDENT,
+                app_role: 'user' as const,
                 status: UserStatus.ACTIVE,
                 units: [{ unit_id: "u1", building_id: "building-A", is_primary: true } as any],
                 buildingRoles: []
@@ -84,7 +85,7 @@ describe("GetUsers Building Filter", () => {
                 id: "user-2",
                 email: "u2@test.com",
                 name: "User 2",
-                role: UserRole.BOARD,
+                app_role: 'user' as const,
                 status: UserStatus.ACTIVE,
                 units: [],
                 buildingRoles: [new BuildingRole({ building_id: "building-A", role: "board" })]

@@ -104,14 +104,18 @@ function baseApp() {
 function makeRoleApp(allowedRoles: UserRole[]) {
     return baseApp()
         .use(requireRole(allowedRoles))
-        .get('/protected', ({ profile }) => ({ ok: true, role: profile.role }));
+        .get('/protected', ({ profile }) => ({
+            ok: true,
+            app_role: profile.app_role,
+            boardBuildingIds: profile.boardBuildingIds,
+        }));
 }
 
 function makeBuildingApp(allowedRoles: UserRole[], buildingId: string) {
     return baseApp()
         .use(requireRole(allowedRoles))
         .use(requireBuildingAccess(() => buildingId))
-        .get('/protected/:buildingId', ({ profile }) => ({ ok: true, role: profile.role }));
+        .get('/protected/:buildingId', ({ profile }) => ({ ok: true, app_role: profile.app_role }));
 }
 
 function authHeader(token: string) {
@@ -144,7 +148,7 @@ describe('requireRole', () => {
         expect(res.status).toBe(200);
         const body = await res.json() as any;
         expect(body.ok).toBe(true);
-        expect(body.role).toBe('admin');
+        expect(body.app_role).toBe('admin');
     });
 
     test('BOARD calling endpoint that requires [ADMIN, BOARD] → 200', async () => {
@@ -157,7 +161,8 @@ describe('requireRole', () => {
         expect(res.status).toBe(200);
         const body = await res.json() as any;
         expect(body.ok).toBe(true);
-        expect(body.role).toBe('board');
+        expect(body.app_role).toBe('user');
+        expect(body.boardBuildingIds).toContain('building-A');
     });
 
     test('missing Authorization header → 401', async () => {
@@ -187,7 +192,8 @@ describe('requireRole', () => {
         );
         expect(res.status).toBe(200);
         const body = await res.json() as any;
-        expect(body.role).toBe('board');
+        expect(body.app_role).toBe('user');
+        expect(body.boardBuildingIds).toContain('building-A');
     });
 });
 

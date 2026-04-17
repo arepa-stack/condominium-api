@@ -47,13 +47,13 @@ const UserResponse = t.Object({
     id: t.String(),
     email: t.String(),
     name: t.String(),
-    role: t.String(),
+    app_role: t.Union([t.Literal('admin'), t.Literal('user')]),
     status: t.String(),
     phone: t.Optional(t.Union([t.String(), t.Null()])),
     units: t.Array(UserUnitSchema),
     buildingRoles: t.Array(BuildingRoleSchema),
-    created_at: t.Optional(t.Any()), // Date
-    updated_at: t.Optional(t.Any())  // Date
+    created_at: t.Optional(t.Any()),
+    updated_at: t.Optional(t.Any())
 });
 
 const SuccessResponse = t.Object({
@@ -151,14 +151,17 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         return await updateUser.execute({
             id: params.id,
             updaterId: user.id,
-            data: body as any // Type cast as validation is handled by schema and logic
+            data: body as any
         });
     }, {
         body: t.Object({
             name: t.Optional(t.String()),
             phone: t.Optional(t.String()),
             unit_id: t.Optional(t.String()),
-            role: t.Optional(t.Union([t.Literal('resident'), t.Literal('board'), t.Literal('admin')])),
+            // Global-capability change. Only admins can flip this.
+            // To change per-building roles (add/remove a board seat), use
+            // POST /users/:id/roles instead.
+            app_role: t.Optional(t.Union([t.Literal('admin'), t.Literal('user')])),
             status: t.Optional(t.String()),
             building_id: t.Optional(t.String()),
         }),
@@ -166,7 +169,7 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         detail: {
             tags: ['Admin - Users'],
             summary: 'Update user (Admin/Board)',
-            description: 'Update user information. Only admins can change roles.',
+            description: 'Update user profile data. Admins may change app_role here. Per-building role changes go through POST /users/:id/roles.',
             security: [{ BearerAuth: [] }]
         }
     })

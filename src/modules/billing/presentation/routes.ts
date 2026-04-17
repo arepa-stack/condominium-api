@@ -9,7 +9,7 @@ import { GetAllInvoices } from '../application/use-cases/GetAllInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
 import { UnauthorizedError, NotFoundError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
-import { UserRole, InvoiceTag } from '@/core/domain/enums';
+import { InvoiceTag } from '@/core/domain/enums';
 import { PreviewInvoicesFromExcel } from '../application/use-cases/PreviewInvoicesFromExcel';
 import { BulkLoadInvoicesFromExcel } from '../application/use-cases/BulkLoadInvoicesFromExcel';
 import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositories/SupabaseUnitRepository';
@@ -118,36 +118,34 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         if (error || !user) throw new UnauthorizedError('Invalid or expired token');
 
         // Load profile + units + board memberships in one round-trip.
-        // `app_role` and `building_members` are the new source of truth
-        // (Phase 2). `profile.role` is overwritten below with the value
-        // derived from the new model so the legacy inline checks in this
-        // route file (profile.role === UserRole.RESIDENT, etc.) keep
-        // working unchanged.
+        // Phase 4 contract: app_role + boardBuildingIds. The legacy `role`
+        // column/field is gone — downstream inline checks use two helpers
+        // (isAdmin, isBoardAnywhere, isResidentOnly) derived at the end.
         const { data: rawProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, email, name, role, app_role, status, profile_units(unit_id), building_members(building_id, role)')
+            .select('id, email, name, app_role, status, profile_units(unit_id), building_members(building_id, role)')
             .eq('id', user.id)
             .single();
 
         if (!rawProfile) throw new UnauthorizedError('Profile not found');
 
-        const app_role: 'admin' | 'user' = (rawProfile.app_role as 'admin' | 'user')
-            ?? (rawProfile.role === 'admin' ? 'admin' : 'user');
+        const app_role: 'admin' | 'user' = (rawProfile.app_role as 'admin' | 'user') ?? 'user';
 
         const boardBuildingIds = ((rawProfile.building_members as any[] | null) ?? [])
             .filter(bm => bm.role === 'board')
             .map(bm => bm.building_id as string);
 
-        let derivedRole: UserRole;
-        if (app_role === 'admin') derivedRole = UserRole.ADMIN;
-        else if (boardBuildingIds.length > 0) derivedRole = UserRole.BOARD;
-        else derivedRole = UserRole.RESIDENT;
+        const isAdmin = app_role === 'admin';
+        const isBoardAnywhere = boardBuildingIds.length > 0;
+        const isResidentOnly = !isAdmin && !isBoardAnywhere;
 
         const profile = {
             ...rawProfile,
-            role: derivedRole,
             app_role,
             boardBuildingIds,
+            isAdmin,
+            isBoardAnywhere,
+            isResidentOnly,
         };
 
         return { user, profile };
@@ -155,7 +153,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     // 0. Get All Invoices (Admin/Board Filtered)
     .get('/invoices', async ({ query, profile }) => {
         // Allow Admin/Board OR Resident (if filtering by their own unit)
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             if (!query.unit_id) {
                 throw new UnauthorizedError('Residents must specify a unit_id');
             }
@@ -165,7 +163,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             if (!hasAccess) {
                 throw new UnauthorizedError('You do not have access to this unit invoices');
             }
-        } else if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        } else if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can list all invoices');
         }
 
@@ -212,7 +210,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     })
     // 1.5. Preview Excel Invoices
     .post('/invoices/preview', async ({ query, body, profile }) => {
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can preview invoices');
         }
 
@@ -249,7 +247,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     })
     // 1.6. Confirm Excel Invoices
     .post('/invoices/confirm', async ({ query, body, profile }) => {
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can confirm invoices');
         }
 
@@ -284,7 +282,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     })
     // 1. Admin loads Debt
     .post('/debt', async ({ body, profile }) => {
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can load debt');
         }
 
@@ -315,12 +313,12 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     // 2. Get Unit Balance
     .get('/units/:id/balance', async ({ params, profile }) => {
         // Auth: Admin, Board (any building for now, ideally same building), or Resident (same unit)
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) {
                 throw new UnauthorizedError('Unauthorized: You do not have access to this unit balance');
             }
-        } else if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        } else if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see balance');
         }
 
@@ -336,12 +334,12 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     // 3. Get All Unit Invoices
     .get('/units/:id/invoices', async ({ params, query, profile }) => {
         // Auth: Admin, Board or Resident (same unit)
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) {
                 throw new UnauthorizedError('Unauthorized: You do not have access to this unit invoices');
             }
-        } else if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        } else if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see invoices');
         }
 
@@ -366,12 +364,12 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         const unitId = params.id;
 
         // Auth: Residents can only access their own units; Board/Admin can access any unit in their buildings
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === unitId);
             if (!hasAccess) {
                 throw new UnauthorizedError('You do not have access to this unit credit balance');
             }
-        } else if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        } else if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see credit balance');
         }
 
@@ -408,7 +406,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     .get('/invoices/:id/payments', async ({ params, profile }) => {
         // Auth: Admin or Board (or resident if they own the unit of this invoice)
         // For now, simpler: Admin or Board
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             // we could check if profile.profile_units contains invoice.unit_id
             // but for simplicity return allocations. Repository handles basic fetch.
         }
@@ -440,7 +438,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
     // 4.5. Get Invoices for a Payment
     .get('/payments/:id/invoices', async ({ params, profile }) => {
         // Auth: Admin or Board
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             throw new UnauthorizedError('Only Admin/Board can see payment allocations');
         }
 
@@ -474,7 +472,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         if (!invoice) throw new NotFoundError('Invoice not found');
 
         // Authorization
-        if (profile.role !== UserRole.ADMIN && profile.role !== UserRole.BOARD) {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
             if (!hasAccess) {
                 throw new UnauthorizedError('Unauthorized: You do not have access to this invoice');

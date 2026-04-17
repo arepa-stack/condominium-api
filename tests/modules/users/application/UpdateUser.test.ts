@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { UpdateUser } from '@/modules/users/application/use-cases/UpdateUser';
 import { MockUserRepository } from '../mocks';
 import { User } from '@/modules/users/domain/entities/User';
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { UserStatus } from '@/core/domain/enums';
 import { ForbiddenError } from '@/core/errors';
 
 describe('UpdateUser Use Case', () => {
@@ -10,11 +10,11 @@ describe('UpdateUser Use Case', () => {
     let useCase: UpdateUser;
 
     const createResident = (id: string, name: string = 'Res') => new User({
-        id, email: 'res@test.com', name, role: UserRole.RESIDENT, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+        id, email: 'res@test.com', name, app_role: 'user' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
     });
 
     const createAdmin = (id: string) => new User({
-        id, email: 'admin@test.com', name: 'Admin', role: UserRole.ADMIN, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+        id, email: 'admin@test.com', name: 'Admin', app_role: 'admin' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
     });
 
     beforeEach(() => {
@@ -58,11 +58,11 @@ describe('UpdateUser Use Case', () => {
         expect(useCase.execute({
             id: 'u1',
             updaterId: 'u1',
-            data: { role: UserRole.ADMIN } as any
+            data: { app_role: 'admin' as const } as any
         })).rejects.toThrow(ForbiddenError);
     });
 
-    it('should allow admin to update roles', async () => {
+    it('should allow admin to promote another user to admin via app_role', async () => {
         const admin = createAdmin('adm1');
         const user = createResident('u1');
         await repo.create(admin);
@@ -71,9 +71,10 @@ describe('UpdateUser Use Case', () => {
         const updated = await useCase.execute({
             id: 'u1',
             updaterId: 'adm1',
-            data: { role: UserRole.BOARD }
+            data: { app_role: 'admin' as const }
         });
 
-        expect(updated.role).toBe(UserRole.BOARD);
+        expect(updated.app_role).toBe('admin');
+        expect(updated.isAdmin()).toBe(true);
     });
 });

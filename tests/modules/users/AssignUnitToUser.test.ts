@@ -1,7 +1,7 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import { AssignUnitToUser } from "@/modules/users/application/use-cases/AssignUnitToUser";
 import { User } from "@/modules/users/domain/entities/User";
-import { UserRole, UserStatus } from "@/core/domain/enums";
+import { UserStatus } from "@/core/domain/enums";
 import { createMockUserRepository } from "../../mocks/repositories";
 import { UserUnit } from "@/modules/users/domain/entities/UserUnit";
 
@@ -19,7 +19,7 @@ describe("AssignUnitToUser Use Case", () => {
             id: "user-1",
             email: "test@example.com",
             name: "Test User",
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
 
@@ -44,7 +44,7 @@ describe("AssignUnitToUser Use Case", () => {
             id: "user-1",
             email: "test@example.com",
             name: "Test User",
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [
                 new UserUnit({
@@ -73,7 +73,7 @@ describe("AssignUnitToUser Use Case", () => {
             id: "user-1",
             email: "test@example.com",
             name: "Test User",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
 

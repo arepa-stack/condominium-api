@@ -21,7 +21,7 @@ describe("GetAllPayments Building Filter", () => {
             id: "board-1",
             email: "board@test.com",
             name: "Board Member",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [],
             buildingRoles: [new BuildingRole({ building_id: "building-B", role: "board" })]
@@ -47,7 +47,7 @@ describe("GetAllPayments Building Filter", () => {
             id: "board-1",
             email: "board@test.com",
             name: "Board Member",
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             units: [],
             buildingRoles: [new BuildingRole({ building_id: "building-B", role: "board" })]

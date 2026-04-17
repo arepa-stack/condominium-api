@@ -47,12 +47,16 @@ export class CreateUser {
     }
 
     private initializeUser(id: string, dto: CreateUserDTO): User {
+        // Translate the ergonomic `role` input into the new model:
+        //   admin    → app_role='admin', no building role
+        //   board    → app_role='user',  board row added in applyInitialAssignments
+        //   resident → app_role='user',  no board row (residency comes from units)
         return new User({
             id,
             email: dto.email,
             name: dto.name,
             phone: dto.phone,
-            role: dto.role,
+            app_role: dto.role === UserRole.ADMIN ? 'admin' : 'user',
             status: UserStatus.ACTIVE,
         });
     }

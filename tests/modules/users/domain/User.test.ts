@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'bun:test';
 import { User, UserProps } from '@/modules/users/domain/entities/User';
 import { BuildingRole } from '@/modules/users/domain/entities/BuildingRole';
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { UserStatus } from '@/core/domain/enums';
 
 describe('User Entity', () => {
     const defaultProps: UserProps = {
         id: '123',
         email: 'test@example.com',
         name: 'Test User',
-        role: UserRole.RESIDENT,
+        app_role: 'user' as const,
         status: UserStatus.PENDING,
         created_at: new Date(),
         updated_at: new Date()
@@ -21,8 +21,7 @@ describe('User Entity', () => {
     });
 
     it('should correctly identify admin', () => {
-        // Phase 2 semantics: admin is determined by app_role, not legacy role.
-        const user = new User({ ...defaultProps, role: UserRole.ADMIN, app_role: 'admin' });
+        const user = new User({ ...defaultProps, app_role: 'admin' as const });
         expect(user.isAdmin()).toBe(true);
         expect(user.isBoardMember()).toBe(false);
     });
@@ -64,9 +63,10 @@ describe('User Entity', () => {
         expect(user.status).toBe(UserStatus.REJECTED);
     });
 
-    it('should change role', () => {
-        const user = new User({ ...defaultProps, role: UserRole.RESIDENT });
-        user.changeRole(UserRole.BOARD);
-        expect(user.role).toBe(UserRole.BOARD);
+    it('should change app_role', () => {
+        const user = new User({ ...defaultProps, app_role: 'user' as const });
+        user.changeAppRole('admin');
+        expect(user.app_role).toBe('admin');
+        expect(user.isAdmin()).toBe(true);
     });
 });

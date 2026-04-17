@@ -23,7 +23,7 @@ describe('UpdateBuilding Use Case', () => {
             email: 'admin@test.com',
             name: 'Admin',
 
-            role: UserRole.ADMIN,
+            app_role: 'admin' as const,
             status: UserStatus.ACTIVE
         });
         await userRepo.create(admin);
@@ -52,7 +52,7 @@ describe('UpdateBuilding Use Case', () => {
             email: 'resident@test.com',
             name: 'Resident',
 
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
         await userRepo.create(resident);
