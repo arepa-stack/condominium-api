@@ -72,6 +72,16 @@ describe('GetAllInvoices — tag filter', () => {
         await useCase.execute(filters);
         expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith(filters);
     });
+
+    it('forwards pagination params (page + limit) to the repo', async () => {
+        // Regression: the /admin/billing/invoices handler previously
+        // accepted page/limit in the Elysia query schema but never
+        // passed them down — the repo always saw undefined and fell
+        // back to page=1, limit=10 regardless of what the client sent.
+        const useCase = new GetAllInvoices(mockRepo);
+        await useCase.execute({ page: 3, limit: 25 });
+        expect(mockRepo.findInvoicesForAdmin).toHaveBeenCalledWith({ page: 3, limit: 25 });
+    });
 });
 
 describe('GetUnitInvoices — tag filter', () => {
