@@ -12,7 +12,7 @@ import { GetUnitInvoices } from '../application/use-cases/GetUnitInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
 import { UnauthorizedError, NotFoundError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
-import { UserRole, InvoiceTag } from '@/core/domain/enums';
+import { InvoiceTag } from '@/core/domain/enums';
 
 const invoiceRepository = new SupabaseInvoiceRepository();
 const creditLedgerRepository = new SupabaseCreditLedgerRepository();
@@ -63,16 +63,42 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         const token = authHeader.replace('Bearer ', '');
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (error || !user) throw new UnauthorizedError('Invalid or expired token');
-        const { data: profile } = await supabaseAdmin
+
+        // Phase 4 contract: read app_role + joined building_members. The
+        // previous SELECT asked for the legacy `role` column which was
+        // dropped in phase 4; the query was silently failing and the
+        // handler returned 401 'Profile not found' for every request.
+        const { data: rawProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, email, name, role, status, profile_units(unit_id)')
+            .select('id, email, name, app_role, status, profile_units(unit_id), building_members(building_id, role)')
             .eq('id', user.id)
             .single();
-        if (!profile) throw new UnauthorizedError('Profile not found');
+
+        if (!rawProfile) throw new UnauthorizedError('Profile not found');
+
+        const app_role: 'admin' | 'user' = (rawProfile.app_role as 'admin' | 'user') ?? 'user';
+
+        const boardBuildingIds = ((rawProfile.building_members as any[] | null) ?? [])
+            .filter(bm => bm.role === 'board')
+            .map(bm => bm.building_id as string);
+
+        const isAdmin = app_role === 'admin';
+        const isBoardAnywhere = boardBuildingIds.length > 0;
+        const isResidentOnly = !isAdmin && !isBoardAnywhere;
+
+        const profile = {
+            ...rawProfile,
+            app_role,
+            boardBuildingIds,
+            isAdmin,
+            isBoardAnywhere,
+            isResidentOnly,
+        };
+
         return { user, profile };
     })
     .get('/units/:id/balance', async ({ params, profile }) => {
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) throw new UnauthorizedError('Unauthorized');
         }
@@ -82,7 +108,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         detail: { tags: ['App - Billing'], summary: 'Get unit balance and pending invoices' }
     })
     .get('/units/:id/invoices', async ({ params, query, profile }) => {
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) throw new UnauthorizedError('Unauthorized');
         }
@@ -96,7 +122,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         detail: { tags: ['App - Billing'], summary: 'Get invoices for a unit' }
     })
     .get('/units/:id/credit', async ({ params, profile }) => {
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) throw new UnauthorizedError('Unauthorized');
         }
@@ -127,7 +153,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         const invoice = await invoiceRepository.findById(params.id);
         if (!invoice) throw new NotFoundError('Invoice not found');
 
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const ownsUnit = invoice.unit_id
                 && profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
             if (!ownsUnit) {
@@ -148,7 +174,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
         const invoice = await invoiceRepository.findById(params.id);
         if (!invoice) throw new NotFoundError('Invoice not found');
 
-        if (profile.role === UserRole.RESIDENT) {
+        if (profile.isResidentOnly) {
             const ownsUnit = invoice.unit_id
                 && profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === invoice.unit_id);
             if (!ownsUnit) {
