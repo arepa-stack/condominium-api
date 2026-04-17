@@ -42,6 +42,28 @@ export enum PettyCashTransactionType {
     EXPENSE = 'EXPENSE'
 }
 
+/**
+ * Type of a petty-cash ledger entry (petty_cash_entries.type).
+ * Mirrors the SQL CHECK constraint on that column.
+ *
+ *   income     — manual replenishment by the board.
+ *   expense    — building-level spend. Amount stored negative.
+ *   collection — auto-entry when a resident pays a PETTY_CASH invoice.
+ *   reversal   — counter-entry for any of the above.
+ */
+export enum PettyCashEntryType {
+    INCOME = 'income',
+    EXPENSE = 'expense',
+    COLLECTION = 'collection',
+    REVERSAL = 'reversal'
+}
+
+export enum PettyCashEntryReferenceType {
+    MANUAL = 'manual',
+    INVOICE_PAYMENT = 'invoice_payment',
+    REVERSAL = 'reversal'
+}
+
 export enum PettyCashCategory {
     REPAIR = 'REPAIR',
     CLEANING = 'CLEANING',

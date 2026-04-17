@@ -1,83 +1,56 @@
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
-import { PettyCashFund } from '../../domain/entities/PettyCashFund';
-import { PettyCashTransaction } from '../../domain/entities/PettyCashTransaction';
-import { IInvoiceRepository } from '../../../billing/domain/repository';
-import { Invoice, InvoiceStatus, InvoiceType } from '../../../billing/domain/entities/Invoice';
-import { PettyCashTransactionType, PettyCashCategory, InvoiceTag } from '../../../../core/domain/enums';
+import { PettyCashEntry } from '../../domain/entities/PettyCashEntry';
+import {
+    PettyCashEntryType,
+    PettyCashEntryReferenceType,
+    PettyCashCategory,
+} from '@/core/domain/enums';
+import { DomainError } from '@/core/errors';
 
 export interface RegisterExpenseDTO {
     buildingId: string;
-    amount: number;
+    amount: number;                     // positive — the actual spend
     description: string;
     category: PettyCashCategory;
     userId: string;
     evidenceUrl?: string;
 }
 
+/**
+ * Record an EXPENSE entry in the petty-cash ledger. Single INSERT.
+ *
+ * Balance MAY go negative: if the board spends more than the current
+ * balance the fund is overdrawn by (amount - balance). That overdraft
+ * is reflected naturally in the view (`petty_cash_balance.balance`
+ * becomes negative) and is what the next assessment collects from the
+ * units. No building-level PAID fantasma invoices are generated
+ * anymore — the expense lives only in the ledger.
+ */
 export class RegisterPettyCashExpense {
-    constructor(
-        private pettyCashRepo: PettyCashRepository,
-        private invoiceRepo: IInvoiceRepository
-    ) { }
+    constructor(private pettyCashRepo: PettyCashRepository) { }
 
-    async execute(dto: RegisterExpenseDTO) {
-        let fund = await this.pettyCashRepo.findFundByBuildingId(dto.buildingId);
-
-        if (!fund) {
-            fund = PettyCashFund.create(dto.buildingId);
+    async execute(dto: RegisterExpenseDTO): Promise<PettyCashEntry> {
+        if (!(dto.amount > 0)) {
+            throw new DomainError(
+                'Expense amount must be greater than zero',
+                'VALIDATION_ERROR',
+                400
+            );
         }
 
-        const { deducted, overage } = fund.registerExpensePartial(dto.amount);
-        await this.pettyCashRepo.saveFund(fund);
+        const fund = await this.pettyCashRepo.findOrCreateFund(dto.buildingId);
 
-        const period = new Date().toISOString().substring(0, 7); // YYYY-MM
-        const description = `[${dto.category}] ${dto.description}`;
+        const entry = new PettyCashEntry({
+            fund_id: fund.id,
+            type: PettyCashEntryType.EXPENSE,
+            amount: -dto.amount,            // NEGATIVE — sign encodes direction
+            category: dto.category,
+            description: dto.description,
+            evidence_url: dto.evidenceUrl ?? null,
+            reference_type: PettyCashEntryReferenceType.MANUAL,
+            created_by: dto.userId,
+        });
 
-        // Create invoice for the amount actually deducted from fund (skip if zero)
-        if (deducted > 0) {
-            const deductedInvoice = new Invoice({
-                id: crypto.randomUUID(),
-                building_id: dto.buildingId,
-                amount: deducted,
-                period,
-                issue_date: new Date(),
-                status: InvoiceStatus.PAID,
-                type: InvoiceType.EXPENSE,
-                tag: InvoiceTag.PETTY_CASH,
-                description,
-                receipt_number: undefined
-            });
-            await this.invoiceRepo.create(deductedInvoice);
-        }
-
-        // Create invoice for the overage (amount beyond fund balance)
-        if (overage > 0) {
-            const overageInvoice = new Invoice({
-                id: crypto.randomUUID(),
-                building_id: dto.buildingId,
-                amount: overage,
-                period,
-                issue_date: new Date(),
-                status: InvoiceStatus.PAID,
-                type: InvoiceType.EXPENSE,
-                tag: InvoiceTag.PETTY_CASH,
-                description,
-                receipt_number: undefined
-            });
-            await this.invoiceRepo.create(overageInvoice);
-        }
-
-        const transaction = new PettyCashTransaction(
-            '',
-            fund.id,
-            PettyCashTransactionType.EXPENSE,
-            dto.amount,
-            dto.description,
-            dto.category,
-            dto.userId,
-            dto.evidenceUrl
-        );
-
-        return await this.pettyCashRepo.saveTransaction(transaction);
+        return await this.pettyCashRepo.addEntry(entry);
     }
 }

@@ -1,218 +1,136 @@
 import { describe, it, expect, mock, beforeEach } from 'bun:test';
-import { RegisterPettyCashExpense, RegisterExpenseDTO } from '@/modules/petty-cash/application/use-cases/RegisterPettyCashExpense';
+import {
+    RegisterPettyCashExpense,
+    RegisterExpenseDTO,
+} from '@/modules/petty-cash/application/use-cases/RegisterPettyCashExpense';
 import { PettyCashFund } from '@/modules/petty-cash/domain/entities/PettyCashFund';
-import { PettyCashCategory } from '@/core/domain/enums';
-import { InvoiceStatus, InvoiceType, InvoiceTag } from '@/modules/billing/domain/entities/Invoice';
+import { PettyCashEntry } from '@/modules/petty-cash/domain/entities/PettyCashEntry';
+import { PettyCashCategory, PettyCashEntryType } from '@/core/domain/enums';
 
-describe('RegisterPettyCashExpense', () => {
+// ---------------------------------------------------------------------
+// Phase 2 semantics: RegisterPettyCashExpense does a SINGLE INSERT into
+// petty_cash_entries with a negative amount. No invoice repo is
+// involved. Balance may go negative (handled downstream by the view).
+// ---------------------------------------------------------------------
+
+function makeMockPettyCashRepo() {
+    const fund = new PettyCashFund('fund-1', 'b1', 0, 'USD', new Date());
+    return {
+        findFundByBuildingId: mock(async () => fund),
+        findOrCreateFund: mock(async () => fund),
+        getBalance: mock(async () => 0),
+        addEntry: mock(async (e: PettyCashEntry) => e),
+        findEntriesByFundId: mock(async () => []),
+        findEntriesByReference: mock(async () => []),
+        createAssessment: mock(async (a: any) => a),
+        findAssessmentsByFundId: mock(async () => []),
+        findAssessmentsByPeriod: mock(async () => []),
+    };
+}
+
+describe('RegisterPettyCashExpense (ledger-based)', () => {
     let useCase: RegisterPettyCashExpense;
-    let mockPettyCashRepo: any;
-    let mockInvoiceRepo: any;
+    let pettyCashRepo: ReturnType<typeof makeMockPettyCashRepo>;
 
     beforeEach(() => {
-        mockPettyCashRepo = {
-            findFundByBuildingId: mock(() => Promise.resolve(null)),
-            saveFund: mock(() => Promise.resolve(null)),
-            saveTransaction: mock(() => Promise.resolve(null)),
+        pettyCashRepo = makeMockPettyCashRepo();
+        useCase = new RegisterPettyCashExpense(pettyCashRepo as any);
+    });
+
+    it('creates one INSERT in petty_cash_entries when expense is within balance', async () => {
+        // Balance is irrelevant — the use case does NOT check it. It just
+        // appends a negative entry. This asserts the "single INSERT" shape:
+        // type=EXPENSE, amount=-X, fund_id populated.
+        const dto: RegisterExpenseDTO = {
+            buildingId: 'b1',
+            amount: 200,
+            description: 'Fixed lobby door',
+            category: PettyCashCategory.REPAIR,
+            userId: 'user-1',
         };
-        mockInvoiceRepo = {
-            create: mock((inv: unknown) => Promise.resolve(inv)),
+
+        await useCase.execute(dto);
+
+        expect(pettyCashRepo.findOrCreateFund).toHaveBeenCalledWith('b1');
+        expect(pettyCashRepo.addEntry).toHaveBeenCalledTimes(1);
+
+        const entry: PettyCashEntry = pettyCashRepo.addEntry.mock.calls[0][0];
+        expect(entry.type).toBe(PettyCashEntryType.EXPENSE);
+        expect(entry.amount).toBe(-200);
+        expect(entry.fund_id).toBe('fund-1');
+        expect(entry.description).toBe('Fixed lobby door');
+        expect(entry.category).toBe(PettyCashCategory.REPAIR);
+        expect(entry.created_by).toBe('user-1');
+    });
+
+    it('allows balance to go negative when expense exceeds balance (no invoice interaction)', async () => {
+        // Even if the balance would go negative, the use case still
+        // records a single EXPENSE entry with the FULL negative amount.
+        // No building-level fantasma invoice gets created — that flow
+        // is gone in Phase 2.
+        pettyCashRepo.getBalance.mockImplementation(async () => 50);
+
+        const dto: RegisterExpenseDTO = {
+            buildingId: 'b1',
+            amount: 600,
+            description: 'Emergency repair',
+            category: PettyCashCategory.EMERGENCY,
+            userId: 'user-1',
         };
-        // NOTE: IUnitRepository is NOT a constructor parameter
-        useCase = new RegisterPettyCashExpense(mockPettyCashRepo, mockInvoiceRepo);
+
+        await useCase.execute(dto);
+
+        expect(pettyCashRepo.addEntry).toHaveBeenCalledTimes(1);
+        const entry: PettyCashEntry = pettyCashRepo.addEntry.mock.calls[0][0];
+        expect(entry.amount).toBe(-600);
+        expect(entry.type).toBe(PettyCashEntryType.EXPENSE);
     });
 
-    describe('when expense is within fund balance', () => {
-        it('creates exactly ONE building-level invoice with tag=PETTY_CASH and status=PAID', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 1000, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
+    it('throws VALIDATION_ERROR when amount is zero', async () => {
+        const dto: RegisterExpenseDTO = {
+            buildingId: 'b1',
+            amount: 0,
+            description: 'Invalid expense',
+            category: PettyCashCategory.OTHER,
+            userId: 'user-1',
+        };
 
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 600,
-                description: 'Fixed lobby door',
-                category: PettyCashCategory.REPAIR,
-                userId: 'user1'
-            };
-
-            await useCase.execute(dto);
-
-            expect(mockInvoiceRepo.create).toHaveBeenCalledTimes(1);
-
-            const invoice = mockInvoiceRepo.create.mock.calls[0][0];
-            expect(invoice.building_id).toBe(buildingId);
-            expect(invoice.unit_id).toBeUndefined();
-            expect(invoice.tag).toBe(InvoiceTag.PETTY_CASH);
-            expect(invoice.status).toBe(InvoiceStatus.PAID);
-            expect(invoice.type).toBe(InvoiceType.EXPENSE);
-            expect(invoice.amount).toBe(600);
+        await expect(useCase.execute(dto)).rejects.toMatchObject({
+            code: 'VALIDATION_ERROR',
         });
-
-        it('deducts the full amount from the fund', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 1000, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
-
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 600,
-                description: 'Cleaning supplies',
-                category: PettyCashCategory.CLEANING,
-                userId: 'user1'
-            };
-
-            await useCase.execute(dto);
-
-            expect(fund.current_balance).toBe(400);
-            expect(mockPettyCashRepo.saveFund).toHaveBeenCalledWith(fund);
-        });
+        expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
     });
 
-    describe('when expense exceeds fund balance', () => {
-        it('deducts fund to 0 and creates TWO building-level invoices (deducted + overage)', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 500, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
+    it('throws VALIDATION_ERROR when amount is negative', async () => {
+        const dto: RegisterExpenseDTO = {
+            buildingId: 'b1',
+            amount: -10,
+            description: 'Invalid',
+            category: PettyCashCategory.OTHER,
+            userId: 'user-1',
+        };
 
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 600,
-                description: 'Emergency repair',
-                category: PettyCashCategory.EMERGENCY,
-                userId: 'user1'
-            };
-
-            await useCase.execute(dto);
-
-            expect(fund.current_balance).toBe(0);
-            expect(mockPettyCashRepo.saveFund).toHaveBeenCalledWith(fund);
-            // Two invoices: one for deducted (500), one for overage (100)
-            expect(mockInvoiceRepo.create).toHaveBeenCalledTimes(2);
-
-            const amounts = mockInvoiceRepo.create.mock.calls.map((c: any[]) => c[0].amount);
-            expect(amounts).toContain(500);
-            expect(amounts).toContain(100);
-
-            // Both should be building-level, PETTY_CASH tag, PAID
-            for (const call of mockInvoiceRepo.create.mock.calls) {
-                const inv = call[0];
-                expect(inv.building_id).toBe(buildingId);
-                expect(inv.unit_id).toBeUndefined();
-                expect(inv.tag).toBe(InvoiceTag.PETTY_CASH);
-                expect(inv.status).toBe(InvoiceStatus.PAID);
-                expect(inv.type).toBe(InvoiceType.EXPENSE);
-            }
+        await expect(useCase.execute(dto)).rejects.toMatchObject({
+            code: 'VALIDATION_ERROR',
         });
-
-        it('still saves the petty cash transaction with the full amount', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 500, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
-
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 600,
-                description: 'Emergency repair',
-                category: PettyCashCategory.EMERGENCY,
-                userId: 'user1'
-            };
-
-            await useCase.execute(dto);
-
-            expect(mockPettyCashRepo.saveTransaction).toHaveBeenCalledWith(
-                expect.objectContaining({ amount: 600 })
-            );
-        });
+        expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
     });
 
-    describe('invoice description format', () => {
-        it('formats description as "[CATEGORY] description"', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 1000, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
+    it('creates the fund on first expense via findOrCreateFund', async () => {
+        // findOrCreateFund is an atomic upsert — if no fund exists the
+        // repo creates one and returns it. This test pins the call site.
+        const dto: RegisterExpenseDTO = {
+            buildingId: 'b-new',
+            amount: 100,
+            description: 'Office supplies',
+            category: PettyCashCategory.OFFICE,
+            userId: 'user-1',
+        };
 
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 200,
-                description: 'Fixed lobby door',
-                category: PettyCashCategory.REPAIR,
-                userId: 'user1'
-            };
+        await useCase.execute(dto);
 
-            await useCase.execute(dto);
-
-            const invoice = mockInvoiceRepo.create.mock.calls[0][0];
-            expect(invoice.description).toBe('[REPAIR] Fixed lobby door');
-        });
-    });
-
-    describe('evidence URL propagation', () => {
-        it('propagates evidenceUrl to invoice receipt_number when provided', async () => {
-            const buildingId = 'b1';
-            const fund = new PettyCashFund('f1', buildingId, 1000, 'USD', new Date());
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(fund));
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
-
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 200,
-                description: 'Supplies',
-                category: PettyCashCategory.OFFICE,
-                userId: 'user1',
-                evidenceUrl: 'https://storage.example.com/evidence.jpg'
-            };
-
-            await useCase.execute(dto);
-
-            // evidenceUrl is stored on the petty cash transaction, NOT on the invoice receipt_number
-            // (receipt_number is VARCHAR(50) — too short for URLs)
-            const transaction = mockPettyCashRepo.saveTransaction.mock.calls[0][0];
-            expect(transaction.evidence_url).toBe('https://storage.example.com/evidence.jpg');
-        });
-    });
-
-    describe('fund auto-creation', () => {
-        it('creates a new fund when none exists and processes the expense', async () => {
-            const buildingId = 'b1';
-            mockPettyCashRepo.findFundByBuildingId.mockImplementation(() => Promise.resolve(null));
-            // saveFund should return the saved fund with an id
-            mockPettyCashRepo.saveFund.mockImplementation((fund: PettyCashFund) =>
-                Promise.resolve(new PettyCashFund('f-new', fund.building_id, fund.current_balance, fund.currency, new Date()))
-            );
-            mockPettyCashRepo.saveTransaction.mockImplementation(() => Promise.resolve({ id: 'tx1' }));
-
-            const dto: RegisterExpenseDTO = {
-                buildingId,
-                amount: 100,
-                description: 'Office supplies',
-                category: PettyCashCategory.OFFICE,
-                userId: 'user1'
-            };
-
-            await useCase.execute(dto);
-
-            expect(mockPettyCashRepo.saveFund).toHaveBeenCalled();
-            // Fund was empty (0), so full amount is overage → 2 invoices: 0 deducted + 100 overage
-            // But deducted=0 means we skip the first invoice (amount 0 is invalid)
-            // We still create the overage invoice (100)
-            expect(mockInvoiceRepo.create).toHaveBeenCalledTimes(1);
-            const invoice = mockInvoiceRepo.create.mock.calls[0][0];
-            expect(invoice.amount).toBe(100);
-            expect(invoice.building_id).toBe(buildingId);
-        });
-    });
-
-    describe('IUnitRepository is not a dependency', () => {
-        it('does not require IUnitRepository in constructor — only 2 dependencies', () => {
-            // Constructor has exactly 2 params: pettyCashRepo + invoiceRepo (no unitRepo)
-            expect(useCase).toBeDefined();
-            expect(RegisterPettyCashExpense.length).toBe(2);
-        });
+        expect(pettyCashRepo.findOrCreateFund).toHaveBeenCalledTimes(1);
+        expect(pettyCashRepo.findOrCreateFund).toHaveBeenCalledWith('b-new');
+        expect(pettyCashRepo.addEntry).toHaveBeenCalledTimes(1);
     });
 });

@@ -7,12 +7,17 @@ import { RegisterPettyCashExpense } from '../application/use-cases/RegisterPetty
 import { SupabaseInvoiceRepository } from '@/modules/billing/infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { StorageService } from '@/infrastructure/storage';
-import { UserRole, PettyCashTransactionType, PettyCashCategory } from '@/core/domain/enums';
+import {
+    UserRole,
+    PettyCashCategory,
+    PettyCashEntryType,
+} from '@/core/domain/enums';
 import { requireRole, requireBuildingAccess } from '@/core/presentation/guards';
 import { PreviewAssessments } from '../application/use-cases/PreviewAssessments';
 import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
+import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
 
-// Initialize repo and use cases
+// ── DI ──────────────────────────────────────────────────────────────────────
 const pettyCashRepo = new SupabasePettyCashRepository();
 const storageService = new StorageService();
 const invoiceRepo = new SupabaseInvoiceRepository();
@@ -21,12 +26,10 @@ const unitRepo = new SupabaseUnitRepository();
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo);
-const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, invoiceRepo);
+const registerExpense = new RegisterPettyCashExpense(pettyCashRepo);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
-
-import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
-const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo);
+const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -34,54 +37,91 @@ const PettyCashFundSchema = t.Object({
     id: t.String(),
     building_id: t.String(),
     current_balance: t.Number(),
-    currency: t.String(),
-    updated_at: t.Any()
+    updated_at: t.Any(),
 });
 
-const PettyCashTransactionSchema = t.Object({
-    id: t.String(),
+const PettyCashEntrySchema = t.Object({
+    id: t.Optional(t.String()),
     fund_id: t.String(),
-    type: t.String(),
+    type: t.Union([
+        t.Literal(PettyCashEntryType.INCOME),
+        t.Literal(PettyCashEntryType.EXPENSE),
+        t.Literal(PettyCashEntryType.COLLECTION),
+        t.Literal(PettyCashEntryType.REVERSAL),
+    ]),
     amount: t.Number(),
+    category: t.Optional(t.Nullable(t.String())),
     description: t.String(),
-    category: t.String(),
-    created_by: t.String(),
     evidence_url: t.Optional(t.Nullable(t.String())),
-    created_at: t.Optional(t.Nullable(t.Any()))
+    reference_type: t.Optional(t.Nullable(t.String())),
+    reference_id: t.Optional(t.Nullable(t.String())),
+    created_by: t.String(),
+    created_at: t.Optional(t.Nullable(t.Any())),
 });
 
 const AssessmentUnitSchema = t.Object({
     id: t.String(),
     name: t.String(),
-    amount: t.Number()
+    amount: t.Number(),
 });
 
 const AssessmentPreviewSchema = t.Object({
     building_id: t.String(),
-    total_expenses: t.Number(),
-    total_income: t.Number(),
-    fund_balance: t.Number(),
+    current_balance: t.Number(),
     total_overage: t.Number(),
     already_assessed: t.Number(),
     pending_to_assess: t.Number(),
-    units: t.Array(AssessmentUnitSchema)
+    units: t.Array(AssessmentUnitSchema),
 });
 
 const AssessmentInvoiceSchema = t.Object({
     unit_id: t.String(),
     unit_name: t.String(),
     amount: t.Number(),
-    invoice_id: t.String()
+    invoice_id: t.String(),
 });
 
 const AssessmentResultSchema = t.Object({
     building_id: t.String(),
+    assessment_id: t.String(),
+    description: t.String(),
     total_assessed: t.Number(),
     invoices_created: t.Number(),
-    invoices: t.Array(AssessmentInvoiceSchema)
+    invoices: t.Array(AssessmentInvoiceSchema),
 });
 
-// ── Route factories (fresh instance each call — prevents Swagger duplicates) ─
+const TransparencyUnitSchema = t.Object({
+    unit_id: t.String(),
+    unit_name: t.String(),
+    expected_amount: t.Number(),
+    covered_amount: t.Number(),
+    status: t.Union([
+        t.Literal('PENDING'),
+        t.Literal('PARTIAL'),
+        t.Literal('PAID'),
+    ]),
+});
+
+const AssessmentTransparencySchema = t.Object({
+    id: t.String(),
+    description: t.String(),
+    category: t.Optional(t.Nullable(t.String())),
+    total_to_collect: t.Number(),
+    total_collected: t.Number(),
+    collection_percentage: t.Number(),
+    units: t.Array(TransparencyUnitSchema),
+});
+
+const TransparencySchema = t.Object({
+    building_id: t.String(),
+    period: t.String(),
+    assessments: t.Array(AssessmentTransparencySchema),
+    total_to_collect: t.Number(),
+    total_collected: t.Number(),
+    collection_percentage: t.Number(),
+});
+
+// ── Routes ──────────────────────────────────────────────────────────────────
 
 function createReadRoutes(tag: string) {
     return new Elysia()
@@ -91,60 +131,39 @@ function createReadRoutes(tag: string) {
             return await getBalance.execute(params.buildingId);
         }, {
             response: PettyCashFundSchema,
-            detail: {
-                tags: [tag],
-                summary: 'Get fund balance for a building'
-            }
+            detail: { tags: [tag], summary: 'Get fund balance for a building' },
         })
-        .get('/funds/:buildingId/transactions', async ({ params, query }) => {
+        .get('/funds/:buildingId/entries', async ({ params, query }) => {
             return await getHistory.execute(params.buildingId, {
-                type: query.type as PettyCashTransactionType,
+                type: query.type as PettyCashEntryType,
                 category: query.category as PettyCashCategory,
                 page: query.page ? Number(query.page) : 1,
-                limit: query.limit ? Number(query.limit) : 10
+                limit: query.limit ? Number(query.limit) : 10,
             });
         }, {
             query: t.Object({
                 type: t.Optional(t.String()),
                 category: t.Optional(t.String()),
                 page: t.Optional(t.Numeric()),
-                limit: t.Optional(t.Numeric())
+                limit: t.Optional(t.Numeric()),
             }),
-            response: t.Array(PettyCashTransactionSchema),
-            detail: {
-                tags: [tag],
-                summary: 'List transactions for a building fund'
-            }
+            response: t.Array(PettyCashEntrySchema),
+            detail: { tags: [tag], summary: 'List ledger entries for a building fund' },
         })
         .get('/funds/:buildingId/transparency', async ({ params, query }) => {
             return await getTransparency.execute(params.buildingId, query.period);
         }, {
             query: t.Object({
-                period: t.String({ minLength: 1, description: 'Period to report (e.g. "2024-01")' })
+                period: t.String({ minLength: 1, description: 'Period to report (e.g. "2026-04")' }),
             }),
-            response: t.Object({
-                building_id: t.String(),
-                period: t.String(),
-                total_to_collect: t.Number(),
-                total_collected: t.Number(),
-                collection_percentage: t.Number(),
-                units: t.Array(t.Object({
-                    unit_id: t.String(),
-                    unit_name: t.String(),
-                    expected_amount: t.Number(),
-                    covered_amount: t.Number(),
-                    status: t.Union([
-                        t.Literal('PENDING'),
-                        t.Literal('PARTIAL'),
-                        t.Literal('PAID')
-                    ])
-                }))
-            }),
+            response: TransparencySchema,
             detail: {
                 tags: [tag],
-                summary: 'Get petty cash replenishment transparency view',
-                description: 'Shows progress of fund replenishment for a specific period, capping unit contributions at their assigned quota. Cancelled invoices are excluded from totals.'
-            }
+                summary: 'Per-assessment transparency of petty cash replenishment',
+                description:
+                    'Breaks collection progress down by assessment batch (ascensor, agua, ...). ' +
+                    'CANCELLED invoices excluded. covered_amount capped per-invoice at expected.',
+            },
         });
 }
 
@@ -152,23 +171,30 @@ function createWriteRoutes() {
     return new Elysia()
         .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
         .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-write-access'))
-        .post('/funds/:buildingId/transactions', async ({ params, body, profile }) => {
+        .post('/funds/:buildingId/entries', async ({ params, body, profile }) => {
             const buildingId = params.buildingId;
-            const amount = typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount;
+            const amount = typeof body.amount === 'string'
+                ? parseFloat(body.amount)
+                : body.amount;
 
-            if (body.type === PettyCashTransactionType.INCOME) {
+            if (body.type === PettyCashEntryType.INCOME) {
                 return await registerIncome.execute({
                     buildingId,
                     amount,
                     description: body.description,
-                    userId: profile.id
+                    userId: profile.id,
                 });
             }
 
-            // EXPENSE
+            // EXPENSE — category is required at the business level;
+            // we default to OTHER if the client forgets it, same as
+            // the legacy endpoint did.
             let evidenceUrl: string | undefined;
             if (body.evidence_image) {
-                evidenceUrl = await storageService.uploadProof(body.evidence_image, profile.id);
+                evidenceUrl = await storageService.uploadProof(
+                    body.evidence_image,
+                    profile.id
+                );
             }
 
             return await registerExpense.execute({
@@ -177,26 +203,30 @@ function createWriteRoutes() {
                 description: body.description,
                 category: (body.category ?? PettyCashCategory.OTHER) as PettyCashCategory,
                 userId: profile.id,
-                evidenceUrl
+                evidenceUrl,
             });
         }, {
             body: t.Object({
                 type: t.Union([
-                    t.Literal(PettyCashTransactionType.INCOME),
-                    t.Literal(PettyCashTransactionType.EXPENSE)
+                    t.Literal(PettyCashEntryType.INCOME),
+                    t.Literal(PettyCashEntryType.EXPENSE),
                 ]),
                 amount: t.Union([t.Number(), t.String()]),
                 description: t.String(),
                 category: t.Optional(t.String()),
-                evidence_image: t.Optional(t.File())
+                evidence_image: t.Optional(t.File()),
             }),
             type: 'multipart/form-data',
-            response: PettyCashTransactionSchema,
+            response: PettyCashEntrySchema,
             detail: {
                 tags: ['Admin - Petty Cash'],
-                summary: 'Create a transaction (income or expense)',
-                description: 'Type INCOME creates a fund replenishment. Type EXPENSE creates a fund deduction and generates a PETTY_CASH invoice. Category and evidence_image only apply to EXPENSE.'
-            }
+                summary: 'Create a ledger entry (income or expense)',
+                description:
+                    'INCOME: board replenishes the fund. EXPENSE: board records a spend — ' +
+                    'the ledger balance may go negative (overdraft); the next assessment ' +
+                    'collects that overdraft from units. Auto-collection entries are NOT ' +
+                    'created here — they fire from ApprovePayment when a resident pays.',
+            },
         });
 }
 
@@ -210,29 +240,53 @@ function createAssessmentRoutes() {
             response: AssessmentPreviewSchema,
             detail: {
                 tags: ['Admin - Petty Cash'],
-                summary: 'Preview overage assessment for units',
-                description: 'Shows how the accumulated petty cash overage would be split across building units. No invoices are created.'
-            }
+                summary: 'Preview the remaining overage that can be prorated to units',
+                description:
+                    'Does NOT create invoices. total_overage = max(0, -current_balance). ' +
+                    'already_assessed excludes CANCELLED invoices.',
+            },
         })
-        .post('/funds/:buildingId/assessments', async ({ params }) => {
-            return await generateAssessments.execute(params.buildingId);
+        .post('/funds/:buildingId/assessments', async ({ params, body, profile }) => {
+            const amount = typeof body.amount === 'string'
+                ? parseFloat(body.amount)
+                : body.amount;
+            return await generateAssessments.execute({
+                buildingId: params.buildingId,
+                description: body.description,
+                category: body.category as PettyCashCategory | undefined,
+                amount,
+                userId: profile.id,
+            });
         }, {
+            body: t.Object({
+                description: t.String({
+                    minLength: 1,
+                    description: 'Name of this assessment batch (e.g. "Ascensor abril"). Shown on each invoice.',
+                }),
+                category: t.Optional(t.String({
+                    description: 'Optional PettyCashCategory value for dashboards (REPAIR, UTILITIES, …).',
+                })),
+                amount: t.Union([t.Number(), t.String()], {
+                    description: 'Total amount to prorate across units in this batch.',
+                }),
+            }),
             response: AssessmentResultSchema,
             detail: {
                 tags: ['Admin - Petty Cash'],
-                summary: 'Generate overage assessment invoices',
-                description: 'Creates PENDING invoices for each unit in the building, splitting the accumulated petty cash overage equally. Returns 400 if no pending overage exists.'
-            }
+                summary: 'Generate a named assessment batch (PENDING invoices per unit)',
+                description:
+                    'Creates a petty_cash_assessment row + one PENDING invoice per unit with ' +
+                    'assessment_id linking back. Multiple batches per period are expected ' +
+                    '(ascensor, agua, …) — each shows its own progress in transparency.',
+            },
         });
 }
 
 // ── Exports ─────────────────────────────────────────────────────────────────
 
-// App routes (APK — read only)
 export const pettyCashAppRoutes = new Elysia({ prefix: '/petty-cash' })
     .use(createReadRoutes('App - Petty Cash'));
 
-// Admin routes (Web Admin — read + write + assessments)
 export const pettyCashRoutes = new Elysia({ prefix: '/petty-cash' })
     .use(createReadRoutes('Admin - Petty Cash'))
     .use(createWriteRoutes())

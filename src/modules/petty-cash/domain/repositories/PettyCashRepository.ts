@@ -1,18 +1,56 @@
 import { PettyCashFund } from '../entities/PettyCashFund';
-import { PettyCashTransaction } from '../entities/PettyCashTransaction';
-import { PettyCashTransactionType, PettyCashCategory } from '@/core/domain/enums';
+import { PettyCashEntry } from '../entities/PettyCashEntry';
+import { PettyCashAssessment } from '../entities/PettyCashAssessment';
+import {
+    PettyCashEntryType,
+    PettyCashCategory,
+} from '@/core/domain/enums';
+
+export interface EntryHistoryFilters {
+    type?: PettyCashEntryType;
+    category?: PettyCashCategory;
+    limit?: number;
+    offset?: number;
+}
 
 export interface PettyCashRepository {
+    // ── Fund (metadata only — balance comes from getBalance) ──────────────
     findFundByBuildingId(buildingId: string): Promise<PettyCashFund | null>;
-    saveFund(fund: PettyCashFund): Promise<PettyCashFund>;
-    saveTransaction(transaction: PettyCashTransaction): Promise<PettyCashTransaction>;
-    findTransactionsByFundId(
+
+    /**
+     * Upsert the fund metadata row for a building. Creates one if
+     * missing, returns the persisted instance with id populated. This
+     * is the only path that inserts into `petty_cash_fund`.
+     */
+    findOrCreateFund(buildingId: string): Promise<PettyCashFund>;
+
+    /**
+     * Live balance from the petty_cash_balance view. Returns 0 if the
+     * fund has no entries yet.
+     */
+    getBalance(fundId: string): Promise<number>;
+
+    // ── Entries (append-only ledger) ──────────────────────────────────────
+    addEntry(entry: PettyCashEntry): Promise<PettyCashEntry>;
+    findEntriesByFundId(
         fundId: string,
-        filters: {
-            type?: PettyCashTransactionType;
-            category?: PettyCashCategory;
-            limit?: number;
-            offset?: number;
-        }
-    ): Promise<PettyCashTransaction[]>;
+        filters: EntryHistoryFilters
+    ): Promise<PettyCashEntry[]>;
+
+    /**
+     * Entries that reference a given external id (invoice or another
+     * entry). Used by reversal flows and for idempotency checks.
+     */
+    findEntriesByReference(
+        referenceType: string,
+        referenceId: string
+    ): Promise<PettyCashEntry[]>;
+
+    // ── Assessment batches ────────────────────────────────────────────────
+    createAssessment(assessment: PettyCashAssessment): Promise<PettyCashAssessment>;
+    findAssessmentsByFundId(fundId: string): Promise<PettyCashAssessment[]>;
+    findAssessmentsByPeriod(
+        fundId: string,
+        period: string
+    ): Promise<PettyCashAssessment[]>;
 }

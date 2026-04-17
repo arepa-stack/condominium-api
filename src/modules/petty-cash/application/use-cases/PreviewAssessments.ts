@@ -1,26 +1,40 @@
 import { IInvoiceRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
-import { InvoiceTag, PettyCashTransactionType } from '@/core/domain/enums';
+import { InvoiceTag } from '@/core/domain/enums';
+import { InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
 
 export interface AssessmentPreview {
     building_id: string;
-    total_expenses: number;
-    total_income: number;
-    fund_balance: number;
-    total_overage: number;
-    already_assessed: number;
-    pending_to_assess: number;
+    current_balance: number;            // live ledger balance (may be negative)
+    total_overage: number;              // max(0, -current_balance)
+    already_assessed: number;           // sum of active unit-level PETTY_CASH invoice amounts
+    pending_to_assess: number;          // max(0, overage - already_assessed)
     units: { id: string; name: string; amount: number }[];
 }
 
-// Money is handled as integer cents inside this use case to avoid
-// IEEE-754 drift. Floats arrive from the repo layer (legacy shape),
-// are rounded to cents on the way in, and converted back only in the
-// DTO. Never sum floats — always sum cents.
+// Integer-cents arithmetic to dodge IEEE-754 drift. The repo returns
+// floats from DECIMAL columns; everything interior is cents.
 const toCents = (n: number): number => Math.round(n * 100);
 const fromCents = (c: number): number => c / 100;
 
+/**
+ * Preview how much to prorate across units for a given building.
+ *
+ * Phase 2 semantics:
+ *   current_balance   = petty_cash_balance view (SUM of signed entries)
+ *   total_overage     = max(0, -current_balance)  — negative balance is
+ *                       the live overdraft
+ *   already_assessed  = Σ amounts of ACTIVE unit-level PETTY_CASH
+ *                       invoices (PENDING + PARTIAL + PAID — NOT
+ *                       CANCELLED). Fixes the pre-existing bug where
+ *                       CANCELLED invoices still counted.
+ *   pending_to_assess = max(0, overage - already_assessed)
+ *
+ * The per-unit amount is a fair-to-the-cent split; first `remainder`
+ * units get one extra cent so the sum of unit amounts equals
+ * pending_to_assess exactly.
+ */
 export class PreviewAssessments {
     constructor(
         private invoiceRepo: IInvoiceRepository,
@@ -30,48 +44,37 @@ export class PreviewAssessments {
 
     async execute(buildingId: string): Promise<AssessmentPreview> {
         const fund = await this.pettyCashRepo.findFundByBuildingId(buildingId);
+        const balance = fund
+            ? await this.pettyCashRepo.getBalance(fund.id)
+            : 0;
 
-        let expensesCents = 0;
-        let incomeCents = 0;
-        const fundBalanceCents = fund ? toCents(fund.current_balance) : 0;
+        const balanceCents = toCents(balance);
+        const overageCents = Math.max(0, -balanceCents);
 
-        if (fund) {
-            const transactions = await this.pettyCashRepo.findTransactionsByFundId(fund.id, {});
-            for (const t of transactions) {
-                if (t.type === PettyCashTransactionType.EXPENSE) {
-                    expensesCents += toCents(t.amount);
-                } else if (t.type === PettyCashTransactionType.INCOME) {
-                    incomeCents += toCents(t.amount);
-                }
-            }
-        }
-
-        const overageCents = Math.max(0, expensesCents - incomeCents - fundBalanceCents);
-
+        // Unit-level PETTY_CASH invoices — what's already been assigned.
+        // We count PENDING + PARTIAL + PAID. CANCELLED is excluded
+        // intentionally (a cancelled quota isn't part of what's owed).
         const allInvoices = await this.invoiceRepo.findAll({
             building_id: buildingId,
-            tag: InvoiceTag.PETTY_CASH
+            tag: InvoiceTag.PETTY_CASH,
         });
 
         let alreadyAssessedCents = 0;
         for (const inv of allInvoices) {
             if (!inv.unit_id) continue;
+            if (inv.status === InvoiceStatus.CANCELLED) continue;
             alreadyAssessedCents += toCents(inv.amount);
         }
 
         let pendingCents = Math.max(0, overageCents - alreadyAssessedCents);
 
-        // Absorb sub-cent residue. Anything under 1 cent is accounting
-        // dust from legacy float-stored invoices, not real debt.
+        // Clamp sub-cent dust from legacy float-stored invoices.
         if (pendingCents < 1) {
             pendingCents = 0;
         }
 
         const units = await this.unitRepo.findByBuildingId(buildingId);
 
-        // Fair distribution: split pendingCents across units at the cent
-        // level so the sum of unit amounts equals pendingCents exactly.
-        // The first `remainder` units get one extra cent.
         const unitCents: number[] = new Array(units.length).fill(0);
         if (units.length > 0 && pendingCents > 0) {
             const base = Math.floor(pendingCents / units.length);
@@ -83,17 +86,15 @@ export class PreviewAssessments {
 
         return {
             building_id: buildingId,
-            total_expenses: fromCents(expensesCents),
-            total_income: fromCents(incomeCents),
-            fund_balance: fromCents(fundBalanceCents),
+            current_balance: balance,
             total_overage: fromCents(overageCents),
             already_assessed: fromCents(alreadyAssessedCents),
             pending_to_assess: fromCents(pendingCents),
             units: units.map((u, i) => ({
                 id: u.id,
                 name: u.name,
-                amount: fromCents(unitCents[i])
-            }))
+                amount: fromCents(unitCents[i]),
+            })),
         };
     }
 }

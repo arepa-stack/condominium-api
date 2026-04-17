@@ -5,12 +5,13 @@ import { MockUserRepository } from '../../users/mocks';
 import { Payment } from '@/modules/payments/domain/entities/Payment';
 import { BuildingRole } from '@/modules/users/domain/entities/BuildingRole';
 import { User } from '@/modules/users/domain/entities/User';
-import { PaymentMethod, PaymentStatus, UserRole, UserStatus } from '@/core/domain/enums';
+import { PaymentMethod, PaymentStatus, UserRole, UserStatus, InvoiceTag, PettyCashEntryType, PettyCashEntryReferenceType } from '@/core/domain/enums';
 import { IPaymentAllocationRepository, IInvoiceRepository, ICreditLedgerRepository } from '@/modules/billing/domain/repository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentAllocation } from '@/modules/billing/domain/entities/PaymentAllocation';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
+import { PettyCashEntry } from '@/modules/petty-cash/domain/entities/PettyCashEntry';
 
 describe('ApprovePayment Use Case', () => {
     let paymentRepo: MockPaymentRepository;
@@ -18,6 +19,7 @@ describe('ApprovePayment Use Case', () => {
     let allocationRepo: IPaymentAllocationRepository;
     let invoiceRepo: IInvoiceRepository;
     let creditLedgerRepo: ICreditLedgerRepository;
+    let pettyCashRepo: any;
     let approvePayment: ApprovePayment;
 
     beforeEach(() => {
@@ -37,7 +39,7 @@ describe('ApprovePayment Use Case', () => {
             findAll: mock(),
             findInvoicesForAdmin: mock(),
             findByBuildingId: mock(async () => []),
-            update: mock(),
+            update: mock(async (inv: Invoice) => inv),
             createBatch: mock()
         };
         creditLedgerRepo = {
@@ -46,12 +48,19 @@ describe('ApprovePayment Use Case', () => {
             getEntriesForUnit: mock(async () => []),
             findByReferenceId: mock(async () => [])
         };
+        pettyCashRepo = {
+            findOrCreateFund: mock(async () => ({ id: 'fund-x' })),
+            addEntry: mock(async (e: PettyCashEntry) => e),
+            findEntriesByReference: mock(async () => []),
+        };
         const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
         approvePayment = new ApprovePayment(
             paymentRepo,
             userRepo,
             allocationRepo,
-            processOverpayment
+            processOverpayment,
+            invoiceRepo,
+            pettyCashRepo
         );
     });
 
@@ -712,6 +721,167 @@ describe('ApprovePayment Use Case', () => {
             // no duplicate credit entries.
             expect(allocationRepo.findByPaymentId).not.toHaveBeenCalled();
             expect(creditLedgerRepo.addCredit).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('Auto-collection → petty cash ledger', () => {
+        let admin: User;
+
+        beforeEach(async () => {
+            admin = new User({
+                id: 'admin-1',
+                email: 'admin@test.com',
+                name: 'Admin',
+                app_role: 'admin' as const,
+                status: UserStatus.ACTIVE
+            });
+            await userRepo.create(admin);
+        });
+
+        it('records a COLLECTION entry when allocation lands on a PETTY_CASH unit-level invoice', async () => {
+            const payment = new Payment({
+                id: 'payment-pc',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-pc',
+                payment_id: 'payment-pc',
+                invoice_id: 'invoice-pc',
+                amount: 100
+            });
+            const pettyCashInvoice = new Invoice({
+                id: 'invoice-pc',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.EXPENSE,
+                tag: InvoiceTag.PETTY_CASH,
+                description: 'Cuota caja chica abril'
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => pettyCashInvoice);
+
+            await approvePayment.approve({ paymentId: 'payment-pc', approverId: 'admin-1' });
+
+            expect(pettyCashRepo.findOrCreateFund).toHaveBeenCalledWith('building-1');
+            expect(pettyCashRepo.addEntry).toHaveBeenCalledTimes(1);
+            const entry: PettyCashEntry = pettyCashRepo.addEntry.mock.calls[0][0];
+            expect(entry.type).toBe(PettyCashEntryType.COLLECTION);
+            expect(entry.amount).toBe(100);
+            expect(entry.fund_id).toBe('fund-x');
+            expect(entry.reference_type).toBe(PettyCashEntryReferenceType.INVOICE_PAYMENT);
+            expect(entry.reference_id).toBe('invoice-pc');
+            expect(entry.description).toContain('payment-pc');
+        });
+
+        it('does not record a petty cash entry when invoice is NOT PETTY_CASH', async () => {
+            const payment = new Payment({
+                id: 'payment-normal',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-normal',
+                payment_id: 'payment-normal',
+                invoice_id: 'invoice-normal',
+                amount: 100
+            });
+            const normalInvoice = new Invoice({
+                id: 'invoice-normal',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.DEBT,
+                tag: InvoiceTag.NORMAL
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => normalInvoice);
+
+            await approvePayment.approve({ paymentId: 'payment-normal', approverId: 'admin-1' });
+
+            expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
+            expect(pettyCashRepo.findOrCreateFund).not.toHaveBeenCalled();
+        });
+
+        it('is idempotent: does not duplicate the collection entry if one already exists for (invoice, payment)', async () => {
+            const payment = new Payment({
+                id: 'payment-dup',
+                user_id: 'user-1',
+                building_id: 'building-1',
+                amount: 100,
+                payment_date: new Date(),
+                method: PaymentMethod.TRANSFER,
+                status: PaymentStatus.PENDING,
+                unit_id: 'unit-1'
+            });
+            await paymentRepo.create(payment);
+
+            const allocation = new PaymentAllocation({
+                id: 'alloc-dup',
+                payment_id: 'payment-dup',
+                invoice_id: 'invoice-dup',
+                amount: 100
+            });
+            const pettyCashInvoice = new Invoice({
+                id: 'invoice-dup',
+                unit_id: 'unit-1',
+                building_id: 'building-1',
+                amount: 100,
+                paid_amount: 0,
+                period: '2026-04',
+                issue_date: new Date(),
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.EXPENSE,
+                tag: InvoiceTag.PETTY_CASH,
+                description: 'Cuota'
+            });
+
+            // Existing entry that matches the (invoice, payment) tuple — the
+            // idempotency check inspects type=COLLECTION and description
+            // containing the paymentId.
+            const existingCollection = new PettyCashEntry({
+                id: 'pce-existing',
+                fund_id: 'fund-x',
+                type: PettyCashEntryType.COLLECTION,
+                amount: 100,
+                description: 'Cobro previo — pago payment-dup',
+                reference_type: PettyCashEntryReferenceType.INVOICE_PAYMENT,
+                reference_id: 'invoice-dup',
+                created_by: 'admin-1'
+            });
+
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => pettyCashInvoice);
+            pettyCashRepo.findEntriesByReference.mockImplementation(async () => [existingCollection]);
+
+            await approvePayment.approve({ paymentId: 'payment-dup', approverId: 'admin-1' });
+
+            expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
         });
     });
 });

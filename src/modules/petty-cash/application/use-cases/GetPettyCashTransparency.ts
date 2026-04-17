@@ -1,11 +1,10 @@
 import { IInvoiceRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
+import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { Invoice, InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
 import { DomainError } from '@/core/errors';
 
-// CANCELLED is intentionally excluded from the transparency view — a
-// cancelled quota is not part of the fund being collected.
 export type TransparencyUnitStatus =
     | InvoiceStatus.PENDING
     | InvoiceStatus.PARTIAL
@@ -14,24 +13,51 @@ export type TransparencyUnitStatus =
 export interface TransparencyUnitDTO {
     unit_id: string;
     unit_name: string;
-    expected_amount: number;   // cuota asignada
-    covered_amount: number;    // min(paid, expected_amount)
+    expected_amount: number;
+    covered_amount: number;
     status: TransparencyUnitStatus;
+}
+
+export interface AssessmentTransparencyDTO {
+    id: string;
+    description: string;
+    category: string | null;
+    total_to_collect: number;
+    total_collected: number;
+    collection_percentage: number;
+    units: TransparencyUnitDTO[];
 }
 
 export interface PettyCashTransparencyDTO {
     building_id: string;
     period: string;
-    total_to_collect: number;          // suma de cuotas
-    total_collected: number;           // suma de covered_amounts
-    collection_percentage: number;     // (collected / to_collect) * 100
-    units: TransparencyUnitDTO[];
+    // Per-batch breakdown. Multiple assessments per period are the
+    // whole point — ascensor + agua in 2026-04 show up as separate
+    // entries each with its own progress bar.
+    assessments: AssessmentTransparencyDTO[];
+    // Aggregate totals across all batches for the period, so clients
+    // can show a single "overall" number without having to re-sum.
+    total_to_collect: number;
+    total_collected: number;
+    collection_percentage: number;
 }
 
+/**
+ * Per-assessment transparency. Invoices are grouped by assessment_id;
+ * each batch reports its own progress. Orphan PETTY_CASH invoices
+ * (no assessment_id — legacy data or invoices emitted before Phase 2)
+ * are lumped under a synthetic "Sin categorizar" batch for back-compat.
+ *
+ * Notes:
+ *  - CANCELLED invoices are excluded from both expected and covered.
+ *  - covered_amount is capped per-invoice at expected_amount —
+ *    overpayments flow to the credit ledger, not into the collection %.
+ */
 export class GetPettyCashTransparency {
     constructor(
         private invoiceRepo: IInvoiceRepository,
-        private unitRepo: IUnitRepository
+        private unitRepo: IUnitRepository,
+        private pettyCashRepo: PettyCashRepository
     ) { }
 
     async execute(buildingId: string, period: string): Promise<PettyCashTransparencyDTO> {
@@ -43,91 +69,119 @@ export class GetPettyCashTransparency {
             );
         }
 
-        const [buildingUnits, invoices] = await Promise.all([
+        const [buildingUnits, invoices, fund] = await Promise.all([
             this.unitRepo.findByBuildingId(buildingId),
             this.invoiceRepo.findAll({
                 building_id: buildingId,
                 tag: InvoiceTag.PETTY_CASH,
-                period
-            })
+                period,
+            }),
+            this.pettyCashRepo.findFundByBuildingId(buildingId),
         ]);
 
-        // Aggregate active invoices by unit_id. A single unit may have
-        // multiple PETTY_CASH invoices in the same period when the
-        // overage grows in stages (see GenerateAssessments) — each
-        // invoice represents an incremental assessment tranche.
-        // CANCELLED invoices are excluded — a cancelled quota is not
-        // part of the collection target.
-        const byUnit = new Map<string, Invoice[]>();
+        // Load assessment metadata if there is a fund for this building.
+        const assessments = fund
+            ? await this.pettyCashRepo.findAssessmentsByPeriod(fund.id, period)
+            : [];
+        const assessmentById = new Map(assessments.map(a => [a.id!, a]));
+
+        // Group active unit-level invoices by assessment_id. Orphan
+        // invoices (assessment_id NULL) land in a special 'legacy' key.
+        const LEGACY_KEY = '__legacy__';
+        const byAssessment = new Map<string, Invoice[]>();
         for (const inv of invoices) {
             if (inv.status === InvoiceStatus.CANCELLED) continue;
             if (!inv.unit_id) continue;
-            const bucket = byUnit.get(inv.unit_id);
+
+            const key = inv.assessment_id ?? LEGACY_KEY;
+            const bucket = byAssessment.get(key);
             if (bucket) bucket.push(inv);
-            else byUnit.set(inv.unit_id, [inv]);
+            else byAssessment.set(key, [inv]);
         }
 
-        const unitsTransparency: TransparencyUnitDTO[] = [];
-        let totalToCollect = 0;
-        let totalCollected = 0;
+        const assessmentDTOs: AssessmentTransparencyDTO[] = [];
+        let grandTotalExpected = 0;
+        let grandTotalCovered = 0;
 
-        for (const unit of buildingUnits) {
-            const unitInvoices = byUnit.get(unit.id);
+        // Preserve display order: use the assessments[] order from the
+        // repo (newest first), then append legacy at the end.
+        const orderedKeys: string[] = [
+            ...assessments.map(a => a.id!).filter(id => byAssessment.has(id)),
+            ...(byAssessment.has(LEGACY_KEY) ? [LEGACY_KEY] : []),
+        ];
 
-            if (unitInvoices && unitInvoices.length > 0) {
-                let expectedAmount = 0;
-                let coveredAmount = 0;
-                for (const inv of unitInvoices) {
-                    expectedAmount += inv.amount;
-                    // RN1 & RN5: cap contribution per-invoice. Overpayments
-                    // flow to the credit ledger, not into the collection %.
-                    coveredAmount += Math.min(inv.paid_amount, inv.amount);
-                }
+        for (const key of orderedKeys) {
+            const bucketInvoices = byAssessment.get(key)!;
+            const batch = key === LEGACY_KEY ? null : assessmentById.get(key);
 
-                totalToCollect += expectedAmount;
-                totalCollected += coveredAmount;
-
-                // Derive combined status: PAID only if every tranche is
-                // fully covered; PENDING only if nothing has been paid;
-                // PARTIAL otherwise.
-                let status: TransparencyUnitStatus;
-                if (coveredAmount >= expectedAmount) {
-                    status = InvoiceStatus.PAID;
-                } else if (coveredAmount <= 0) {
-                    status = InvoiceStatus.PENDING;
-                } else {
-                    status = InvoiceStatus.PARTIAL;
-                }
-
-                unitsTransparency.push({
-                    unit_id: unit.id,
-                    unit_name: unit.name,
-                    expected_amount: expectedAmount,
-                    covered_amount: coveredAmount,
-                    status
-                });
-            } else {
-                unitsTransparency.push({
-                    unit_id: unit.id,
-                    unit_name: unit.name,
-                    expected_amount: 0,
-                    covered_amount: 0,
-                    status: InvoiceStatus.PENDING
-                });
+            const byUnitId = new Map<string, Invoice[]>();
+            for (const inv of bucketInvoices) {
+                const arr = byUnitId.get(inv.unit_id!) ?? [];
+                arr.push(inv);
+                byUnitId.set(inv.unit_id!, arr);
             }
+
+            let batchExpected = 0;
+            let batchCovered = 0;
+            const unitsDTO: TransparencyUnitDTO[] = [];
+
+            for (const unit of buildingUnits) {
+                const unitInvoices = byUnitId.get(unit.id);
+                if (!unitInvoices || unitInvoices.length === 0) continue;
+
+                let expected = 0;
+                let covered = 0;
+                for (const inv of unitInvoices) {
+                    expected += inv.amount;
+                    covered += Math.min(inv.paid_amount, inv.amount);
+                }
+
+                let status: TransparencyUnitStatus;
+                if (covered >= expected) status = InvoiceStatus.PAID;
+                else if (covered <= 0) status = InvoiceStatus.PENDING;
+                else status = InvoiceStatus.PARTIAL;
+
+                unitsDTO.push({
+                    unit_id: unit.id,
+                    unit_name: unit.name,
+                    expected_amount: expected,
+                    covered_amount: covered,
+                    status,
+                });
+
+                batchExpected += expected;
+                batchCovered += covered;
+            }
+
+            const percentage = batchExpected > 0
+                ? Math.round((batchCovered / batchExpected) * 10000) / 100
+                : 0;
+
+            assessmentDTOs.push({
+                id: batch?.id ?? LEGACY_KEY,
+                description: batch?.description ?? 'Sin categorizar (legacy)',
+                category: batch?.category ?? null,
+                total_to_collect: batchExpected,
+                total_collected: batchCovered,
+                collection_percentage: percentage,
+                units: unitsDTO,
+            });
+
+            grandTotalExpected += batchExpected;
+            grandTotalCovered += batchCovered;
         }
 
-        const collectionPercentage = totalToCollect > 0
-            ? Math.round((totalCollected / totalToCollect) * 10000) / 100
+        const globalPct = grandTotalExpected > 0
+            ? Math.round((grandTotalCovered / grandTotalExpected) * 10000) / 100
             : 0;
 
         return {
             building_id: buildingId,
             period,
-            total_to_collect: totalToCollect,
-            total_collected: totalCollected,
-            collection_percentage: collectionPercentage,
-            units: unitsTransparency
+            assessments: assessmentDTOs,
+            total_to_collect: grandTotalExpected,
+            total_collected: grandTotalCovered,
+            collection_percentage: globalPct,
         };
     }
 }
