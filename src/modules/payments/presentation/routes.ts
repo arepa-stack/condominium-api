@@ -31,15 +31,20 @@ const getUnitBalance = new GetUnitBalance(invoiceRepo, creditLedgerRepo);
 import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
 const processOverpayment = new ProcessInvoiceOverpayment(invoiceRepo, creditLedgerRepo);
 
+import { SupabasePettyCashRepository } from '@/modules/petty-cash/infrastructure/repositories/SupabasePettyCashRepository';
+const pettyCashRepo = new SupabasePettyCashRepository();
+
 const approvePayment = new ApprovePayment(
     paymentRepo,
     userRepo,
     allocationRepo,
-    processOverpayment
+    processOverpayment,
+    invoiceRepo,
+    pettyCashRepo
 );
 
 import { ReversePayment } from '../application/use-cases/ReversePayment';
-const reversePayment = new ReversePayment(paymentRepo, invoiceRepo, allocationRepo, creditLedgerRepo);
+const reversePayment = new ReversePayment(paymentRepo, invoiceRepo, allocationRepo, creditLedgerRepo, pettyCashRepo);
 const getUnitPayments = new GetUnitPayments(paymentRepo, userRepo);
 const getUnitPaymentSummary = new GetUnitPaymentSummary(paymentRepo, userRepo, getUnitBalance);
 const getAllPayments = new GetAllPayments(paymentRepo, userRepo);

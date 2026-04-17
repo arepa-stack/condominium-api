@@ -3,7 +3,14 @@ import { IInvoiceRepository, IPaymentAllocationRepository, ICreditLedgerReposito
 import { NotFoundError, ForbiddenError } from '@/core/errors';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 import { InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
-import { PaymentStatus } from '@/core/domain/enums';
+import {
+    PaymentStatus,
+    InvoiceTag,
+    PettyCashEntryType,
+    PettyCashEntryReferenceType,
+} from '@/core/domain/enums';
+import { PettyCashRepository } from '@/modules/petty-cash/domain/repositories/PettyCashRepository';
+import { PettyCashEntry } from '@/modules/petty-cash/domain/entities/PettyCashEntry';
 
 export interface ReversePaymentDTO {
     paymentId: string;
@@ -22,7 +29,8 @@ export class ReversePayment {
         private paymentRepo: IPaymentRepository,
         private invoiceRepo: IInvoiceRepository,
         private allocationRepo: IPaymentAllocationRepository,
-        private creditLedgerRepo: ICreditLedgerRepository
+        private creditLedgerRepo: ICreditLedgerRepository,
+        private pettyCashRepo: PettyCashRepository
     ) { }
 
     async execute(dto: ReversePaymentDTO): Promise<void> {
@@ -58,18 +66,65 @@ export class ReversePayment {
         // 3. Subtract the applied amount from each affected invoice, then
         //    delete the allocation. The domain now owns paid_amount /
         //    status recalculation (triggers dropped in 20260412091500).
+        //    While we're here, if the invoice was a PETTY_CASH unit-level
+        //    one, reverse the auto-collection entry in the fund ledger so
+        //    the building's petty-cash balance un-reflects the collection.
         const allocations = await this.allocationRepo.findByPaymentId(dto.paymentId);
         for (const alloc of allocations) {
             const invoice = await this.invoiceRepo.findById(alloc.invoice_id);
-            // Skip the state mutation for cancelled invoices — CANCELLED is
-            // terminal and subtractPayment / updateStatus should not reach it.
-            // The allocation still gets deleted so no orphan rows remain.
             if (invoice && invoice.status !== InvoiceStatus.CANCELLED) {
                 invoice.subtractPayment(alloc.amount);
                 invoice.updateStatus();
                 await this.invoiceRepo.update(invoice);
             }
+            if (invoice) {
+                await this.reversePettyCashCollectionIfApplicable(
+                    invoice,
+                    dto.paymentId,
+                    dto.requesterId,
+                    dto.reason
+                );
+            }
             await this.allocationRepo.delete(alloc.id);
         }
+    }
+
+    /**
+     * Counter-asiento in petty_cash_entries for any collection entry
+     * that ApprovePayment generated for this (invoice, payment) pair.
+     * Mirrors how credit ledger entries are reversed above.
+     */
+    private async reversePettyCashCollectionIfApplicable(
+        invoice: { id: string; tag: InvoiceTag; unit_id?: string; building_id?: string },
+        paymentId: string,
+        requesterId: string,
+        reason: string
+    ): Promise<void> {
+        if (invoice.tag !== InvoiceTag.PETTY_CASH) return;
+        if (!invoice.unit_id) return;
+        if (!invoice.building_id) return;
+
+        const existing = await this.pettyCashRepo.findEntriesByReference(
+            PettyCashEntryReferenceType.INVOICE_PAYMENT,
+            invoice.id
+        );
+        const collectionForThisPayment = existing.find(
+            e => e.type === PettyCashEntryType.COLLECTION &&
+                 e.description.includes(paymentId)
+        );
+        if (!collectionForThisPayment) return;
+
+        // Skip if already reversed.
+        const alreadyReversed = existing.some(
+            e => e.type === PettyCashEntryType.REVERSAL &&
+                 e.reference_id === collectionForThisPayment.id
+        );
+        if (alreadyReversed) return;
+
+        const counter = PettyCashEntry.reversalOf(collectionForThisPayment, {
+            description: `Reversión de cobro por pago ${paymentId}: ${reason}`,
+            createdBy: requesterId,
+        });
+        await this.pettyCashRepo.addEntry(counter);
     }
 }

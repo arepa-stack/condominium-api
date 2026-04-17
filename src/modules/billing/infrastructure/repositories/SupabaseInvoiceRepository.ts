@@ -21,6 +21,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             description: data.description as string | undefined,
             receipt_number: data.receipt_number as string | undefined,
             paid_amount: parseFloat(data.paid_amount as string || '0'),
+            assessment_id: (data.assessment_id as string | null) ?? null,
             created_at: data.created_at ? new Date(data.created_at as string) : undefined,
             updated_at: data.updated_at ? new Date(data.updated_at as string) : undefined
         });
@@ -41,6 +42,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             tag: invoice.tag,
             description: invoice.description,
             receipt_number: invoice.receipt_number,
+            assessment_id: invoice.assessment_id ?? null,
             updated_at: invoice.updated_at
         };
     }

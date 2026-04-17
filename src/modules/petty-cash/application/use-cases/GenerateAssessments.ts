@@ -2,40 +2,76 @@ import { IInvoiceRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
-import { InvoiceTag } from '@/core/domain/enums';
+import { PettyCashAssessment } from '../../domain/entities/PettyCashAssessment';
+import { InvoiceTag, PettyCashCategory } from '@/core/domain/enums';
 import { DomainError } from '@/core/errors';
-import { PreviewAssessments } from './PreviewAssessments';
+
+export interface GenerateAssessmentDTO {
+    buildingId: string;
+    description: string;
+    category?: PettyCashCategory;
+    amount: number;                 // total to prorate across units
+    userId: string;
+}
 
 export interface GenerateAssessmentsResult {
     building_id: string;
+    assessment_id: string;
+    description: string;
     total_assessed: number;
     invoices_created: number;
-    invoices: { unit_id: string; unit_name: string; amount: number; invoice_id: string }[];
+    invoices: {
+        unit_id: string;
+        unit_name: string;
+        amount: number;
+        invoice_id: string;
+    }[];
 }
 
-export class GenerateAssessments {
-    private previewUseCase: PreviewAssessments;
+const toCents = (n: number): number => Math.round(n * 100);
+const fromCents = (c: number): number => c / 100;
 
+/**
+ * Create a named assessment BATCH and one PENDING invoice per unit
+ * linking back to the batch.
+ *
+ * Breaking change vs. Phase 1:
+ *   - The admin now provides `description` (e.g. "Ascensor abril") and
+ *     optional `category`. These are stored on the batch and copied
+ *     into each invoice's description for clarity.
+ *   - The admin provides `amount` — the total to prorate. It can be
+ *     smaller than `pending_to_assess` (partial assessment) but not
+ *     larger (the system never asks units for more than is owed).
+ */
+export class GenerateAssessments {
     constructor(
         private invoiceRepo: IInvoiceRepository,
         private unitRepo: IUnitRepository,
         private pettyCashRepo: PettyCashRepository
-    ) {
-        this.previewUseCase = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
-    }
+    ) {}
 
-    async execute(buildingId: string): Promise<GenerateAssessmentsResult> {
-        const preview = await this.previewUseCase.execute(buildingId);
+    async execute(dto: GenerateAssessmentDTO): Promise<GenerateAssessmentsResult> {
+        const { buildingId, description, category, amount, userId } = dto;
 
-        if (preview.pending_to_assess <= 0) {
+        if (!description?.trim()) {
             throw new DomainError(
-                'No pending overage to assess. Fund balance is sufficient or overage has already been assessed.',
-                'NO_PENDING_OVERAGE',
+                'Assessment description is required',
+                'VALIDATION_ERROR',
+                400
+            );
+        }
+        if (!(amount > 0)) {
+            throw new DomainError(
+                'Assessment amount must be greater than zero',
+                'VALIDATION_ERROR',
                 400
             );
         }
 
-        if (preview.units.length === 0) {
+        const fund = await this.pettyCashRepo.findOrCreateFund(buildingId);
+
+        const units = await this.unitRepo.findByBuildingId(buildingId);
+        if (units.length === 0) {
             throw new DomainError(
                 'No units found in this building.',
                 'NO_UNITS',
@@ -43,54 +79,65 @@ export class GenerateAssessments {
             );
         }
 
-        // Need at least 1 cent per unit, otherwise the distribution is
-        // meaningless: we'd either emit zero-amount invoices or
-        // concentrate the residue on a single unit.
-        const pendingCents = Math.round(preview.pending_to_assess * 100);
-        if (pendingCents < preview.units.length) {
+        const amountCents = toCents(amount);
+        if (amountCents < units.length) {
             throw new DomainError(
-                `Pending amount (${preview.pending_to_assess}) is too small to distribute across ${preview.units.length} units. Needs at least 1 cent per unit.`,
+                `Amount (${amount}) is too small to distribute across ${units.length} units. Needs at least 1 cent per unit.`,
                 'AMOUNT_TOO_SMALL_TO_DISTRIBUTE',
                 400
             );
         }
 
+        // Fair-to-the-cent distribution.
+        const base = Math.floor(amountCents / units.length);
+        const remainder = amountCents - base * units.length;
+        const unitCents = units.map((_, i) => base + (i < remainder ? 1 : 0));
+
         const period = new Date().toISOString().substring(0, 7);
-        const invoicedUnits: { unit: typeof preview.units[number]; invoice: Invoice }[] = [];
 
-        for (const unit of preview.units) {
-            if (unit.amount <= 0) continue;
-
-            const invoice = new Invoice({
-                id: crypto.randomUUID(),
-                unit_id: unit.id,
-                building_id: buildingId,
-                amount: unit.amount,
+        // 1. Create the batch (atomic row).
+        const assessment = await this.pettyCashRepo.createAssessment(
+            new PettyCashAssessment({
+                fund_id: fund.id,
                 period,
-                issue_date: new Date(),
-                status: InvoiceStatus.PENDING,
-                type: InvoiceType.EXPENSE,
-                tag: InvoiceTag.PETTY_CASH,
-                description: `Cuota reposición caja chica - ${period}`
-            });
-
-            invoicedUnits.push({ unit, invoice });
-        }
-
-        const created = await this.invoiceRepo.createBatch(
-            invoicedUnits.map(x => x.invoice)
+                description,
+                category: category ?? null,
+                total_amount: amount,
+                created_by: userId,
+            })
         );
+
+        // 2. One invoice per unit, linked to the batch via
+        //    assessment_id. Description copies the batch name so it
+        //    appears verbatim on each resident's billing.
+        const invoices: Invoice[] = units.map((unit, i) => new Invoice({
+            id: crypto.randomUUID(),
+            unit_id: unit.id,
+            building_id: buildingId,
+            amount: fromCents(unitCents[i]),
+            period,
+            issue_date: new Date(),
+            status: InvoiceStatus.PENDING,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description,
+            assessment_id: assessment.id,
+        }));
+
+        const created = await this.invoiceRepo.createBatch(invoices);
 
         return {
             building_id: buildingId,
-            total_assessed: preview.pending_to_assess,
+            assessment_id: assessment.id!,
+            description: assessment.description,
+            total_assessed: amount,
             invoices_created: created.length,
             invoices: created.map((inv, i) => ({
-                unit_id: invoicedUnits[i].unit.id,
-                unit_name: invoicedUnits[i].unit.name,
+                unit_id: units[i].id,
+                unit_name: units[i].name,
                 amount: inv.amount,
-                invoice_id: inv.id
-            }))
+                invoice_id: inv.id,
+            })),
         };
     }
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { ReversePayment } from './ReversePayment';
-import { Payment } from '../../domain/entities/Payment';
-import { PaymentStatus, PaymentMethod } from '@/core/domain/enums';
+import { ReversePayment } from '@/modules/payments/application/use-cases/ReversePayment';
+import { Payment } from '@/modules/payments/domain/entities/Payment';
+import { PaymentStatus, PaymentMethod, InvoiceTag, PettyCashEntryType, PettyCashEntryReferenceType } from '@/core/domain/enums';
 import { CreditLedgerEntry, CreditLedgerReferenceType } from '@/modules/billing/domain/entities/CreditLedgerEntry';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
+import { PettyCashEntry } from '@/modules/petty-cash/domain/entities/PettyCashEntry';
 
 // ---------------------------------------------------------------------
 // Factories: every test builds its own set of mocks so there is no
@@ -41,6 +42,12 @@ const makeCreditLedgerRepo = (entries: CreditLedgerEntry[] = []) => ({
     deductCredit: mock(async () => ({}) as any)
 });
 
+const makePettyCashRepoStub = (existingEntries: PettyCashEntry[] = []) => ({
+    findOrCreateFund: mock(async () => ({ id: 'fund-x' })),
+    addEntry: mock(async (e: PettyCashEntry) => e),
+    findEntriesByReference: mock(async () => existingEntries),
+});
+
 describe('ReversePayment', () => {
     it('full reversal brings a PAID invoice back to PENDING with paid_amount = 0', async () => {
         const payment = makeApprovedPayment('pay-1');
@@ -56,12 +63,14 @@ describe('ReversePayment', () => {
             { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
         ]);
         const creditLedgerRepo = makeCreditLedgerRepo();
+        const pettyCashRepo = makePettyCashRepoStub();
 
         const useCase = new ReversePayment(
             paymentRepo as any,
             invoiceRepo as any,
             allocationRepo as any,
-            creditLedgerRepo as any
+            creditLedgerRepo as any,
+            pettyCashRepo as any
         );
 
         await useCase.execute({
@@ -76,8 +85,7 @@ describe('ReversePayment', () => {
         expect(updatedPayment.status).toBe(PaymentStatus.REJECTED);
         expect(updatedPayment.notes).toContain('REVERSED');
 
-        // Invoice state actually reflects the reversal — this is the
-        // assertion the old test was missing entirely.
+        // Invoice state reflects the reversal.
         expect(invoiceRepo.update).toHaveBeenCalled();
         expect(invoice.paid_amount).toBe(0);
         expect(invoice.status).toBe(InvoiceStatus.PENDING);
@@ -87,9 +95,6 @@ describe('ReversePayment', () => {
     });
 
     it('partial reversal leaves invoice in PARTIAL when other payments remain applied', async () => {
-        // Invoice amount = 100, another approved payment already contributed 40,
-        // this payment contributed 60 → paid_amount was 100 (PAID). Reversing
-        // this payment should bring paid_amount to 40 (PARTIAL).
         const payment = makeApprovedPayment('pay-1');
         const paymentRepo = makePaymentRepo(payment);
 
@@ -107,7 +112,8 @@ describe('ReversePayment', () => {
             paymentRepo as any,
             invoiceRepo as any,
             allocationRepo as any,
-            makeCreditLedgerRepo() as any
+            makeCreditLedgerRepo() as any,
+            makePettyCashRepoStub() as any
         );
 
         await useCase.execute({
@@ -146,7 +152,8 @@ describe('ReversePayment', () => {
             makeAllocationRepo([
                 { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
             ]) as any,
-            creditLedgerRepo as any
+            creditLedgerRepo as any,
+            makePettyCashRepoStub() as any
         );
 
         await useCase.execute({
@@ -163,10 +170,6 @@ describe('ReversePayment', () => {
     });
 
     it('does not re-reverse REVERSAL entries on re-invocation', async () => {
-        // Scenario: if somehow findByReferenceId returns a mix of the original
-        // credit and its previous reversal, only the credit should be reversed.
-        // The APPROVED guard already blocks double-reversal, but this test
-        // pins the reference_type filter that protects against stale rows.
         const payment = makeApprovedPayment('pay-1');
         const invoice = new Invoice({
             id: 'inv-1', unit_id: 'u1', amount: 100, paid_amount: 100,
@@ -195,7 +198,8 @@ describe('ReversePayment', () => {
             makeAllocationRepo([
                 { id: 'alloc-1', invoice_id: 'inv-1', amount: 100 }
             ]) as any,
-            creditLedgerRepo as any
+            creditLedgerRepo as any,
+            makePettyCashRepoStub() as any
         );
 
         await useCase.execute({
@@ -210,11 +214,6 @@ describe('ReversePayment', () => {
 });
 
 describe('ReversePayment — CANCELLED invoice handling', () => {
-    // Regression guard from aabf4dd: the transition guard now throws
-    // INVALID_STATE_TRANSITION on a CANCELLED invoice. ReversePayment must
-    // skip the state mutation on cancelled invoices but still delete the
-    // allocation so no orphan row remains.
-
     it('skips state mutation on cancelled invoice but still deletes the allocation', async () => {
         const payment = makeApprovedPayment('pay-2');
         const paymentRepo = makePaymentRepo(payment);
@@ -233,7 +232,8 @@ describe('ReversePayment — CANCELLED invoice handling', () => {
             paymentRepo as any,
             invoiceRepo as any,
             allocationRepo as any,
-            makeCreditLedgerRepo() as any
+            makeCreditLedgerRepo() as any,
+            makePettyCashRepoStub() as any
         );
 
         await expect(useCase.execute({
@@ -249,5 +249,144 @@ describe('ReversePayment — CANCELLED invoice handling', () => {
         expect(allocationRepo.delete).toHaveBeenCalledWith('alloc-x');
         // And the payment itself still reaches REJECTED.
         expect(paymentRepo.update).toHaveBeenCalled();
+    });
+});
+
+describe('ReversePayment — auto-collection reversal in petty cash ledger', () => {
+    it('records a REVERSAL entry when the reversed allocation was a PETTY_CASH unit-level invoice with an existing collection', async () => {
+        const payment = makeApprovedPayment('pay-pc');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const pettyCashInvoice = new Invoice({
+            id: 'inv-pc',
+            unit_id: 'u1',
+            building_id: 'b1',
+            amount: 100,
+            paid_amount: 100,
+            period: '2026-04',
+            issue_date: new Date(),
+            status: InvoiceStatus.PAID,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description: 'Cuota caja chica'
+        });
+        const invoiceRepo = makeInvoiceRepo(pettyCashInvoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-pc', invoice_id: 'inv-pc', amount: 100 }
+        ]);
+
+        const existingCollection = new PettyCashEntry({
+            id: 'pce-1',
+            fund_id: 'fund-x',
+            type: PettyCashEntryType.COLLECTION,
+            amount: 100,
+            description: 'Cobro Cuota caja chica — pago pay-pc',
+            reference_type: PettyCashEntryReferenceType.INVOICE_PAYMENT,
+            reference_id: 'inv-pc',
+            created_by: 'admin-1'
+        });
+        const pettyCashRepo = makePettyCashRepoStub([existingCollection]);
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            makeCreditLedgerRepo() as any,
+            pettyCashRepo as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-pc',
+            requesterId: 'admin-1',
+            reason: 'Reversal'
+        });
+
+        expect(pettyCashRepo.addEntry).toHaveBeenCalledTimes(1);
+        const reversalEntry: PettyCashEntry = pettyCashRepo.addEntry.mock.calls[0][0];
+        expect(reversalEntry.type).toBe(PettyCashEntryType.REVERSAL);
+        expect(reversalEntry.amount).toBe(-100);
+        expect(reversalEntry.reference_type).toBe(PettyCashEntryReferenceType.REVERSAL);
+        expect(reversalEntry.reference_id).toBe('pce-1');
+    });
+
+    it('does not record a reversal entry when invoice is NOT PETTY_CASH', async () => {
+        const payment = makeApprovedPayment('pay-normal');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const normalInvoice = new Invoice({
+            id: 'inv-normal',
+            unit_id: 'u1',
+            building_id: 'b1',
+            amount: 100,
+            paid_amount: 100,
+            period: '2026-04',
+            issue_date: new Date(),
+            status: InvoiceStatus.PAID,
+            type: InvoiceType.DEBT,
+            tag: InvoiceTag.NORMAL
+        });
+        const invoiceRepo = makeInvoiceRepo(normalInvoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-n', invoice_id: 'inv-normal', amount: 100 }
+        ]);
+        const pettyCashRepo = makePettyCashRepoStub();
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            makeCreditLedgerRepo() as any,
+            pettyCashRepo as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-normal',
+            requesterId: 'admin-1',
+            reason: 'Reversal'
+        });
+
+        expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
+        expect(pettyCashRepo.findEntriesByReference).not.toHaveBeenCalled();
+    });
+
+    it('does not record a reversal entry when no matching collection exists', async () => {
+        const payment = makeApprovedPayment('pay-lonely');
+        const paymentRepo = makePaymentRepo(payment);
+
+        const pettyCashInvoice = new Invoice({
+            id: 'inv-lonely',
+            unit_id: 'u1',
+            building_id: 'b1',
+            amount: 100,
+            paid_amount: 100,
+            period: '2026-04',
+            issue_date: new Date(),
+            status: InvoiceStatus.PAID,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description: 'Cuota caja chica'
+        });
+        const invoiceRepo = makeInvoiceRepo(pettyCashInvoice);
+        const allocationRepo = makeAllocationRepo([
+            { id: 'alloc-l', invoice_id: 'inv-lonely', amount: 100 }
+        ]);
+        // findEntriesByReference returns empty → no matching collection to reverse.
+        const pettyCashRepo = makePettyCashRepoStub([]);
+
+        const useCase = new ReversePayment(
+            paymentRepo as any,
+            invoiceRepo as any,
+            allocationRepo as any,
+            makeCreditLedgerRepo() as any,
+            pettyCashRepo as any
+        );
+
+        await useCase.execute({
+            paymentId: 'pay-lonely',
+            requesterId: 'admin-1',
+            reason: 'Reversal'
+        });
+
+        expect(pettyCashRepo.addEntry).not.toHaveBeenCalled();
     });
 });
