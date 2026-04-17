@@ -1,7 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
-> **Última actualización**: 2026-04-18 — Refleja el estado post-PR Phase 2 del rediseño de Caja Chica (`feat/petty-cash-ledger-phase-2`).
-> Cambios destacados de Caja Chica Phase 2: modelo **ledger-based** (append-only). `petty_cash_entries` reemplaza a `petty_cash_transactions`; el balance se deriva de la vista `petty_cash_balance` — no hay más columna cacheada ni riesgo de drift. Los **egresos permiten balance negativo** (overdraft): el excedente no genera invoices fantasma PAID building-level (eliminadas), vive directamente en el ledger como `amount < 0`. Los **assessments pasan a ser batches con nombre**: nueva tabla `petty_cash_assessment` + campo `invoices.assessment_id`. El admin llama `POST /petty-cash/funds/:id/assessments` con `{ description, amount, category? }` y se crea 1 invoice PENDING por unit linkeada al batch. Múltiples batches por período son esperados (ascensor, agua) — la **transparencia** ahora se desglosa por assessment. **Auto-collection**: cuando un resident paga una invoice PETTY_CASH con unit_id, `ApprovePayment` genera automáticamente una entry `collection` en el ledger (se repone el fund sin intervención manual). `ReversePayment` genera el counter-asiento correspondiente. **Fix bug**: `findOrCreateFund` atómico resuelve el bug donde la primera creación del fondo generaba balance persistido sin transacción (fund.id='' pasado al INSERT de transactions).
+> **Última actualización**: 2026-04-19 — Refleja el estado post-PR Phase 3 (final) del rediseño de Caja Chica (`feat/petty-cash-ledger-phase-3`).
+> Cambios destacados de Phase 3: se **dropearon** `petty_cash_transactions`, `petty_cash_fund.current_balance` y `petty_cash_fund.currency`. El entity `PettyCashFund` ahora es solo metadata (`id`, `building_id`, `updated_at`). Balance vive exclusivamente en la vista `petty_cash_balance`. Nuevo endpoint `POST /petty-cash/funds/:buildingId/entries/:entryId/reverse` para emitir counter-asientos manuales sobre cualquier entry — idempotente, append-only, rechaza reversar una reversal. Secciones 4.1/7.5/7.6/7.9 de este doc reescritas al estado final.
+> Cambios de Phase 2 vigentes: modelo **ledger-based** (append-only). `petty_cash_entries` reemplaza a `petty_cash_transactions`; el balance se deriva de la vista `petty_cash_balance`. Los **egresos permiten balance negativo** (overdraft): el excedente vive en el ledger como `amount < 0`, sin invoices fantasma PAID building-level. Los **assessments son batches con nombre**: tabla `petty_cash_assessment` + campo `invoices.assessment_id`. El admin llama `POST /petty-cash/funds/:id/assessments` con `{ description, amount, category? }` y se crea 1 invoice PENDING por unit linkeada al batch. **Auto-collection**: cuando un resident paga una invoice PETTY_CASH con unit_id, `ApprovePayment` genera automáticamente una entry `collection` en el ledger; `ReversePayment` genera el counter-asiento. Transparencia desglosada por assessment.
 > Cambios de Phase 4 (roles) vigentes: se **dropeó la columna legacy `profiles.role`** y su CHECK constraint. Las 3 RLS policies que la leían directamente (`profile_units`, `payment_allocations`) ahora pasan por `get_my_role()`. La función SQL `get_my_role()` sigue devolviendo `admin|board|resident` (derivado de `app_role` + `building_members`) para que las RLS queden intactas. **Breaking change para clientes**: la respuesta de `/auth/login`, `/auth/register`, `GET /users/*` ya **NO incluye el field `role`** — los clientes deben leer `app_role` + `buildingRoles[]`. El endpoint `PATCH /users/:id` ahora acepta `app_role` (admin-only) en lugar de `role`; para cambios per-edificio seguir usando `POST /users/:id/roles`. El endpoint `POST /users` mantiene el input ergonómico `role: 'admin'|'board'|'resident'` que el backend traduce a `app_role` + `buildingRoles`. `UserProps.role` eliminado del entity; `changeRole()` renombrado a `changeAppRole()`.
 > Cambios destacados de Phase 4: se **dropeó la columna legacy `profiles.role`** y su CHECK constraint. Las 3 RLS policies que la leían directamente (`profile_units`, `payment_allocations`) ahora pasan por `get_my_role()`. La función SQL `get_my_role()` sigue devolviendo `admin|board|resident` (derivado de `app_role` + `building_members`) para que las RLS queden intactas. **Breaking change para clientes**: la respuesta de `/auth/login`, `/auth/register`, `GET /users/*` ya **NO incluye el field `role`** — los clientes deben leer `app_role` + `buildingRoles[]`. El endpoint `PATCH /users/:id` ahora acepta `app_role` (admin-only) en lugar de `role`; para cambios per-edificio seguir usando `POST /users/:id/roles`. El endpoint `POST /users` mantiene el input ergonómico `role: 'admin'|'board'|'resident'` que el backend traduce a `app_role` + `buildingRoles`. `UserProps.role` eliminado del entity; `changeRole()` renombrado a `changeAppRole()`.
 > Cambios de Phases previas vigentes: `profiles.app_role` es la fuente del rol global (Phase 1-2); `building_members.role` per-edificio con CHECK (Phase 1); scoping de board derivado solo de `building_members` via `getBuildingsWhereBoard()` en todos los use cases, con helper `getAffiliatedBuildings()` para reachability del lado del target (Phase 3). El panel admin gatea entrada con `app_role === 'admin' || buildingRoles.length > 0`.
@@ -225,31 +226,74 @@ Vincula pagos con facturas, permitiendo pagos parciales y que un pago cubra múl
 | `invoice_id` | UUID | ID de la factura |
 | `amount` | NUMERIC | Monto asignado de este pago a esta factura |
 
-#### Caja Chica — Fondo (`petty_cash_funds`)
-Fondo de caja chica por edificio. Cada edificio tiene un único fondo.
+#### Caja Chica — Fondo (`petty_cash_fund`)
+Metadata del fondo de caja chica por edificio. Cada edificio tiene un único fondo (CONSTRAINT `UNIQUE(building_id)`). El balance **no vive acá** — se deriva de la vista `petty_cash_balance`.
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `id` | UUID | Identificador único |
 | `building_id` | UUID (UNIQUE) | Edificio al que pertenece |
-| `current_balance` | DECIMAL(12,2) | Balance actual del fondo |
-| `currency` | VARCHAR | Moneda (default: VES) |
-| `updated_at` | TIMESTAMPTZ | Última actualización |
+| `updated_at` | TIMESTAMPTZ | Última actualización del metadata |
 
-#### Caja Chica — Transacción (`petty_cash_transactions`)
-Movimientos de la caja chica (ingresos y egresos).
+> **Phase 3 drop** (2026-04-19): las columnas legacy `current_balance` y `currency` fueron eliminadas. El balance se calcula desde el ledger; el sistema no es multi-currency hoy y el campo era decorativo.
+
+#### Caja Chica — Ledger (`petty_cash_entries`)
+Libro mayor **append-only** de movimientos de caja chica. Una fila = una operación. Jamás se actualizan filas existentes; reversas y correcciones se expresan como contra-asientos. Mismo patrón que `unit_credit_ledger`.
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `id` | UUID | Identificador único |
 | `fund_id` | UUID | Fondo al que pertenece |
-| `type` | VARCHAR | Tipo: `INCOME` o `EXPENSE` |
-| `amount` | DECIMAL(12,2) | Monto de la transacción |
-| `description` | TEXT | Descripción del movimiento |
-| `category` | VARCHAR | Categoría: `REPAIR`, `CLEANING`, `EMERGENCY`, `OFFICE`, `UTILITIES`, `OTHER` |
-| `created_by` | UUID | Usuario que registró la transacción |
-| `evidence_url` | TEXT | URL de evidencia/comprobante (opcional) |
+| `type` | TEXT | `income` \| `expense` \| `collection` \| `reversal` (CHECK) |
+| `amount` | DECIMAL(12,2) | **Monto firmado** (CHECK `!= 0`). Positivo: `income` / `collection`. Negativo: `expense`. Reversal: signo flipeado respecto al original. |
+| `category` | VARCHAR(50) | Solo para `expense`. Valores de `PettyCashCategory` (`REPAIR`, `CLEANING`, `EMERGENCY`, `OFFICE`, `UTILITIES`, `OTHER`). |
+| `description` | TEXT | Descripción legible |
+| `evidence_url` | TEXT (nullable) | Comprobante del gasto (solo `expense`) |
+| `reference_type` | TEXT (nullable) | `manual` (board lo creó), `invoice_payment` (auto-collection cuando un resident paga), `reversal` (contra-asiento) |
+| `reference_id` | UUID (nullable) | Apunta al `invoices.id` (si `invoice_payment`) o al `petty_cash_entries.id` original (si `reversal`) |
+| `created_by` | UUID | Usuario que originó la entry |
 | `created_at` | TIMESTAMPTZ | Fecha de creación |
+
+**Invariantes del dominio** (enforced by `PettyCashEntry` entity):
+- `amount != 0`.
+- Sign matches type: `income`/`collection` > 0; `expense` < 0; `reversal` cualquier signo no-cero.
+- `description` no puede ser string vacío.
+- Static factory `PettyCashEntry.reversalOf(original, opts)` genera el contra-asiento con `amount = -original.amount`, `reference_type = reversal`, `reference_id = original.id`.
+
+**Índices**: `(fund_id)`, `(created_at)`, `(reference_type, reference_id) WHERE reference_type IS NOT NULL`.
+
+#### Caja Chica — Balance (`petty_cash_balance`)
+**Vista SQL** (no materializada) que calcula el balance al vuelo sumando el ledger. Siempre consistente con `petty_cash_entries` — cualquier INSERT se refleja en la próxima query.
+
+```sql
+SELECT fund_id, COALESCE(SUM(amount), 0) AS balance
+FROM petty_cash_entries GROUP BY fund_id
+```
+
+**Read-only**. El backend lee de aquí para obtener el balance actual; el historial detallado sale de `petty_cash_entries`.
+
+**Balance puede ser negativo** (overdraft): si los egresos exceden los ingresos + collections, el balance va negativo. Ese negativo ES el overage pendiente; el próximo assessment lo cobra a las units.
+
+#### Caja Chica — Assessment Batch (`petty_cash_assessment`)
+Una ronda nombrada de prorrateo a units. **Múltiples batches por período son esperados** (ej: ascensor abril + agua abril = 2 batches con 2 invoices por unit cada uno, progreso independiente). Las invoices PETTY_CASH unit-level linkean al batch via `invoices.assessment_id`.
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | UUID | Identificador único |
+| `fund_id` | UUID | Fondo al que pertenece |
+| `period` | TEXT | Período en formato `YYYY-MM` |
+| `description` | TEXT | Nombre del batch. Se copia a cada invoice generada (ej: `"Ascensor abril"`) |
+| `category` | VARCHAR(50) (nullable) | Categoría opcional del batch para dashboards (usa `PettyCashCategory`) |
+| `total_amount` | DECIMAL(12,2) | Monto total prorrateado (CHECK `> 0`). Redundante con `SUM(invoices.amount)` pero cacheado para reporting |
+| `created_by` | UUID | Admin/Board que creó el batch |
+| `created_at` | TIMESTAMPTZ | Fecha de creación |
+
+**Invariantes del dominio** (enforced by `PettyCashAssessment` entity):
+- `period` cumple regex `^\d{4}-\d{2}$`.
+- `description` no puede ser string vacío.
+- `total_amount > 0`.
+
+**Nota sobre invoices**: la tabla `invoices` recibe una columna `assessment_id UUID NULL REFERENCES petty_cash_assessment(id) ON DELETE SET NULL`. Solo invoices PETTY_CASH generadas por un assessment batch la tienen.
 
 #### Crédito por Unidad — Ledger (`unit_credit_ledger`)
 **Libro mayor append-only** (source of truth) de movimientos de crédito/débito por unidad. Cada fila es un asiento contable inmutable. Los sobrepagos, excedentes no asignados y reversas se expresan como filas nuevas (nunca se borran ni se actualizan filas existentes).
@@ -356,8 +400,8 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/payments/summary` | GET | App - Payments | Mi resumen de solvencia |
 | `/payments/:id` | GET | App - Payments | Detalle de un pago |
 | `/payments` | POST | App - Payments | Reportar pago con comprobante. `allocations[]` es un array de intenciones explícitas — cada entrada dice "aplicar N a esta invoice"; el excedente entre `payment.amount` y `sum(allocations)` se convierte en credit. |
-| `/petty-cash/funds/:buildingId` | GET | App - Petty Cash | Balance caja chica (lectura) |
-| `/petty-cash/funds/:buildingId/transactions` | GET | App - Petty Cash | Historial de movimientos (lectura) |
+| `/petty-cash/funds/:buildingId` | GET | App - Petty Cash | Balance caja chica (lectura, derivado de `petty_cash_balance`) |
+| `/petty-cash/funds/:buildingId/entries` | GET | App - Petty Cash | Historial del ledger (lectura) |
 | `/buildings` | GET | Buildings | Lista de edificios disponibles. Mirror del endpoint público — expuesto también bajo `/api/v1/app/` para que el cliente APK autenticado no salga del prefijo. |
 | `/buildings/:id` | GET | Buildings | Detalle de un edificio. Mirror del endpoint público. |
 | `/buildings/:id/units` | GET | Units | Listado de unidades de un edificio. Mirror del endpoint público. |
@@ -400,11 +444,12 @@ El grupo `/payments/admin/*` está gated por `.use(requireRole([ADMIN, BOARD]))`
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/petty-cash/funds/:buildingId` | GET | Balance actual del fondo |
-| `/petty-cash/funds/:buildingId/transactions` | GET | Historial de transacciones (filtros: `type`, `category`, `page`, `limit`) |
-| `/petty-cash/funds/:buildingId/transactions` | POST | Crear transacción. `type` en body: `INCOME` (reposición) o `EXPENSE` (gasto, genera invoice PETTY_CASH). `category` y `evidence_image` solo para EXPENSE. |
-| `/petty-cash/funds/:buildingId/assessments` | GET | Preview: muestra excedente del fondo (gastos - ingresos), lo ya cobrado a unidades, lo pendiente y cuánto le toca a cada unidad |
-| `/petty-cash/funds/:buildingId/assessments` | POST | Generar facturas PENDING a cada unidad del edificio por el excedente pendiente. Retorna 400 si no hay excedente. |
+| `/petty-cash/funds/:buildingId` | GET | Balance actual del fondo (metadata + balance derivado). No incluye `currency` — eliminada en Phase 3 |
+| `/petty-cash/funds/:buildingId/entries` | GET | Historial del ledger (filtros: `type`, `category`, `page`, `limit`). Shape nuevo: `{ id, fund_id, type, amount (firmado), category, description, evidence_url, reference_type, reference_id, created_by, created_at }` |
+| `/petty-cash/funds/:buildingId/entries` | POST | Crear entry. `type` ∈ `income` \| `expense`. `income`: amount > 0 → balance sube. `expense`: amount > 0 (el backend guarda como negativo) → balance baja y puede ir negativo. `category` y `evidence_image` solo para `expense`. No genera invoices building-level (modelo ledger) |
+| `/petty-cash/funds/:buildingId/entries/:entryId/reverse` | POST | Emitir counter-asiento sobre una entry. Body: `{ reason }` (10..500 chars). Idempotente. Rechaza reversar una entry type=reversal (409) |
+| `/petty-cash/funds/:buildingId/assessments` | GET | Preview del próximo prorrateo: `current_balance`, `total_overage = max(0, -balance)`, `already_assessed` (invoices activas ≠ CANCELLED), `pending_to_assess`, `units[]` con distribución fair-to-cent |
+| `/petty-cash/funds/:buildingId/assessments` | POST | Generar **batch con nombre**. Body: `{ description, amount, category? }`. Crea una fila en `petty_cash_assessment` + una invoice PENDING por unit linkeada via `assessment_id`. Múltiples batches por período son esperados |
 | `/petty-cash/funds/:buildingId/transparency?period=YYYY-MM` | GET | **Vista de transparencia del estado de cobro de caja chica**, por período específico. Devuelve por cada unit: `expected_amount` (su cuota), `covered_amount` (capado a la cuota — los sobrepagos no inflan la recaudación del grupo), `status` (`PENDING` \| `PARTIAL` \| `PAID`). El response incluye `total_to_collect`, `total_collected` y `collection_percentage`. Invoices `CANCELLED` se excluyen del total. **`period` es query param requerido** — llamadas sin él devuelven `422`. |
 
 **Edificios (Admin - Buildings)**:
@@ -631,70 +676,145 @@ Opción B — Masiva desde Excel:
    - Facturas pendientes con detalle (monto, pagado, restante, período)
 ```
 
-### 7.5 Gestión de Caja Chica (unificada con recibos)
-```
-Registrar Gasto:
-1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/transactions
-   Body: { type: "EXPENSE", amount, description, category, evidence_image? }
-2. El sistema descuenta del fondo lo que hay disponible:
-   - Si fondo=500, gasto=80 → descuenta 80, fondo queda en 420
-   - Si fondo=30, gasto=80 → descuenta 30, fondo queda en 0
-3. Se genera automáticamente un invoice con tag=PETTY_CASH a nivel de edificio
-   - building_id = edificio, unit_id = null
-   - type = EXPENSE, status = PAID
-   - description = "[CATEGORÍA] descripción del gasto"
-4. Si hubo excedente (gasto > fondo), se genera invoice adicional por el monto excedente
+### 7.5 Gestión de Caja Chica (modelo ledger)
 
-Registrar Ingreso (reposición):
-1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/transactions
-   Body: { type: "INCOME", amount, description }
-2. Balance del fondo aumenta inmediatamente
+Todos los movimientos pasan por un único endpoint de entries. El balance se deriva en vivo de la vista `petty_cash_balance`; nunca se cachea.
+
+```
+Registrar Ingreso (reposición del fondo):
+1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/entries
+   Body: { type: "income", amount, description }
+2. INSERT único en petty_cash_entries (amount > 0, type=income,
+   reference_type=manual). La vista refleja el nuevo balance al instante.
+
+Registrar Egreso (gasto de la junta):
+1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/entries
+   Body: { type: "expense", amount, description, category, evidence_image? }
+2. INSERT único con amount = -<amount absoluto>, type=expense,
+   category ∈ PettyCashCategory, reference_type=manual.
+3. El balance puede quedar negativo (overdraft) — es esperado, no un
+   error. Ese negativo es el overage que el próximo assessment va a cobrar.
+   NO se generan invoices building-level PAID por el egreso (eran fantasma
+   en el modelo anterior; el ledger ya guarda el egreso).
+
+Auto-collection (ocurre sin intervención manual):
+- Cuando un resident paga una invoice PETTY_CASH con unit_id vía
+  POST /payments + ApprovePayment, se genera automáticamente una entry
+  { type: "collection", amount: applied, reference_type: "invoice_payment",
+    reference_id: <invoice_id> } en el ledger del building. El fondo se
+  repone solo.
+- Si ese payment se revierte vía POST /payments/admin/payments/:id/reverse,
+  ReversePayment genera el counter-asiento correspondiente
+  (type=reversal, amount=-applied) — el balance vuelve a su estado previo.
+
+Reversa manual (corregir una entry con error):
+1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/entries/{entryId}/reverse
+   Body: { reason: string (minLength 10, maxLength 500) }
+2. Valida: entry existe, pertenece al fund del buildingId, y su type
+   no es "reversal" (no se reversa una reversal — se emite una entry
+   fresca con el signo correcto).
+3. INSERT único con amount = -original.amount, type=reversal,
+   reference_type=reversal, reference_id=<original_entry_id>.
+4. Idempotente: si ya existe una reversal para este entry, devuelve la
+   existente sin crear duplicado.
 
 Consultas:
-- Balance en tiempo real → GET /petty-cash/funds/{buildingId}
-- Historial de movimientos → GET /petty-cash/funds/{buildingId}/transactions
-- Recibos de caja chica → GET /billing/invoices?tag=PETTY_CASH
-- Todos los recibos unificados → GET /billing/invoices (sin filtro de tag)
+- Balance en vivo → GET /petty-cash/funds/{buildingId}
+  Response: { id, building_id, current_balance (puede ser negativo), updated_at }
+- Historial del ledger → GET /petty-cash/funds/{buildingId}/entries
+  Filtros: ?type=, ?category=, ?page=, ?limit=.
+  Response: array de entries con type, amount firmado, reference_type, reference_id.
 ```
 
-### 7.6 Cobro de Excedente a Unidades (Assessments)
-```
-Cuando los gastos de caja chica superan los ingresos, la Junta puede generar
-facturas a las unidades para cubrir el excedente.
+### 7.6 Assessment Batches — Cobro Nombrado a Unidades
 
-Preview:
+Los assessments son **batches con nombre**. El admin puede correr múltiples batches en el mismo período (ej: `"Ascensor abril"`, `"Agua abril"`) y cada uno tiene su propio progreso de recaudación.
+
+```
+Preview (cuánto falta por cobrar en total):
 1. Board/Admin → GET /api/v1/admin/petty-cash/funds/{buildingId}/assessments
-2. El sistema calcula (toda la aritmética en centavos integer para
-   evitar drift de IEEE-754):
-   - total_expenses: suma de todas las transacciones EXPENSE
-   - total_income: suma de todas las transacciones INCOME
-   - fund_balance: balance actual del fondo
-   - total_overage: gastos - ingresos - balance = excedente real
-   - already_assessed: lo ya cobrado a unidades (invoices PETTY_CASH con unit_id)
-   - pending_to_assess: excedente - ya cobrado = pendiente por cobrar
-     (si el residuo es menor a 1 centavo, se clampea a 0 — es ruido
-     contable de invoices legacy almacenadas como float)
-   - units: lista de unidades con el monto que le corresponde a cada
-     una. La distribución es justa al centavo: las primeras
-     `remainder` unidades reciben 1 centavo extra, de modo que la
-     sumatoria de unit amounts coincide exactamente con pending_to_assess.
+2. El sistema calcula (aritmética en integer-cents para evitar IEEE-754 drift):
+   - current_balance: balance del ledger (puede ser negativo)
+   - total_overage: max(0, -current_balance)
+   - already_assessed: Σ amounts de invoices PETTY_CASH unit-level
+     ACTIVAS (PENDING + PARTIAL + PAID). CANCELLED excluidas — fix del
+     bug de la versión anterior donde las CANCELLED inflaban este total.
+   - pending_to_assess: max(0, overage - already_assessed)
+     (si el residuo es < 1 centavo, se clampea a 0)
+   - units: lista con el monto que le tocaría a cada una si se cobra
+     todo el pending ahora. Distribución justa al centavo: las primeras
+     `remainder` units reciben 1 centavo extra.
 
-Generar facturas:
+Generar batch (cobrar a las units):
 1. Board/Admin → POST /api/v1/admin/petty-cash/funds/{buildingId}/assessments
-2. Se crea un invoice PENDING por cada unidad del edificio:
-   - tag = PETTY_CASH, type = EXPENSE, status = PENDING
-   - amount = el monto calculado por el preview (distribución justa al centavo)
-   - description = "Cuota reposición caja chica - YYYY-MM"
-3. Retorna 400 si:
-   - no hay excedente pendiente (NO_PENDING_OVERAGE)
-   - no hay unidades en el edificio (NO_UNITS)
-   - el pendiente no alcanza para dar al menos 1 centavo a cada
-     unidad (AMOUNT_TOO_SMALL_TO_DISTRIBUTE) — previene emitir
-     facturas de $0 o concentrar el residuo en una sola unidad
-4. Los invoices generados aparecen filtrados con tag=PETTY_CASH
+   Body:
+     {
+       description: "Ascensor abril",       // requerido — aparece en la
+                                            // invoice de cada unit
+       amount: 500,                         // total a prorratear en ESTE batch
+                                            // (puede ser < pending_to_assess —
+                                            // prorrateo parcial válido)
+       category: "REPAIR"                   // opcional — enum PettyCashCategory
+     }
+
+2. El use case GenerateAssessments hace:
+   a. findOrCreateFund (upsert atómico — cierra el bug histórico del
+      fund.id='').
+   b. Validaciones: description no-vacía, amount > 0, units.length > 0,
+      amount en centavos ≥ units.length (AMOUNT_TOO_SMALL_TO_DISTRIBUTE).
+   c. Distribución fair-to-cent: base = ⌊amount_cents / n⌋, remainder =
+      amount_cents mod n. Las primeras `remainder` units reciben base+1.
+   d. INSERT único en petty_cash_assessment (period, description, category,
+      total_amount, created_by).
+   e. invoiceRepo.createBatch(...) con una invoice PENDING por unit:
+      - tag = PETTY_CASH, type = EXPENSE, status = PENDING
+      - description = batch.description (literal, ej: "Ascensor abril")
+      - assessment_id = batch.id ← backlink al batch
+      - amount = cuota de esa unit
+
+3. Response:
+   {
+     building_id,
+     assessment_id,
+     description: "Ascensor abril",
+     total_assessed: 500,
+     invoices_created: N,
+     invoices: [{ unit_id, unit_name, amount, invoice_id }, ...]
+   }
+
+Ejemplo — 2 batches en el mismo período:
+- POST assessments { description: "Ascensor abril", amount: 500, category: "REPAIR" }
+  → 1 assessment + N invoices, description="Ascensor abril".
+- POST assessments { description: "Agua abril", amount: 300, category: "UTILITIES" }
+  → 2do assessment + N invoices más, description="Agua abril".
+- Cada unit termina con 2 invoices PENDING del mismo período, cada
+  una linkeada a su batch. El transparency desglosa progreso de cada
+  batch por separado (ver 7.9).
 ```
 
-### 7.7 Crédito / Saldo a Favor por Unidad
+### 7.7 Reverse de una entry del ledger (correcciones manuales)
+
+```
+POST /api/v1/admin/petty-cash/funds/{buildingId}/entries/{entryId}/reverse
+Body: { reason: string (10..500 chars) }
+
+Validaciones:
+- entry existe y pertenece al fund del buildingId
+  (scope check — un board de building A no puede reversar entries de B).
+- entry.type != "reversal" (no se reversa una reversal).
+- reason no-vacía.
+
+Resultado:
+- INSERT único en petty_cash_entries:
+    type=reversal, amount=-original.amount,
+    reference_type=reversal, reference_id=<original_entry_id>,
+    description="Reversión: <reason>".
+- Idempotente: si ya existe una reversal del entry, devuelve la existente
+  sin crear duplicado.
+- La entry original NO se modifica ni se borra (append-only).
+```
+
+### 7.8 Crédito / Saldo a Favor por Unidad
 
 El `unit_credit_ledger` tiene **dos canales complementarios** que producen credit entries. Ambos usan `reference_type=payment` y `reference_id=<payment_id>`, pero el campo `reason` los distingue — lo que permite que `ReversePayment` encuentre todos los créditos de un pago con una sola query y genere contra-asientos para ambos.
 
@@ -749,7 +869,7 @@ payment.amount=100, allocations=[].
 
 **Consumo del crédito** (aplicar saldo a favor a recibos futuros): **planificado para una futura actualización**. Hoy el credit solo se acumula y se revierte.
 
-### 7.8 Reversa de Pagos
+### 7.9 Reversa de Pagos
 
 Nuevo flujo administrativo introducido con esta rama. Permite al Board/Admin revertir un pago ya APPROVED, restaurando el estado previo del sistema contable.
 
@@ -797,45 +917,66 @@ Nuevo flujo administrativo introducido con esta rama. Permite al Board/Admin rev
 - **Distingue REVERSED de REJECTED solo por el prefijo del notes**. Un futuro rediseño podría introducir un estado `REVERSED` separado — por ahora ambos terminan en `REJECTED` y se distinguen por el contenido de `notes`.
 - **Cross-building para BOARD**: un BOARD de edificio X puede ejecutar reverse sobre un pago de edificio Y (ReversePayment no tiene check interno de building membership; el guard `requireRole` solo chequea rol, no building). Pendiente de arreglar con `requireBuildingAccess` async-aware.
 
-### 7.9 Transparencia de Caja Chica
+### 7.10 Transparencia de Caja Chica — Desglose por Assessment
+
+La transparencia **agrupa invoices por `assessment_id`** para que cada batch tenga su propio progreso. Si la junta corrió múltiples batches en el mismo período (ascensor + agua), el response muestra cada uno con su `collection_percentage` independiente, más un agregado del período completo.
 
 ```
-1. Board/Admin → GET /petty-cash/funds/:buildingId/transparency?period=YYYY-MM
-   - period es query param REQUERIDO. Sin él → 422.
+GET /api/v1/admin/petty-cash/funds/:buildingId/transparency?period=YYYY-MM
+   - `period` es query param REQUERIDO. Sin él → 422.
 
-2. El use case GetPettyCashTransparency:
-   a. Carga las units del edificio (todas aparecen en el response, tengan o no invoice).
-   b. Carga las invoices PETTY_CASH del edificio filtradas por el período solicitado.
-   c. Indexa las invoices por unit_id en un Map (O(1) lookup).
-      - Invoices CANCELLED se EXCLUYEN del indexado — no cuentan en los totales.
-      - Si una unit tiene múltiples invoices del mismo período, la última en el array gana
-        (TODO: agregar UNIQUE constraint a nivel DB cuando el modelo lo garantice).
+Algoritmo (GetPettyCashTransparency):
+1. Carga en paralelo:
+   - units del edificio (unitRepo).
+   - invoices PETTY_CASH del edificio para el período (invoiceRepo con filtro).
+   - assessments del fund para el período (pettyCashRepo).
 
-3. Por cada unit:
-   a. Si tiene invoice activa: expected_amount = invoice.amount,
-      covered_amount = min(invoice.paid_amount, invoice.amount)  // capado a la cuota
-      status = invoice.status (PENDING | PARTIAL | PAID — CANCELLED ya está filtrado).
-   b. Si NO tiene invoice (o estaba CANCELLED): expected=0, covered=0, status=PENDING.
+2. Indexa invoices activas (CANCELLED excluidas) por `assessment_id`.
+   Invoices sin assessment_id (legacy, generadas antes de Phase 2) van
+   a una bucket sintética "__legacy__" mostrada como "Sin categorizar".
 
-4. El capado de covered_amount a expected_amount es intencional: un residente que
-   pagó 100 contra una cuota de 80 NO debe inflar el collection_percentage del grupo.
-   Su excedente (20) va al credit ledger por el canal B (unallocated surplus),
-   no al total de caja chica.
+3. Por cada batch:
+   - Por cada unit con invoice(s) en el batch:
+     * expected_amount = Σ invoice.amount (puede ser > 1 si una unit
+       tiene varias invoices del mismo batch — edge case).
+     * covered_amount  = Σ min(invoice.paid_amount, invoice.amount)
+       → el cap por-invoice evita que overpayments inflen el %.
+     * status: PAID si covered ≥ expected; PENDING si covered = 0;
+       PARTIAL en el medio.
+   - Σ expected + covered del batch → collection_percentage.
 
-5. Response:
-   {
-     building_id,
-     period,
-     total_to_collect: sum de expected_amount,
-     total_collected: sum de covered_amount (todas capadas a sus respectivas cuotas),
-     collection_percentage: (total_collected / total_to_collect) * 100 (redondeado 2 decimales),
-     units: [
-       { unit_id, unit_name, expected_amount, covered_amount, status }
-     ]
-   }
+4. Agregados globales: suma expected/covered de todos los batches del
+   período (usado por dashboards que quieren un número único del mes).
+
+Response:
+{
+  building_id,
+  period,
+  assessments: [
+    {
+      id,                            // petty_cash_assessment.id
+      description: "Ascensor abril",
+      category: "REPAIR" | null,
+      total_to_collect: 500,
+      total_collected: 350,
+      collection_percentage: 70,
+      units: [
+        { unit_id, unit_name, expected_amount, covered_amount, status },
+        ...
+      ]
+    },
+    { id, description: "Agua abril", ... }
+  ],
+  // Agregados globales (todos los assessments sumados)
+  total_to_collect: 800,
+  total_collected: 650,
+  collection_percentage: 81.25
+}
 ```
 
-**Breaking change**: el endpoint requería antes `?period=` como opcional (y se ignoraba, agregando todas las invoices históricas del edificio — bug). Ahora es estrictamente requerido. El frontend del Web Admin debe pasar el período actual explícitamente.
+**Por qué el cap**: un residente que paga 100 contra una cuota de 80 NO debe inflar el `collection_percentage` del batch. Su excedente (20) va al `unit_credit_ledger` por el canal B (unallocated surplus), no al conteo de recaudación.
+
+**Breaking change (Phase 2)**: el endpoint antes devolvía `units[]` a nivel top-level. Ahora `units[]` vive dentro de cada entrada de `assessments[]`. Los dashboards que solo consumen los totales globales (`total_to_collect`, `total_collected`, `collection_percentage`) mantienen compatibilidad — esos campos siguen en el top-level.
 
 ---
 
@@ -903,21 +1044,32 @@ profiles (usuario)
     └── building_members (rol por edificio) → buildings
 
 payments → unit_id, building_id, user_id
-invoices → unit_id (nullable), building_id (nullable), tag (NORMAL|PETTY_CASH)
+invoices → unit_id (nullable), building_id (nullable), tag (NORMAL|PETTY_CASH),
+           assessment_id (nullable, FK a petty_cash_assessment)
 payment_allocations → payment_id, invoice_id
 unit_credit_ledger → unit_id (saldo a favor por sobrepago)
 unit_credit_balance → VIEW sobre unit_credit_ledger
-petty_cash_funds → building_id (UNIQUE, 1 por edificio)
-petty_cash_transactions → fund_id
 
-Relación caja chica ↔ recibos:
-  POST /petty-cash/funds/:buildingId/transactions (EXPENSE)
-    → crea invoice (tag=PETTY_CASH, building_id, unit_id=null, status=PAID)
+petty_cash_fund → building_id (UNIQUE, 1 por edificio) — solo metadata
+petty_cash_entries → fund_id (append-only ledger, amount firmado)
+petty_cash_balance → VIEW sobre petty_cash_entries (SUM por fund_id)
+petty_cash_assessment → fund_id (batches nombrados para cobro a units)
 
 Relación caja chica → cobro a unidades:
-  POST /petty-cash/funds/:buildingId/assessments
-    → crea invoices (tag=PETTY_CASH, unit_id, status=PENDING) por unidad
-  
+  POST /petty-cash/funds/:b/assessments { description, amount, category? }
+    → INSERT petty_cash_assessment
+    → createBatch de invoices (tag=PETTY_CASH, unit_id, status=PENDING,
+                               assessment_id=<batch.id>)
+
+Relación caja chica ↔ pagos (auto-collection loop):
+  ApprovePayment: resident paga invoice PETTY_CASH con unit_id
+    → INSERT petty_cash_entries { type=collection, amount=+applied,
+                                  reference_type=invoice_payment,
+                                  reference_id=<invoice.id> }
+    → balance del fund sube automáticamente
+  ReversePayment: revertir ese payment
+    → INSERT petty_cash_entries { type=reversal, amount=-applied, ... }
+
 Relación pagos → crédito:
   Aprobación de pago con sobrepago → crea entrada en unit_credit_ledger
 

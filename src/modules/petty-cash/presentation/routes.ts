@@ -16,6 +16,7 @@ import { requireRole, requireBuildingAccess } from '@/core/presentation/guards';
 import { PreviewAssessments } from '../application/use-cases/PreviewAssessments';
 import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
 import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
+import { ReversePettyCashEntry } from '../application/use-cases/ReversePettyCashEntry';
 
 // ── DI ──────────────────────────────────────────────────────────────────────
 const pettyCashRepo = new SupabasePettyCashRepository();
@@ -30,6 +31,7 @@ const registerExpense = new RegisterPettyCashExpense(pettyCashRepo);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
+const reverseEntry = new ReversePettyCashEntry(pettyCashRepo);
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -226,6 +228,29 @@ function createWriteRoutes() {
                     'the ledger balance may go negative (overdraft); the next assessment ' +
                     'collects that overdraft from units. Auto-collection entries are NOT ' +
                     'created here — they fire from ApprovePayment when a resident pays.',
+            },
+        })
+        .post('/funds/:buildingId/entries/:entryId/reverse', async ({ params, body, profile }) => {
+            return await reverseEntry.execute({
+                entryId: params.entryId,
+                reason: body.reason,
+                userId: profile.id,
+                buildingId: params.buildingId,
+            });
+        }, {
+            body: t.Object({
+                reason: t.String({
+                    minLength: 10,
+                    maxLength: 500,
+                    description: 'Human-readable explanation of why this entry is being reversed. Stored in the counter-asiento description.',
+                }),
+            }),
+            response: PettyCashEntrySchema,
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Reverse a ledger entry (counter-asiento)',
+                description:
+                    'Creates a new REVERSAL entry with amount = -original.amount. Original entry is NEVER mutated (append-only). Idempotent: returns the existing reversal if called twice. Cannot reverse an entry whose type is already REVERSAL.',
             },
         });
 }
