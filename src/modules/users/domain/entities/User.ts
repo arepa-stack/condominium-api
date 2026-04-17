@@ -1,4 +1,4 @@
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { UserRole, UserStatus, AppRole } from '@/core/domain/enums';
 import { DomainError } from '@/core/errors';
 
 import { UserUnit } from './UserUnit';
@@ -11,7 +11,8 @@ export interface UserProps {
     phone?: string;
     units?: UserUnit[];
     buildingRoles?: BuildingRole[]; // New building-level roles support
-    role: UserRole;
+    role: UserRole;         // Legacy — dropped in phase 4. Kept for RLS back-compat.
+    app_role?: AppRole;     // New: 'admin' | 'user' — global capability.
     status: UserStatus;
     created_at?: Date;
     updated_at?: Date;
@@ -52,20 +53,38 @@ export class User {
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
 
+    /**
+     * Global system capability. Source of truth for "is this a staff/admin user?".
+     * Falls back to deriving from the legacy `role` column until Phase 4 drops it.
+     */
+    get app_role(): AppRole {
+        if (this.props.app_role) return this.props.app_role;
+        return this.props.role === UserRole.ADMIN ? 'admin' : 'user';
+    }
+
     get primaryUnit(): UserUnit | undefined {
         return this.units.find(u => u.is_primary);
     }
 
+    /**
+     * Phase 2 semantics:
+     *  - isAdmin: global capability via app_role
+     *  - isBoardMember: has a board membership in ANY building (was: legacy global role === 'board')
+     *  - isResident: the complement — neither global admin nor board anywhere
+     *
+     * A user can be board in building A and resident in building B. Per-building
+     * questions ("is board in THIS building?") go through isBoardInBuilding(id).
+     */
     isAdmin(): boolean {
-        return this.props.role === UserRole.ADMIN;
+        return this.app_role === 'admin';
     }
 
     isBoardMember(): boolean {
-        return this.props.role === UserRole.BOARD;
+        return this.isBoardMemberAnywhere();
     }
 
     isResident(): boolean {
-        return this.props.role === UserRole.RESIDENT;
+        return !this.isAdmin() && !this.isBoardMemberAnywhere();
     }
 
     approve(): void {

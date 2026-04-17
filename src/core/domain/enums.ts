@@ -4,6 +4,14 @@ export enum UserRole {
     RESIDENT = 'resident'
 }
 
+/**
+ * Global system capability stored in profiles.app_role.
+ * 'admin' = staff with access to every building.
+ * 'user'  = regular user whose access is scoped via building_members / profile_units.
+ * See docs section 2 for the full role model.
+ */
+export type AppRole = 'admin' | 'user';
+
 export enum UserStatus {
     ACTIVE = 'active',
     PENDING = 'pending',

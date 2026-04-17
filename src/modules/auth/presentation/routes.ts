@@ -17,7 +17,8 @@ const AuthResponse = t.Object({
     user: t.Object({
         id: t.String(),
         email: t.Optional(t.String()),
-        role: t.String(),
+        role: t.String(), // Legacy. Kept until Phase 4. Clients should migrate to app_role + buildingRoles.
+        app_role: t.Union([t.Literal('admin'), t.Literal('user')]),
         units: t.Array(t.Object({
             unit_id: t.String(),
             building_id: t.Optional(t.String()),
@@ -44,7 +45,8 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
             ...session,
             user: {
                 ...session.user,
-                role: 'RESIDENT', // Default role for registration
+                role: 'RESIDENT', // Legacy — new residents have app_role='user' and no buildingRoles.
+                app_role: 'user' as const,
                 units: [],
                 buildingRoles: []
             }
@@ -74,6 +76,7 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
                 id: user.id,
                 email: user.email,
                 role: user.role,
+                app_role: user.app_role,
                 units: user.units.map(u => u.toJSON()),  // Include units
                 buildingRoles: user.buildingRoles.map(r => r.toJSON()) // Include detached roles
             }

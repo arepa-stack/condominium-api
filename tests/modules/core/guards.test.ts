@@ -12,14 +12,23 @@ const TOKEN_BOARD     = 'token-board';
 const TOKEN_RESIDENT  = 'token-resident';
 const TOKEN_INVALID   = 'token-invalid';
 
-// In-memory "profiles" table for the mock
-const PROFILES: Record<string, { id: string; role: string }> = {
-    'user-admin':    { id: 'user-admin',    role: 'admin'    },
-    'user-board':    { id: 'user-board',    role: 'board'    },
-    'user-resident': { id: 'user-resident', role: 'resident' },
+// In-memory "profiles" table for the mock — matches the Phase 2 shape
+// (app_role + joined building_members row list).
+const PROFILES: Record<string, {
+    id: string;
+    role: string;
+    app_role: 'admin' | 'user';
+    building_members: { building_id: string; role: string }[];
+}> = {
+    'user-admin':    { id: 'user-admin',    role: 'admin',    app_role: 'admin', building_members: [] },
+    'user-board':    { id: 'user-board',    role: 'board',    app_role: 'user',  building_members: [{ building_id: 'building-A', role: 'board' }] },
+    'user-resident': { id: 'user-resident', role: 'resident', app_role: 'user',  building_members: [] },
 };
 
-// In-memory "building_members" table  (profile_id → building_ids[])
+// Legacy in-memory "building_members" table (profile_id → building_ids[]).
+// No longer queried by requireBuildingAccess in Phase 2 (the guard reads
+// boardBuildingIds from context populated by requireRole). Kept for any
+// direct building_members queries that might appear in other tests.
 const BUILDING_MEMBERS: Record<string, string[]> = {
     'user-board': ['building-A'],
 };

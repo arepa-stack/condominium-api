@@ -117,14 +117,38 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (error || !user) throw new UnauthorizedError('Invalid or expired token');
 
-        // Get profile with units for role and ownership check
-        const { data: profile } = await supabaseAdmin
+        // Load profile + units + board memberships in one round-trip.
+        // `app_role` and `building_members` are the new source of truth
+        // (Phase 2). `profile.role` is overwritten below with the value
+        // derived from the new model so the legacy inline checks in this
+        // route file (profile.role === UserRole.RESIDENT, etc.) keep
+        // working unchanged.
+        const { data: rawProfile } = await supabaseAdmin
             .from('profiles')
-            .select('id, email, name, role, status, profile_units(unit_id)')
+            .select('id, email, name, role, app_role, status, profile_units(unit_id), building_members(building_id, role)')
             .eq('id', user.id)
             .single();
 
-        if (!profile) throw new UnauthorizedError('Profile not found');
+        if (!rawProfile) throw new UnauthorizedError('Profile not found');
+
+        const app_role: 'admin' | 'user' = (rawProfile.app_role as 'admin' | 'user')
+            ?? (rawProfile.role === 'admin' ? 'admin' : 'user');
+
+        const boardBuildingIds = ((rawProfile.building_members as any[] | null) ?? [])
+            .filter(bm => bm.role === 'board')
+            .map(bm => bm.building_id as string);
+
+        let derivedRole: UserRole;
+        if (app_role === 'admin') derivedRole = UserRole.ADMIN;
+        else if (boardBuildingIds.length > 0) derivedRole = UserRole.BOARD;
+        else derivedRole = UserRole.RESIDENT;
+
+        const profile = {
+            ...rawProfile,
+            role: derivedRole,
+            app_role,
+            boardBuildingIds,
+        };
 
         return { user, profile };
     })

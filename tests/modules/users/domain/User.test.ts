@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { User, UserProps } from '@/modules/users/domain/entities/User';
+import { BuildingRole } from '@/modules/users/domain/entities/BuildingRole';
 import { UserRole, UserStatus } from '@/core/domain/enums';
 
 describe('User Entity', () => {
@@ -20,13 +21,22 @@ describe('User Entity', () => {
     });
 
     it('should correctly identify admin', () => {
-        const user = new User({ ...defaultProps, role: UserRole.ADMIN });
+        // Phase 2 semantics: admin is determined by app_role, not legacy role.
+        const user = new User({ ...defaultProps, role: UserRole.ADMIN, app_role: 'admin' });
         expect(user.isAdmin()).toBe(true);
         expect(user.isBoardMember()).toBe(false);
     });
 
     it('should correctly identify board member', () => {
-        const user = new User({ ...defaultProps, role: UserRole.BOARD });
+        // Phase 2 semantics: board membership lives in buildingRoles (sourced
+        // from building_members), not in the legacy profiles.role field. A
+        // user with legacy role='board' but no building_members entries is NOT
+        // a board member anywhere under the new model.
+        const user = new User({
+            ...defaultProps,
+            app_role: 'user',
+            buildingRoles: [new BuildingRole({ building_id: 'bldg-1', role: 'board' })],
+        });
         expect(user.isBoardMember()).toBe(true);
         expect(user.isAdmin()).toBe(false);
     });

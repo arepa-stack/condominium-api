@@ -14,12 +14,20 @@ const TOKEN_BOARD_A = 'token-board-a';
 const TOKEN_BOARD_B = 'token-board-b';
 const TOKEN_ADMIN   = 'token-admin';
 
-const PROFILES: Record<string, { id: string; role: string }> = {
-    'user-board-a': { id: 'user-board-a', role: 'board' },
-    'user-board-b': { id: 'user-board-b', role: 'board' },
-    'user-admin':   { id: 'user-admin',   role: 'admin' },
+// Phase 2 profile shape: app_role + joined building_members rows.
+const PROFILES: Record<string, {
+    id: string;
+    role: string;
+    app_role: 'admin' | 'user';
+    building_members: { building_id: string; role: string }[];
+}> = {
+    'user-board-a': { id: 'user-board-a', role: 'board', app_role: 'user',  building_members: [{ building_id: 'building-A', role: 'board' }] },
+    'user-board-b': { id: 'user-board-b', role: 'board', app_role: 'user',  building_members: [{ building_id: 'building-B', role: 'board' }] },
+    'user-admin':   { id: 'user-admin',   role: 'admin', app_role: 'admin', building_members: [] },
 };
 
+// Legacy table map — no longer queried by requireBuildingAccess in Phase 2
+// (context-based check) but kept for any other call sites.
 const BUILDING_MEMBERS: Record<string, string[]> = {
     'user-board-a': ['building-A'],
     'user-board-b': ['building-B'],

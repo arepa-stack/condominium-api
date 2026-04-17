@@ -1,14 +1,43 @@
 import { Elysia } from 'elysia';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { UnauthorizedError, ForbiddenError } from '@/core/errors';
-import { UserRole } from '@/core/domain/enums';
+import { UserRole, AppRole } from '@/core/domain/enums';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Profile shape stored in context after requireRole resolves
+//
+// Phase 2: app_role + boardBuildingIds are the source of truth.
+// `role` stays for back-compat with inline checks (derived: admin → ADMIN,
+// any board membership → BOARD, else RESIDENT). Phase 4 removes it.
 // ──────────────────────────────────────────────────────────────────────────────
 export interface AuthProfile {
     id: string;
     role: UserRole;
+    app_role: AppRole;
+    boardBuildingIds: string[];
+}
+
+function deriveRole(app_role: AppRole, boardBuildingIds: string[]): UserRole {
+    if (app_role === 'admin') return UserRole.ADMIN;
+    if (boardBuildingIds.length > 0) return UserRole.BOARD;
+    return UserRole.RESIDENT;
+}
+
+function checkRole(
+    allowed: UserRole[],
+    app_role: AppRole,
+    boardBuildingIds: string[]
+): boolean {
+    for (const r of allowed) {
+        if (r === UserRole.ADMIN && app_role === 'admin') return true;
+        if (r === UserRole.BOARD && boardBuildingIds.length > 0) return true;
+        if (
+            r === UserRole.RESIDENT &&
+            app_role !== 'admin' &&
+            boardBuildingIds.length === 0
+        ) return true;
+    }
+    return false;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -17,18 +46,23 @@ export interface AuthProfile {
 // An Elysia plugin that:
 //  1. Extracts the Bearer token from the Authorization header
 //  2. Validates it with Supabase Auth → gets user.id
-//  3. Fetches the user profile from `profiles` table → gets role
-//  4. Checks that the role is in the allowed `roles` array
-//  5. Sets `profile` in the Elysia context for downstream handlers
+//  3. Loads profile + board memberships in a single query (joined
+//     building_members filtered to role='board')
+//  4. Admits the request if any of the allowed `roles` matches the new model:
+//       - ADMIN    ⇔ app_role === 'admin'
+//       - BOARD    ⇔ has at least one building_members entry with role='board'
+//       - RESIDENT ⇔ neither of the above
+//  5. Exposes `profile` in context with app_role + boardBuildingIds, so
+//     downstream guards (requireBuildingAccess) and inline checks don't
+//     re-query the DB.
 //
 // On failure:
 //  - Missing / invalid token  → 401 UnauthorizedError
-//  - Role not allowed         → 403 ForbiddenError
+//  - No matching role         → 403 ForbiddenError
 // ──────────────────────────────────────────────────────────────────────────────
 export function requireRole(roles: UserRole[]) {
     return new Elysia({ name: `require-role:${roles.sort().join(',')}` })
         .derive({ as: 'scoped' }, async ({ request }): Promise<{ profile: AuthProfile }> => {
-            // 1. Extract token
             const authHeader = request.headers.get('Authorization');
             if (!authHeader) {
                 throw new UnauthorizedError('Authentication required');
@@ -36,16 +70,14 @@ export function requireRole(roles: UserRole[]) {
 
             const token = authHeader.replace('Bearer ', '');
 
-            // 2. Validate token → user id
             const { data: { user }, error: authError } = await supabase.auth.getUser(token);
             if (authError || !user) {
                 throw new UnauthorizedError('Invalid or expired token');
             }
 
-            // 3. Load profile (role)
             const { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
-                .select('id, role')
+                .select('id, role, app_role, building_members(building_id, role)')
                 .eq('id', user.id)
                 .single();
 
@@ -53,18 +85,25 @@ export function requireRole(roles: UserRole[]) {
                 throw new UnauthorizedError('User profile not found');
             }
 
-            // 4. Check role
-            if (!roles.includes(profile.role as UserRole)) {
+            const app_role: AppRole = (profile.app_role as AppRole)
+                ?? (profile.role === 'admin' ? 'admin' : 'user');
+
+            const boardBuildingIds = ((profile.building_members as any[] | null) ?? [])
+                .filter(bm => bm.role === 'board')
+                .map(bm => bm.building_id as string);
+
+            if (!checkRole(roles, app_role, boardBuildingIds)) {
                 throw new ForbiddenError(
-                    `Access denied. Required roles: ${roles.join(', ')}. Your role: ${profile.role}`
+                    `Access denied. Required roles: ${roles.join(', ')}.`
                 );
             }
 
-            // 5. Expose profile in context
             return {
                 profile: {
                     id: profile.id as string,
-                    role: profile.role as UserRole,
+                    role: deriveRole(app_role, boardBuildingIds),
+                    app_role,
+                    boardBuildingIds,
                 },
             };
         });
@@ -76,12 +115,11 @@ export function requireRole(roles: UserRole[]) {
 // An Elysia plugin that MUST run AFTER requireRole (reads `profile` from ctx).
 //
 // Logic:
-//  - ADMIN  → always passes (bypass)
-//  - BOARD  → checks `building_members` table for (profile.id, buildingId) match
-//             If not found → 403 ForbiddenError
+//  - app_role === 'admin' → always passes (bypass)
+//  - else                 → buildingId must be in profile.boardBuildingIds
 //
-// getBuildingId is a function that receives the Elysia context and returns the
-// target building id (allows extracting from params, query, body, etc.).
+// No DB query needed — the membership list is already in context from
+// requireRole. Phase 2 optimization vs. the legacy two-roundtrip guard.
 // ──────────────────────────────────────────────────────────────────────────────
 export function requireBuildingAccess(
     getBuildingId: (ctx: { params: Record<string, string>; query: Record<string, string>; body?: Record<string, unknown>; profile: AuthProfile }) => string,
@@ -91,20 +129,10 @@ export function requireBuildingAccess(
         .onBeforeHandle({ as: 'scoped' }, async (ctx: any) => {
             const profile: AuthProfile = ctx.profile;
 
-            // ADMIN bypasses building-level check entirely
-            if (profile.role === UserRole.ADMIN) return;
+            if (profile.app_role === 'admin') return;
 
-            // For BOARD, verify membership in the target building
             const buildingId = getBuildingId(ctx);
-
-            const { data: membership, error } = await supabaseAdmin
-                .from('building_members')
-                .select('id')
-                .eq('profile_id', profile.id)
-                .eq('building_id', buildingId)
-                .single();
-
-            if (error || !membership) {
+            if (!profile.boardBuildingIds.includes(buildingId)) {
                 throw new ForbiddenError(
                     `Access denied. You are not a member of building ${buildingId}`
                 );
