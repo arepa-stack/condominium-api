@@ -1,8 +1,8 @@
 # Condominio API Server — Documentación Funcional
 
-> **Última actualización**: 2026-04-17 — Refleja el estado post-PR Phase 3 de separación de roles (`feat/app-role-phase-3`).
-> Cambios destacados de Phase 3: scoping de Board unificado. `GetUsers`, `GetAllPayments` y `GetUserById` derivan la lista de edificios autorizados **exclusivamente** de `building_members` (via `User.getBuildingsWhereBoard()`), cerrando un leak donde un user board-en-X + resident-en-Y recibía también los recursos de Y. Nuevo helper `User.getAffiliatedBuildings()` (union de unit-buildings + board-buildings) para scoping del lado del **target** (permite que un board vea otro miembro de junta de su mismo edificio aunque este último no tenga unidad ahí).
-> Cambios de Phase 2 vigentes: nueva columna `profiles.app_role` (`admin` | `user`) como fuente de verdad del rol **global**; `building_members.role` es la fuente per-edificio (sólo `board` hoy, con CHECK constraint); `profile_units` implica "resident" en esos edificios. La función SQL `get_my_role()` fue reescrita para derivar del nuevo modelo manteniendo su contrato de retorno (`admin|board|resident`) — las RLS policies existentes siguen funcionando sin cambios. El backend TypeScript lee `app_role` y `building_members` directamente; los guards (`requireRole`, `requireBuildingAccess`) y use cases ahora resuelven roles desde este modelo. `profiles.role` queda como columna legacy (se drop en Phase 4). La respuesta de `/auth/login` y `/auth/register` ahora incluye `app_role` junto al `role` legacy.
+> **Última actualización**: 2026-04-17 — Refleja el estado post-PR Phase 4 (final) de separación de roles (`feat/app-role-phase-4`).
+> Cambios destacados de Phase 4: se **dropeó la columna legacy `profiles.role`** y su CHECK constraint. Las 3 RLS policies que la leían directamente (`profile_units`, `payment_allocations`) ahora pasan por `get_my_role()`. La función SQL `get_my_role()` sigue devolviendo `admin|board|resident` (derivado de `app_role` + `building_members`) para que las RLS queden intactas. **Breaking change para clientes**: la respuesta de `/auth/login`, `/auth/register`, `GET /users/*` ya **NO incluye el field `role`** — los clientes deben leer `app_role` + `buildingRoles[]`. El endpoint `PATCH /users/:id` ahora acepta `app_role` (admin-only) en lugar de `role`; para cambios per-edificio seguir usando `POST /users/:id/roles`. El endpoint `POST /users` mantiene el input ergonómico `role: 'admin'|'board'|'resident'` que el backend traduce a `app_role` + `buildingRoles`. `UserProps.role` eliminado del entity; `changeRole()` renombrado a `changeAppRole()`.
+> Cambios de Phases previas vigentes: `profiles.app_role` es la fuente del rol global (Phase 1-2); `building_members.role` per-edificio con CHECK (Phase 1); scoping de board derivado solo de `building_members` via `getBuildingsWhereBoard()` en todos los use cases, con helper `getAffiliatedBuildings()` para reachability del lado del target (Phase 3). El panel admin gatea entrada con `app_role === 'admin' || buildingRoles.length > 0`.
 > Cambios arquitectónicos previos vigentes: paginación en `/admin/billing/invoices` con metadata, módulo **Directory**, vista SQL `board_members_directory`, el dominio es dueño de `invoice.paid_amount` y del status, estado `PARTIAL`, dos canales de credit ledger, endpoints de reverse y petty cash transparency, contrato endurecido en `POST /payments` (proof required, reference/bank por método, date ISO no-futura).
 
 ## 1. Visión General
@@ -142,8 +142,10 @@ Cada usuario tiene un estado (`status`) que controla su acceso al sistema:
 | `email` | TEXT | Correo electrónico |
 | `name` | TEXT | Nombre completo |
 | `phone` | TEXT | Teléfono (opcional) |
-| `role` | TEXT | Rol global: `admin`, `board`, `resident` |
+| `app_role` | TEXT | Capacidad global: `admin` \| `user`. CHECK constraint. Index en la columna. |
 | `status` | TEXT | Estado: `active`, `pending`, `inactive`, `rejected` |
+
+> **Nota Phase 4**: la columna legacy `role` (con valores `admin`/`board`/`resident`) **fue removida**. Los roles per-edificio viven en `building_members`, y la residencia se infiere de `profile_units`. La función SQL `get_my_role()` sigue exponiendo un resultado `admin|board|resident` derivado, para que las RLS policies que dependen de ese contrato no rompan.
 
 #### Asociación Perfil-Unidad (`profile_units`)
 Tabla pivot que permite que un usuario esté asociado a múltiples unidades.

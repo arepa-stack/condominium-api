@@ -1,5 +1,4 @@
-import { UserRole, UserStatus, AppRole } from '@/core/domain/enums';
-import { DomainError } from '@/core/errors';
+import { UserStatus, AppRole } from '@/core/domain/enums';
 
 import { UserUnit } from './UserUnit';
 import { BuildingRole } from './BuildingRole';
@@ -10,14 +9,28 @@ export interface UserProps {
     name: string;
     phone?: string;
     units?: UserUnit[];
-    buildingRoles?: BuildingRole[]; // New building-level roles support
-    role: UserRole;         // Legacy — dropped in phase 4. Kept for RLS back-compat.
-    app_role?: AppRole;     // New: 'admin' | 'user' — global capability.
+    buildingRoles?: BuildingRole[];
+    app_role: AppRole;  // Global capability. 'admin' | 'user'.
     status: UserStatus;
     created_at?: Date;
     updated_at?: Date;
 }
 
+/**
+ * A user of the platform.
+ *
+ * Role model (post Phase 4):
+ *   - app_role          : global capability — 'admin' or 'user' (only 'admin' is
+ *                         privileged globally).
+ *   - buildingRoles[]   : per-building governance roles (today only 'board').
+ *                         Source: building_members table.
+ *   - units[]           : per-unit ownership/occupancy. Having a unit in a
+ *                         building implies the user is a resident there, but
+ *                         carries no governance authority.
+ *
+ * Effective role for legacy callers is *derived* — this entity no longer
+ * stores 'board' or 'resident' as a global value.
+ */
 export class User {
     constructor(private props: UserProps) {
         if (!props.created_at) {
@@ -39,41 +52,30 @@ export class User {
     get name(): string { return this.props.name; }
     get phone(): string | undefined { return this.props.phone; }
 
-    // Multi-apartment support
     get units(): UserUnit[] { return this.props.units || []; }
     get buildingRoles(): BuildingRole[] { return this.props.buildingRoles || []; }
 
-    // Helper to get primary unit ID if needed for backward compat in logic
     get primaryUnitId(): string | undefined {
         return this.primaryUnit?.unit_id || this.units[0]?.unit_id;
     }
 
-    get role(): UserRole { return this.props.role; }
+    get app_role(): AppRole { return this.props.app_role; }
     get status(): UserStatus { return this.props.status; }
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
-
-    /**
-     * Global system capability. Source of truth for "is this a staff/admin user?".
-     * Falls back to deriving from the legacy `role` column until Phase 4 drops it.
-     */
-    get app_role(): AppRole {
-        if (this.props.app_role) return this.props.app_role;
-        return this.props.role === UserRole.ADMIN ? 'admin' : 'user';
-    }
 
     get primaryUnit(): UserUnit | undefined {
         return this.units.find(u => u.is_primary);
     }
 
     /**
-     * Phase 2 semantics:
-     *  - isAdmin: global capability via app_role
-     *  - isBoardMember: has a board membership in ANY building (was: legacy global role === 'board')
-     *  - isResident: the complement — neither global admin nor board anywhere
+     * Semantics:
+     *  - isAdmin           : global capability via app_role.
+     *  - isBoardMember     : has a board role in any building.
+     *  - isResident        : complement — neither admin nor board anywhere.
      *
-     * A user can be board in building A and resident in building B. Per-building
-     * questions ("is board in THIS building?") go through isBoardInBuilding(id).
+     * A user can be board in building A and resident in building B; use
+     * isBoardInBuilding(id) for per-building questions.
      */
     isAdmin(): boolean {
         return this.app_role === 'admin';
@@ -102,7 +104,7 @@ export class User {
         return this.props.status === UserStatus.ACTIVE;
     }
 
-    updateProfile(data: Partial<Omit<UserProps, 'id' | 'email' | 'role' | 'status' | 'created_at' | 'updated_at' | 'units' | 'buildingRoles'>>): void {
+    updateProfile(data: Partial<Omit<UserProps, 'id' | 'email' | 'app_role' | 'status' | 'created_at' | 'updated_at' | 'units' | 'buildingRoles'>>): void {
         this.props = {
             ...this.props,
             ...data,
@@ -110,8 +112,12 @@ export class User {
         };
     }
 
-    changeRole(newRole: UserRole): void {
-        this.props.role = newRole;
+    /**
+     * Change the user's global capability. Only ADMIN callers should be able
+     * to invoke this — enforcement lives at the use-case layer (UpdateUser).
+     */
+    changeAppRole(newAppRole: AppRole): void {
+        this.props.app_role = newAppRole;
         this.props.updated_at = new Date();
     }
 
@@ -135,7 +141,8 @@ export class User {
     }
 
     /**
-     * Get all buildings where user is board
+     * Get all buildings where user is board.
+     * Requester-side scoping: "where may this user govern?".
      */
     getBuildingsWhereBoard(): string[] {
         const buildingIds = this.buildingRoles
@@ -154,13 +161,12 @@ export class User {
 
     /**
      * Every building this user is affiliated with: either owns/occupies a unit
-     * there OR holds a board role there. Use this when deciding whether a TARGET
-     * user is reachable by a board requester — a target can be connected to a
-     * building via a unit or via a board role, not just units.
+     * there OR holds a board role there. Target-side reachability ("can this
+     * board see this other user?" — yes if the target is affiliated with any
+     * building the requester governs, even if via a role rather than a unit).
      *
-     * NOT to be used for requester-side authority checks. For that, use
-     * getBuildingsWhereBoard() which is strictly the buildings where this user
-     * may govern (i.e. scoping for listing/approving/modifying resources).
+     * NOT to be used for requester-side authority checks — use
+     * getBuildingsWhereBoard() for that.
      */
     getAffiliatedBuildings(): string[] {
         const ids = new Set<string>();

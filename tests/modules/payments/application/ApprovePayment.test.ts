@@ -60,7 +60,7 @@ describe('ApprovePayment Use Case', () => {
             id: 'admin-1',
             email: 'admin@test.com',
             name: 'Admin',
-            role: UserRole.ADMIN,
+            app_role: 'admin' as const,
             status: UserStatus.ACTIVE
         });
         // Admin doesn't necessarily need units, but for consistency:
@@ -96,10 +96,10 @@ describe('ApprovePayment Use Case', () => {
             id: 'board-1',
             email: 'board@test.com',
             name: 'Board Member',
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
-        board.setBuildingRoles([new BuildingRole({ building_id: 'building-1', role: UserRole.BOARD as any })]);
+        board.setBuildingRoles([new BuildingRole({ building_id: 'building-1', role: 'board' })]);
 
         const payment = new Payment({
             id: 'payment-1',
@@ -129,10 +129,10 @@ describe('ApprovePayment Use Case', () => {
             id: 'board-1',
             email: 'board@test.com',
             name: 'Board Member',
-            role: UserRole.BOARD,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
-        board.setBuildingRoles([new BuildingRole({ building_id: 'building-2', role: UserRole.BOARD as any })]);
+        board.setBuildingRoles([new BuildingRole({ building_id: 'building-2', role: 'board' })]);
 
         const payment = new Payment({
             id: 'payment-1',
@@ -161,7 +161,7 @@ describe('ApprovePayment Use Case', () => {
             id: 'resident-1',
             email: 'resident@test.com',
             name: 'Resident',
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
         resident.setUnits([{ unit_id: 'C1', building_id: 'building-1', building_role: 'resident', is_primary: true } as any]);
@@ -193,7 +193,7 @@ describe('ApprovePayment Use Case', () => {
             id: 'admin-1',
             email: 'admin@test.com',
             name: 'Admin',
-            role: UserRole.ADMIN,
+            app_role: 'admin' as const,
             status: UserStatus.ACTIVE
         });
         admin.setUnits([{ unit_id: 'A1', building_id: 'building-1', building_role: 'owner', is_primary: true } as any]);
@@ -235,7 +235,7 @@ describe('ApprovePayment Use Case', () => {
                 id: 'admin-1',
                 email: 'admin@test.com',
                 name: 'Admin',
-                role: UserRole.ADMIN,
+                app_role: 'admin' as const,
                 status: UserStatus.ACTIVE
             });
             await userRepo.create(admin);
@@ -407,7 +407,7 @@ describe('ApprovePayment Use Case', () => {
                 id: 'admin-1',
                 email: 'admin@test.com',
                 name: 'Admin',
-                role: UserRole.ADMIN,
+                app_role: 'admin' as const,
                 status: UserStatus.ACTIVE
             });
             await userRepo.create(admin);
@@ -559,7 +559,7 @@ describe('ApprovePayment Use Case', () => {
                 id: 'admin-1',
                 email: 'admin@test.com',
                 name: 'Admin',
-                role: UserRole.ADMIN,
+                app_role: 'admin' as const,
                 status: UserStatus.ACTIVE
             });
             await userRepo.create(admin);
@@ -617,7 +617,7 @@ describe('ApprovePayment Use Case', () => {
                 id: 'admin-1',
                 email: 'admin@test.com',
                 name: 'Admin',
-                role: UserRole.ADMIN,
+                app_role: 'admin' as const,
                 status: UserStatus.ACTIVE
             });
             await userRepo.create(admin);
@@ -680,7 +680,7 @@ describe('ApprovePayment Use Case', () => {
                 id: 'admin-1',
                 email: 'admin@test.com',
                 name: 'Admin',
-                role: UserRole.ADMIN,
+                app_role: 'admin' as const,
                 status: UserStatus.ACTIVE
             });
 

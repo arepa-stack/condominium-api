@@ -3,7 +3,7 @@ import { UserUnit } from '../../domain/entities/UserUnit';
 import { BuildingRole } from '../../domain/entities/BuildingRole';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
-import { UserRole, UserStatus, AppRole } from '@/core/domain/enums';
+import { UserStatus, AppRole } from '@/core/domain/enums';
 import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
 
 export class SupabaseUserRepository implements IUserRepository {
@@ -18,8 +18,7 @@ export class SupabaseUserRepository implements IUserRepository {
             phone: data.phone,
             units: units,
             buildingRoles: buildingRoles,
-            role: data.role as UserRole,
-            app_role: (data.app_role ?? undefined) as AppRole | undefined,
+            app_role: data.app_role as AppRole,
             status: data.status as UserStatus || UserStatus.PENDING,
             created_at: new Date(data.created_at),
             updated_at: new Date(data.updated_at),
@@ -28,15 +27,11 @@ export class SupabaseUserRepository implements IUserRepository {
     }
 
     private toPersistence(user: User): any {
-        // Dual-write during transition: keep legacy `role` in sync with `app_role`
-        // so RLS helpers and any code still reading profiles.role keep working
-        // until Phase 4 drops the legacy column.
         return {
             id: user.id,
             email: user.email,
             name: user.name,
             phone: user.phone,
-            role: user.role,
             app_role: user.app_role,
             status: user.status,
             updated_at: user.updated_at
@@ -49,11 +44,9 @@ export class SupabaseUserRepository implements IUserRepository {
             created_at: user.created_at,
         };
 
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('profiles')
-            .insert(persistenceData)
-            .select('id, email, name, phone, role, app_role, status, created_at, updated_at')
-            .single();
+            .insert(persistenceData);
 
         if (error) {
             throw new DomainError('Error creating user profile: ' + error.message, 'DB_ERROR', 500);
@@ -75,7 +68,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, role, app_role, status, created_at, updated_at, 
+                id, email, name, phone, app_role, status, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -95,7 +88,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, role, app_role, status, created_at, updated_at, 
+                id, email, name, phone, app_role, status, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -184,19 +177,24 @@ export class SupabaseUserRepository implements IUserRepository {
     async findAll(filters?: FindAllUsersFilters): Promise<User[]> {
         // Base query with joins
         let query = supabase.from('profiles').select(`
-            id, email, name, phone, role, app_role, status, created_at, updated_at, 
+            id, email, name, phone, app_role, status, created_at, updated_at, 
             profile_units(*, units(name, building_id, buildings(name))),
             building_members(*, buildings(name))
         `);
 
-        if (filters?.role) {
-            query = query.eq('role', filters.role);
+        // `role` filter is interpreted against the new model:
+        //   admin    → app_role = 'admin'
+        //   board    → has at least one board entry in building_members
+        //   resident → neither admin nor board anywhere
+        // Board/resident are post-fetched because they depend on the joined
+        // building_members rows, which the Supabase client can't filter
+        // against directly in the `profiles` query.
+        if (filters?.role === 'admin') {
+            query = query.eq('app_role', 'admin');
         }
         if (filters?.status) {
             query = query.eq('status', filters.status);
         }
-
-        // Filters applied client-side because of complex joins
 
         query = query.order('created_at', { ascending: false });
 
@@ -206,6 +204,12 @@ export class SupabaseUserRepository implements IUserRepository {
         }
 
         let users = data.map((d: any) => this.toDomain(d));
+
+        if (filters?.role === 'board') {
+            users = users.filter(u => u.isBoardMemberAnywhere() && !u.isAdmin());
+        } else if (filters?.role === 'resident') {
+            users = users.filter(u => u.isResident());
+        }
 
         if (filters?.building_id) {
             users = users.filter(user =>

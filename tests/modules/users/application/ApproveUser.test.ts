@@ -4,7 +4,7 @@ import { IUserRepository } from '@/modules/users/domain/repository';
 import { User } from '@/modules/users/domain/entities/User';
 import { UserUnit } from '@/modules/users/domain/entities/UserUnit';
 import { BuildingRole } from '@/modules/users/domain/entities/BuildingRole';
-import { UserRole, UserStatus } from '@/core/domain/enums';
+import { UserStatus } from '@/core/domain/enums';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
 
 // Mock Repository
@@ -44,7 +44,7 @@ describe('ApproveUser Use Case', () => {
 
     const createResident = (id: string, buildingId: string = 'b1') => {
         const u = new User({
-            id, email: 'res@test.com', name: 'Res', role: UserRole.RESIDENT, status: UserStatus.PENDING, created_at: new Date(), updated_at: new Date()
+            id, email: 'res@test.com', name: 'Res', app_role: 'user' as const, status: UserStatus.PENDING, created_at: new Date(), updated_at: new Date()
         });
         u.setUnits([new UserUnit({ unit_id: 'u1', building_id: buildingId, is_primary: true })]);
         return u;
@@ -52,14 +52,14 @@ describe('ApproveUser Use Case', () => {
 
     const createBoard = (id: string, buildingId: string = 'b1') => {
         const u = new User({
-            id, email: 'board@test.com', name: 'Board', role: UserRole.BOARD, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+            id, email: 'board@test.com', name: 'Board', app_role: 'user' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
         });
         u.setBuildingRoles([new BuildingRole({ building_id: buildingId, role: 'board' })]);
         return u;
     };
 
     const createAdmin = (id: string) => new User({
-        id, email: 'admin@test.com', name: 'Admin', role: UserRole.ADMIN, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+        id, email: 'admin@test.com', name: 'Admin', app_role: 'admin' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
     });
 
     it('should approve user when requested by admin', async () => {
@@ -117,7 +117,7 @@ describe('ApproveUser Use Case', () => {
 
     it('should approve user when board member has no units but has building role', async () => {
         const board = new User({
-            id: 'board_no_units', email: 'board2@test.com', name: 'Board No Units', role: UserRole.BOARD, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+            id: 'board_no_units', email: 'board2@test.com', name: 'Board No Units', app_role: 'user' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
         });
         board.setBuildingRoles([new BuildingRole({ building_id: 'buildingA', role: 'board' })]);
 
@@ -133,7 +133,7 @@ describe('ApproveUser Use Case', () => {
 
     it('should fail when board member has a unit but no building role', async () => {
         const board = new User({
-            id: 'board_with_unit_only', email: 'board3@test.com', name: 'Board Unit Only', role: UserRole.BOARD, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+            id: 'board_with_unit_only', email: 'board3@test.com', name: 'Board Unit Only', app_role: 'user' as const, status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
         });
         // Has unit in buildingA, but NO buildingRole
         board.setUnits([new UserUnit({ unit_id: 'u3', building_id: 'buildingA', is_primary: true })]);

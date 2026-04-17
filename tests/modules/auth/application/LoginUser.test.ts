@@ -23,7 +23,7 @@ describe('LoginUser Use Case', () => {
             email: 'test@test.com',
             name: 'Test',
 
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE
         });
         await userRepo.create(user);
@@ -46,7 +46,7 @@ describe('LoginUser Use Case', () => {
             email: 'pending@test.com',
             name: 'Pending User',
 
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.PENDING
         });
         await userRepo.create(user);

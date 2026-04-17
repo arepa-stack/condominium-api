@@ -1,7 +1,7 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import { UpdateBuildingRole } from "@/modules/users/application/use-cases/UpdateBuildingRole";
 import { User } from "@/modules/users/domain/entities/User";
-import { UserRole, UserStatus } from "@/core/domain/enums";
+import { UserStatus } from "@/core/domain/enums";
 import { createMockUserRepository } from "../../../mocks/repositories";
 import { BuildingRole } from "@/modules/users/domain/entities/BuildingRole";
 
@@ -19,7 +19,7 @@ describe("UpdateBuildingRole Use Case", () => {
             id: "user-1",
             email: "test@example.com",
             name: "Test User",
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             buildingRoles: []
         });
@@ -43,7 +43,7 @@ describe("UpdateBuildingRole Use Case", () => {
             id: "user-1",
             email: "test@example.com",
             name: "Test User",
-            role: UserRole.RESIDENT,
+            app_role: 'user' as const,
             status: UserStatus.ACTIVE,
             buildingRoles: [
                 new BuildingRole({ building_id: "building-1", role: "auditor" })
