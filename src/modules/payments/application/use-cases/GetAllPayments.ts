@@ -43,12 +43,13 @@ export class GetAllPayments {
             filters.building_id = request.filters.building_id;
         }
 
-        // Enforce building scope for Board members
+        // Enforce building scope for Board members.
+        //
+        // Authority comes exclusively from building_members (via
+        // getBuildingsWhereBoard). The prior `[...unitBuildings, ...roleBuildings]`
+        // let a board-in-X + resident-in-Y user list payments of Y too — leak.
         if (requester.isBoardMember()) {
-            const unitBuildings = requester.units.map(u => u.building_id);
-            const roleBuildings = requester.buildingRoles.map(r => r.building_id);
-            const validBuildings = Array.from(new Set([...unitBuildings, ...roleBuildings]))
-                .filter((id): id is string => !!id);
+            const validBuildings = requester.getBuildingsWhereBoard();
 
             if (validBuildings.length === 0) {
                 return [];

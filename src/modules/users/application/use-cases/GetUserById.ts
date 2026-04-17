@@ -42,9 +42,14 @@ export class GetUserById {
         }
 
         if (requester.isBoardMember()) {
-            const requesterBuildings = requester.units.map(u => u.building_id).filter(Boolean);
-            const targetBuildings = targetUser.units.map(u => u.building_id).filter(Boolean);
-            const hasCommonBuilding = requesterBuildings.some(rb => targetBuildings.includes(rb));
+            // Requester's authority comes from board memberships only (not units
+            // — having a unit in a building doesn't make someone a board there).
+            // Target's reachability includes any building it's AFFILIATED with
+            // (unit OR board role) — a fellow board in the same building should
+            // be visible even if they don't own a unit there.
+            const requesterBoardBuildings = requester.getBuildingsWhereBoard();
+            const targetBuildings = new Set(targetUser.getAffiliatedBuildings());
+            const hasCommonBuilding = requesterBoardBuildings.some(b => targetBuildings.has(b));
 
             if (!hasCommonBuilding) {
                 throw new ForbiddenError('You can only view users from your building');
