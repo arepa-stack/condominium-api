@@ -92,4 +92,19 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
             summary: 'Login user',
             description: 'Authenticates user and returns JWT token with user profile.'
         }
+    })
+    .post('/reset-password', async ({ body }) => {
+        const resetPasswordUseCase = new (require('../domain/use-cases/reset-password').ResetPassword)(authRepo);
+        await resetPasswordUseCase.execute(body.email);
+        return { success: true };
+    }, {
+        body: t.Object({
+            email: t.String({ format: 'email', examples: ['juan.perez@example.com'] })
+        }),
+        response: t.Object({ success: t.Boolean() }),
+        detail: {
+            tags: ['Auth'],
+            summary: 'Reset password',
+            description: 'Sends a password reset email to the user if the account exists.'
+        }
     });

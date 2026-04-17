@@ -116,6 +116,21 @@ export const userAppRoutes = new Elysia({ prefix: '/users' })
             summary: 'Update user profile',
             description: 'Update current user profile information. All fields are optional.'
         }
+    })
+    .patch('/me/password', async ({ user, body }) => {
+        const changePasswordUseCase = new (require('@/modules/auth/domain/use-cases/change-password').ChangePassword)(new (require('@/modules/auth/infrastructure/repositories/SupabaseAuthRepository').SupabaseAuthRepository)());
+        await changePasswordUseCase.execute(user.id, body.new_password);
+        return { success: true };
+    }, {
+        body: t.Object({
+            new_password: t.String({ minLength: 6, examples: ['SecurePass123'] })
+        }),
+        response: t.Object({ success: t.Boolean() }),
+        detail: {
+            tags: ['App - Users'],
+            summary: 'Change user password',
+            description: 'Changes the password for the currently authenticated user.'
+        }
     });
 
 // Admin routes — Board+Admin only
