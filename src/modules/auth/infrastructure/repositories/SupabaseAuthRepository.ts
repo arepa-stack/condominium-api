@@ -68,4 +68,22 @@ export class SupabaseAuthRepository implements IAuthRepository {
             }
         };
     }
+
+    async changePassword(userId: string, newPassword: string): Promise<void> {
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+            password: newPassword
+        });
+
+        if (error) {
+            throw new ValidationError(error.message);
+        }
+    }
+
+    async resetPasswordForEmail(email: string): Promise<void> {
+        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        
+        if (error) {
+            throw new ValidationError(error.message);
+        }
+    }
 }
