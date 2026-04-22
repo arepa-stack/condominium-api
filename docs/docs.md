@@ -1156,9 +1156,226 @@ Directorio de junta:
 
 ---
 
-## 11. Endpoint de Salud
-
-| Endpoint | Método | Autenticación | Descripción |
-|----------|--------|---------------|-------------|
 | `/health` | GET | ❌ Pública | Retorna `{ status: "ok", timestamp: "..." }` para monitoreo |
 | `/swagger` | GET | ❌ Pública | Documentación interactiva de la API (OpenAPI 3.0) |
+
+---
+
+## 12. Módulo de Decisiones (Presupuestos y Votaciones)
+
+El módulo de Decisiones implementa el flujo completo de toma de decisiones colectivas dentro de un edificio: desde la recepción de cotizaciones de proveedores hasta la generación del cobro correspondiente a las unidades. Responde al caso de uso central en administración condominial — "*¿con quién contratamos el trabajo?*" — con trazabilidad total y participación democrática de los apartamentos.
+
+El modelo es **machine de estados** con transiciones explícitas. Cada evento de importancia genera una entrada en el `decision_audit_log`, creando un registro inmutable de quién hizo qué y cuándo. Los cobros se generan como `INVOICE` (recibo individual a una unidad) o `ASSESSMENT` (prorrateo equitativo a todas las unidades del edificio), integrándose directamente con el módulo de Facturación.
+
+### 12.1 Roles
+
+| Acción | Admin | Board | Residente |
+|--------|:-----:|:-----:|:---------:|
+| Crear/cancelar decisión | ✅ | ✅ | ❌ |
+| Ver decisiones del edificio | ✅ | ✅ | ✅ (solo activas) |
+| Subir cotización | ✅ | ✅ | ✅ (durante RECEPTION) |
+| Eliminar cotización | ✅ | ✅ | ✅ (solo la propia) |
+| Votar | ✅ | ✅ | ✅ (por unidad asignada) |
+| Finalizar/avanzar estado | ✅ | ✅ | ❌ |
+| Resolver tiebreak manual | ✅ | ✅ | ❌ |
+| Generar cargo (INVOICE/ASSESSMENT) | ✅ | ✅ | ❌ |
+| Ver audit log | ✅ | ✅ | ❌ |
+
+**Nota de acceso APK**: los residentes solo pueden votar en nombre de sus propias unidades (`profile_units`). El ownership check se valida en el transporte, no en el dominio.
+
+### 12.2 Machine de Estados
+
+```
+RECEPTION  →  VOTING  →  RESOLVED   (flujo feliz: hay ganador claro)
+               ↓               ↓
+          TIEBREAK_PENDING  CHARGED   (estado informativo, no terminal por ahora)
+               ↓
+           RESOLVED         (tras resolución manual vía ResolveTiebreak)
+
+RECEPTION  →  CANCELLED     (en cualquier momento antes de RESOLVED)
+```
+
+- **RECEPTION**: período de recepción de cotizaciones. Deadline controlado por `reception_deadline`.
+- **VOTING**: deadline de votación activo (`voting_deadline`). Los apartamentos emiten un voto por ronda.
+- **RESOLVED**: hay un `winner_quote_id`. La decisión puede generar un cargo.
+- **TIEBREAK_PENDING**: dos rondas de votación terminaron empatadas. Requiere resolución manual de Board/Admin.
+- **CANCELLED**: terminal. Registra `cancel_reason` y `cancelled_at`.
+
+### 12.3 Endpoints — Web Admin (`/api/v1/admin/decisions`)
+
+Todos requieren rol `ADMIN` o `BOARD`. Guard: `requireRole([ADMIN, BOARD])`.
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/decisions` | POST | Crear decisión. Body: `{ building_id, title, description?, reception_deadline, voting_deadline }`. Valida `voting_deadline > reception_deadline`. |
+| `/decisions` | GET | Listar decisiones. Filtro: `?building_id=&status=`. |
+| `/decisions/:id` | GET | Detalle de una decisión. |
+| `/decisions/:id` | PATCH | Actualizar título/description (solo en RECEPTION). |
+| `/decisions/:id/cancel` | POST | Cancelar. Body: `{ reason }`. Valida que la decisión no esté ya RESOLVED. |
+| `/decisions/:id/finalize` | POST | Avanzar estado: RECEPTION→VOTING, VOTING→RESOLVED o TIEBREAK_PENDING. Body: `{ actor_user_id }`. |
+| `/decisions/:id/tiebreak` | POST | Resolver tiebreak manualmente. Body: `{ winner_quote_id }`. Solo en estado TIEBREAK_PENDING. |
+| `/decisions/:id/quotes` | GET | Listar cotizaciones. Query: `?include_deleted=true\|false`. |
+| `/decisions/:id/quotes` | POST | Subir cotización. Body (multipart): `{ provider_name, amount, file }`. |
+| `/decisions/:id/quotes/:qid` | DELETE | Eliminar cotización con razón obligatoria. Body: `{ reason }`. |
+| `/decisions/:id/votes` | GET | Listar votos de la ronda activa. |
+| `/decisions/:id/votes` | POST | Emitir voto. Body: `{ apartment_id, quote_id }`. |
+| `/decisions/:id/results` | GET | Tally de la ronda activa. Ver shape en §12.6. |
+| `/decisions/:id/charge` | POST | Generar cargo. Body: `{ type: "INVOICE"\|"ASSESSMENT", amount_override? }`. Solo en RESOLVED. Idempotente (rechaza si ya existe cargo). |
+| `/decisions/:id/audit` | GET | Historial de auditoría. Array de `{ event, actor_user_id, payload, created_at }`. |
+| `/decisions/:id/file-url` | POST | Obtener URL firmada para subir archivo de cotización (two-step upload). Body: `{ filename, mime_type }`. |
+
+### 12.4 Endpoints — APK (`/api/v1/app/decisions`)
+
+Acceso: token de sesión válido vía Supabase Auth. El `userId` y las `unitIds` se extraen del JWT en un `derive()` centralizado.
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/decisions` | GET | Listar decisiones activas del edificio del residente. |
+| `/decisions/:id` | GET | Detalle de una decisión. |
+| `/decisions/:id/quotes` | GET | Cotizaciones de la decisión (solo activas). |
+| `/decisions/:id/quotes` | POST | Subir cotización propia (solo en RECEPTION). Body (multipart): `{ provider_name, amount, file }`. |
+| `/decisions/:id/quotes/:qid` | DELETE | Eliminar propia cotización (soft-delete, razón hardcodeada). |
+| `/decisions/:id/votes` | POST | Emitir voto por una unidad propia. Body: `{ apartment_id, quote_id }`. Valida que `apartment_id ∈ unitIds` del residente. |
+| `/decisions/:id/results` | GET | Tally de la ronda activa (read-only). |
+
+### 12.5 Flujo de Negocio Principal
+
+```
+1. Board/Admin crea la decisión:
+   POST /decisions { building_id, title, reception_deadline, voting_deadline }
+   → estado RECEPTION
+
+2. Residentes (o Board/Admin) suben cotizaciones durante RECEPTION:
+   POST /decisions/:id/quotes (multipart: provider_name, amount, file)
+   → cada quote queda activa; puede ser soft-deleted por el uploader o por admin
+
+3. Admin/Board finaliza la recepción:
+   POST /decisions/:id/finalize
+   → si hay ≥1 quote activa y reception_deadline expiró → VOTING
+   → si no hay quotes activas → 422 DECISION_NO_ACTIVE_QUOTES
+
+4. Apartamentos votan (1 voto por apartamento por ronda):
+   POST /decisions/:id/votes { apartment_id, quote_id }
+   → idempotencia: el mismo apartamento no puede votar dos veces en la misma ronda
+
+5. Admin/Board finaliza la votación:
+   POST /decisions/:id/finalize
+   → ganador claro (mayoría simple) → RESOLVED con winner_quote_id
+   → empate ronda 1 → TIEBREAK_OPENED (abre ronda 2, status sigue VOTING)
+   → empate ronda 2 → TIEBREAK_PENDING (resolución manual requerida)
+   → sin votos o sin quotes activas → TIEBREAK_PENDING
+
+6a. Si RESOLVED: Admin/Board genera el cargo:
+    POST /decisions/:id/charge { type: "INVOICE" | "ASSESSMENT" }
+    → INVOICE: cobro a una unidad específica (el uploader del quote ganador)
+    → ASSESSMENT: prorrateo justo entre todas las unidades del edificio
+    → guarda resulting_type y resulting_id en la decisión
+
+6b. Si TIEBREAK_PENDING: Admin/Board resuelve manualmente:
+    POST /decisions/:id/tiebreak { winner_quote_id }
+    → decisión pasa a RESOLVED, luego flujo normal de cargo
+
+7. Audit trail disponible siempre:
+   GET /decisions/:id/audit → array de eventos { CREATED, PHASE_ADVANCED,
+   FINALIZED, TIEBREAK_OPENED, WINNER_SET_MANUAL, CANCELLED, QUOTE_UPLOADED,
+   QUOTE_DELETED, CHARGE_GENERATED }
+```
+
+### 12.6 Shape de Resultados (Tally)
+
+```json
+{
+  "round": 1,
+  "status": "VOTING",
+  "total_apartments": 10,
+  "total_votes": 7,
+  "participation_pct": 70.0,
+  "winner_quote_id": null,
+  "is_tied": false,
+  "tallies": [
+    {
+      "quote_id": "q-...",
+      "provider_name": "Acme Portones",
+      "amount": 4500,
+      "votes": 4,
+      "pct": 57.14
+    },
+    {
+      "quote_id": "q-...",
+      "provider_name": "Portones SA",
+      "amount": 5000,
+      "votes": 3,
+      "pct": 42.86
+    }
+  ]
+}
+```
+
+- `winner_quote_id`: `null` mientras la decisión no esté en `RESOLVED`. En `RESOLVED`, refleja el ganador persistido.
+- `tallies`: ordenados por votos desc. El primero es el líder provisional durante VOTING.
+- `participation_pct`: relativo al total de apartamentos del edificio (`totalApartments` lookup).
+
+### 12.7 Integración con Facturación
+
+El módulo de Decisiones no escribe directamente en `invoices`. Delega a dos adapters (**puertos**) que implementan la interfaz `ChargeGenerator`:
+
+| Adapter | Tipo de cargo | Implementación en producción |
+|---------|--------------|------------------------------|
+| `InvoiceChargeGenerator` | `INVOICE` | Crea un recibo individual vía `invoiceRepo.create()` con `tag=NORMAL` |
+| `AssessmentChargeGenerator` | `ASSESSMENT` | Crea un batch de recibos via `invoiceRepo.createBatch()` — prorrateo equitativo |
+
+Ambos adapters retornan `{ type, id }` que queda persistido en `decision.resulting_type` y `decision.resulting_id`, permitiendo trazabilidad desde la decisión al cargo generado.
+
+**Nota V1**: la trazabilidad inversa (desde el invoice/assessment encontrar la decisión origen) está planificada como `source_decision_id` para V1.5.
+
+### 12.8 Almacenamiento de Archivos
+
+- **Bucket**: `issue-files` (separado de `payment-proofs`)
+- **Flujo two-step** (mismo patrón que payment proofs):
+  1. `POST /decisions/:id/file-url { filename, mime_type }` → obtiene URL firmada de Supabase Storage
+  2. Cliente sube el archivo directamente a Supabase Storage con la URL firmada
+  3. `POST /decisions/:id/quotes { ..., file_url: "<url>" }` → registra la cotización con la URL ya subida
+- **Tipos aceptados**: PDF recomendado; el backend no valida MIME type en V1.
+- **Un archivo por cotización** (múltiples archivos planificados para V2).
+
+### 12.9 RLS
+
+Las políticas de Row Level Security para el módulo Decisions están definidas en:
+- `supabase/migrations/XXXX_decisions_rls.sql`
+
+Resumen de políticas:
+- **`decisions`**: Board/Admin ven todas las decisiones de sus edificios. Residentes ven solo decisiones de edificios donde son miembros.
+- **`decision_quotes`**: lectura pública dentro del edificio; write restringido a upload propio + admin.
+- **`decision_votes`**: lectura pública dentro del edificio; write 1 voto por apartamento por ronda (enforce DB-level via UNIQUE constraint).
+- **`decision_audit_log`**: read-only para Admin/Board. Sin acceso a residents.
+
+### 12.10 Enumeraciones del Módulo
+
+**DecisionStatus**:
+| Valor | Descripción |
+|-------|-------------|
+| `RECEPTION` | Recepción de cotizaciones activa |
+| `VOTING` | Votación activa |
+| `RESOLVED` | Decisión tomada, hay ganador |
+| `TIEBREAK_PENDING` | Empate en 2 rondas, requiere resolución manual |
+| `CANCELLED` | Cancelada. Estado terminal |
+
+**AuditEvent**:
+| Valor | Disparador |
+|-------|------------|
+| `CREATED` | Decisión creada |
+| `PHASE_ADVANCED` | RECEPTION → VOTING |
+| `FINALIZED` | VOTING → RESOLVED |
+| `TIEBREAK_OPENED` | Empate ronda 1 → abre ronda 2 |
+| `WINNER_SET_MANUAL` | Board/Admin elige ganador manualmente |
+| `CANCELLED` | Decisión cancelada |
+| `QUOTE_UPLOADED` | Nueva cotización subida |
+| `QUOTE_DELETED` | Cotización eliminada (soft-delete) |
+| `CHARGE_GENERATED` | INVOICE o ASSESSMENT creado |
+
+**ResultingType** (tipo de cargo generado):
+| Valor | Descripción |
+|-------|-------------|
+| `INVOICE` | Recibo individual a una unidad |
+| `ASSESSMENT` | Prorrateo a todas las unidades del edificio |
+

@@ -636,3 +636,17 @@ Actualizar `docs/docs.md` con:
 - Confirmar nombre y ubicación del mount del `/api/v1/app` router.
 - Decidir si bucket `issue-files` se crea por migration SQL o vía Supabase dashboard/script (el proyecto usa alguna de las dos convenciones).
 - Confirmar versión de Bun/Elysia para tipos de multipart (algunas versiones tienen APIs distintas).
+
+---
+
+## 14. Implementation Status
+
+**Status:** Completado (2026-04-22).
+
+Durante la implementación (Fases 1 a 12), la especificación original fue respetada casi en su totalidad, con los siguientes **deltas y decisiones de diseño menores**:
+
+1. **Serialización de Fechas (TypeBox)**: Se estandarizó el método `.toJSON()` en las entidades (`Decision`, `DecisionQuote`, `DecisionVote`, `DecisionAuditLog`) para que devuelvan Strings ISO 8601 explícitos, garantizando compatibilidad total con los contratos de TypeBox (`t.String({ format: 'date-time' })`) en los endpoints, evitando el uso de `t.Any()`.
+2. **Ordenamiento de Resultados (GetResults)**: Se añadió un ordenamiento explícito en el use case `GetResults` para que el array de `tallies` se retorne siempre ordenado de mayor a menor número de votos. El `winner_quote_id` es estrictamente `null` mientras la decisión esté en `VOTING`.
+3. **Autenticación APK**: La verificación de pertenencia de unidades (`unitIds` del residente) se implementó como un check de transporte en el router (`/api/v1/app`) mediante un `derive` centralizado que consume la sesión de Supabase, simplificando la carga de seguridad para los casos de uso (`UploadQuote`, `CastVote`).
+4. **Delete Quote (Residente)**: Se forzó por diseño que, cuando el `actor_role` es `resident`, el motivo (`reason`) de la eliminación lógica sea siempre el string harcodeado `"self-deleted by uploader"`, ignorando el reason opcional enviado por el cliente.
+5. **Testing**: Se optó por una estrategia E2E basada en pruebas de integración en memoria (in-memory fakes) para orquestar el ciclo completo (de `RECEPTION` a `CHARGE_GENERATED`), comprobando el 100% de la robustez del flujo sin levantar la infraestructura web real o la base de datos para estos tests (Alineado a las prácticas de Clean Architecture del proyecto).
