@@ -54,16 +54,18 @@ export class GetResults {
 
     const totalApt = await this.totalApartments(d.building_id);
 
-    const tallies: TallyEntry[] = quotes.map((q) => {
-      const votesForQ = tally.totals[q.id] ?? 0;
-      return {
-        quote_id: q.id,
-        provider_name: q.provider_name,
-        amount: q.amount,
-        votes: votesForQ,
-        pct: tally.total_votes ? (votesForQ / tally.total_votes) * 100 : 0,
-      };
-    });
+    const tallies: TallyEntry[] = quotes
+      .map((q) => {
+        const votesForQ = tally.totals[q.id] ?? 0;
+        return {
+          quote_id: q.id,
+          provider_name: q.provider_name,
+          amount: q.amount,
+          votes: votesForQ,
+          pct: tally.total_votes ? (votesForQ / tally.total_votes) * 100 : 0,
+        };
+      })
+      .sort((a, b) => b.votes - a.votes);
 
     return {
       round: r,
