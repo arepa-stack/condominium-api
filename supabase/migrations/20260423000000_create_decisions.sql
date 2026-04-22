@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS public.decision_quotes (
     CHECK (deleted_at IS NULL OR deletion_reason IS NOT NULL)
 );
 
--- Now add the circular FK on decisions.winner_quote_id
+-- Now add the circular FK on decisions.winner_quote_id (idempotent)
+ALTER TABLE public.decisions
+    DROP CONSTRAINT IF EXISTS decisions_winner_quote_id_fkey;
 ALTER TABLE public.decisions
     ADD CONSTRAINT decisions_winner_quote_id_fkey
     FOREIGN KEY (winner_quote_id) REFERENCES public.decision_quotes(id) ON DELETE SET NULL;
@@ -107,25 +109,16 @@ CREATE INDEX IF NOT EXISTS idx_decision_audit_decision
     ON public.decision_audit_log(decision_id, created_at DESC);
 
 -- =================================================================
--- updated_at triggers (reuse the project convention if available;
--- otherwise inline)
+-- updated_at triggers (reuse project-wide public.update_updated_at_column())
 -- =================================================================
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = now();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS trg_decisions_updated_at ON public.decisions;
 CREATE TRIGGER trg_decisions_updated_at
     BEFORE UPDATE ON public.decisions
-    FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 DROP TRIGGER IF EXISTS trg_decision_quotes_updated_at ON public.decision_quotes;
 CREATE TRIGGER trg_decision_quotes_updated_at
     BEFORE UPDATE ON public.decision_quotes
-    FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 COMMIT;
