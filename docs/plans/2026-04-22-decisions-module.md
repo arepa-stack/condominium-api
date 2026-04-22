@@ -2412,7 +2412,15 @@ Bucket: `issue-files`. ...
 
 Also update the header date with new PR number when ready.
 
-- [ ] Commit: `docs(decisions): document decisions module in docs.md`
+- [x] Task 43: Update docs.md
+- [x] Task 44: Update spec post-implementation
+
+**Files:**
+- Modify: `docs/encuentas.md`
+
+Add a final section "## 14. Implementation Status" with date and PR link, and any deltas observed during implementation (e.g., adapter signature differences, naming tweaks).
+
+- [x] Commit: `docs(decisions): document decisions module in docs.md`
 
 ---
 
@@ -2423,7 +2431,7 @@ Also update the header date with new PR number when ready.
 
 Add a final section "## 14. Implementation Status" with date and PR link, and any deltas observed during implementation (e.g., adapter signature differences, naming tweaks).
 
-- [ ] Commit: `docs(decisions): record implementation deltas in spec`
+- [x] Commit: `docs(decisions): record implementation deltas in spec`
 
 ---
 
