@@ -18,12 +18,13 @@ export interface DecisionQuoteProps {
 
 export class DecisionQuote {
     constructor(private props: DecisionQuoteProps) {
-        if (!props.decision_id) throw new DomainError('decision_id required', 'VALIDATION_ERROR', 400);
+        if (!props.decision_id?.trim()) throw new DomainError('decision_id required', 'VALIDATION_ERROR', 400);
         if (!(props.amount > 0)) throw new DomainError('amount must be > 0', 'QUOTE_INVALID_AMOUNT', 400);
-        if (!props.provider_name || props.provider_name.length < 2 || props.provider_name.length > 200) {
+        const name = props.provider_name?.trim() ?? '';
+        if (name.length < 2 || name.length > 200) {
             throw new DomainError('provider_name length 2..200', 'VALIDATION_ERROR', 400);
         }
-        if (!props.file_url) throw new DomainError('file_url required', 'VALIDATION_ERROR', 400);
+        if (!props.file_url?.trim()) throw new DomainError('file_url required', 'VALIDATION_ERROR', 400);
         this.props.created_at ??= new Date();
         this.props.updated_at ??= new Date();
     }
@@ -44,15 +45,29 @@ export class DecisionQuote {
     get isDeleted() { return !!this.props.deleted_at; }
 
     softDelete(deletedBy: string, reason: string) {
-        if (this.isDeleted) throw new DomainError('quote already deleted', 'QUOTE_DELETED', 422);
         if (!deletedBy?.trim()) throw new DomainError('deletedBy required', 'VALIDATION_ERROR', 400);
         if (!reason?.trim()) throw new DomainError('reason required', 'VALIDATION_ERROR', 400);
+        if (this.isDeleted) throw new DomainError('quote already deleted', 'QUOTE_DELETED', 422);
         this.props.deleted_at = new Date();
         this.props.deleted_by = deletedBy;
         this.props.deletion_reason = reason;
     }
 
     toJSON() {
-        return { ...this.props };
+        return {
+            id: this.id,
+            decision_id: this.decision_id,
+            uploader_user_id: this.uploader_user_id,
+            uploader_unit_id: this.uploader_unit_id,
+            provider_name: this.provider_name,
+            amount: this.amount,
+            notes: this.notes,
+            file_url: this.file_url,
+            deleted_at: this.deleted_at,
+            deleted_by: this.deleted_by,
+            deletion_reason: this.deletion_reason,
+            created_at: this.created_at,
+            updated_at: this.updated_at,
+        };
     }
 }

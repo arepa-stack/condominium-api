@@ -23,6 +23,11 @@ describe('DecisionQuote Entity', () => {
         expect(() => new DecisionQuote(base({ provider_name: 'x'.repeat(201) }))).toThrow();
     });
 
+    it('rejects whitespace-only provider_name', () => {
+        expect(() => new DecisionQuote(base({ provider_name: '  ' }))).toThrow();
+        expect(() => new DecisionQuote(base({ provider_name: '\t\n' }))).toThrow();
+    });
+
     it('rejects empty file_url', () => {
         expect(() => new DecisionQuote(base({ file_url: '' }))).toThrow();
     });
