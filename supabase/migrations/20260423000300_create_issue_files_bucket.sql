@@ -12,10 +12,13 @@ ON CONFLICT (id) DO NOTHING;
 --                  decisions/{decision_id}/quotes/{quote_id}/{filename}
 -- split_part(name, '/', 2) extracts {decision_id} (1-indexed)
 DROP POLICY IF EXISTS issue_files_read ON storage.objects;
-CREATE POLICY issue_files_read ON storage.objects FOR SELECT USING (
+CREATE POLICY issue_files_read ON storage.objects FOR SELECT
+    TO authenticated
+    USING (
     bucket_id = 'issue-files'
     AND EXISTS (
         SELECT 1 FROM public.decisions d
+        -- cast uuid→text (not text→uuid) so malformed paths fail silently instead of raising
         WHERE d.id::text = split_part(name, '/', 2)
         AND (
             public.get_my_role() = 'admin'
