@@ -14,6 +14,7 @@ import { pettyCashAppRoutes } from '@/modules/petty-cash/presentation/routes';
 import { userAppRoutes } from '@/modules/users/presentation/routes';
 import { directoryRoutes } from '@/modules/directory/presentation/routes';
 import { buildingPublicRoutes } from '@/modules/buildings/presentation/routes';
+import { decisionAppRoutes } from '@/modules/decisions/presentation/app-routes';
 
 export const appRoutes = new Elysia({ prefix: '/api/v1/app' })
     .use(billingAppRoutes)       // invoices, balance, credit (read + filtered by own unit)
@@ -21,4 +22,5 @@ export const appRoutes = new Elysia({ prefix: '/api/v1/app' })
     .use(pettyCashAppRoutes)     // fund balance + transaction history (read-only)
     .use(userAppRoutes)          // /users/me — get and update own profile
     .use(directoryRoutes)        // building board members directory
-    .use(buildingPublicRoutes);  // buildings + units read-only (mirrors public root routes)
+    .use(buildingPublicRoutes)    // buildings + units read-only (mirrors public root routes)
+    .use(decisionAppRoutes);      // decisions list/detail/quotes/votes/results (residents)
