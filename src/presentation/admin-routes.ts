@@ -17,6 +17,7 @@ import { pettyCashRoutes } from '@/modules/petty-cash/presentation/routes';
 import { buildingAdminRoutes } from '@/modules/buildings/presentation/routes';
 import { userAdminRoutes } from '@/modules/users/presentation/routes';
 import { directoryAdminRoutes } from '@/modules/directory/presentation/routes';
+import { decisionRoutes } from '@/modules/decisions/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -25,4 +26,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(pettyCashRoutes)        // fund read + write + assessments
     .use(buildingAdminRoutes)    // create, update, delete buildings/units
     .use(userAdminRoutes)        // user management, approve, roles
-    .use(directoryAdminRoutes);  // building members directory
+    .use(directoryAdminRoutes)    // building members directory
+    .use(decisionRoutes);         // decisions, quotes, votes, tally, charge gen
