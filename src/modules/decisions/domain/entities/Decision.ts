@@ -100,6 +100,9 @@ export class Decision {
     }
 
     resolve(winnerQuoteId: string): void {
+        if (!winnerQuoteId?.trim()) {
+            throw new DomainError('winnerQuoteId required', 'VALIDATION_ERROR', 400);
+        }
         if (this.status !== DecisionStatus.VOTING && this.status !== DecisionStatus.TIEBREAK_PENDING) {
             throw new DomainError(
                 'decision is not in VOTING/TIEBREAK_PENDING',
@@ -160,8 +163,13 @@ export class Decision {
                 400,
             );
         }
-        if (reception.getTime() < Date.now()) {
-            throw new DomainError('deadline cannot be in the past', 'DECISION_INVALID_DEADLINES', 400);
+        // Only validate past-check for deadlines that were actually provided in the input
+        const now = Date.now();
+        if (input.reception_deadline && input.reception_deadline.getTime() < now) {
+            throw new DomainError('reception_deadline cannot be in the past', 'DECISION_INVALID_DEADLINES', 400);
+        }
+        if (input.voting_deadline && input.voting_deadline.getTime() < now) {
+            throw new DomainError('voting_deadline cannot be in the past', 'DECISION_INVALID_DEADLINES', 400);
         }
         this.props.reception_deadline = reception;
         this.props.voting_deadline = voting;

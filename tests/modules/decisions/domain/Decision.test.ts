@@ -111,6 +111,45 @@ describe('Decision Entity', () => {
         ).toThrow();
     });
 
+    it('extendDeadlines() allows voting-only extension in VOTING phase', () => {
+        const past = new Date(Date.now() - 1000);
+        const d = new Decision(baseProps({
+            reception_deadline: past,
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        const newVoting = new Date(Date.now() + 600_000);
+        d.extendDeadlines({ voting_deadline: newVoting });
+        expect(d.voting_deadline.getTime()).toBe(newVoting.getTime());
+    });
+
+    it('markTiebreakPendingManual() from VOTING sets TIEBREAK_PENDING', () => {
+        const past = new Date(Date.now() - 1000);
+        const d = new Decision(baseProps({
+            reception_deadline: past,
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        d.markTiebreakPendingManual();
+        expect(d.status).toBe(DecisionStatus.TIEBREAK_PENDING);
+    });
+
+    it('markTiebreakPendingManual() throws if not in VOTING', () => {
+        const d = new Decision(baseProps());
+        expect(() => d.markTiebreakPendingManual()).toThrow();
+    });
+
+    it('resolve() rejects empty winnerQuoteId', () => {
+        const past = new Date(Date.now() - 1000);
+        const d = new Decision(baseProps({
+            reception_deadline: past,
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        expect(() => d.resolve('')).toThrow();
+        expect(() => d.resolve('   ')).toThrow();
+    });
+
     it('attachCharge(type, id) sets resulting_type/resulting_id once; second call throws', () => {
         const past = new Date(Date.now() - 1000);
         const d = new Decision(baseProps({
