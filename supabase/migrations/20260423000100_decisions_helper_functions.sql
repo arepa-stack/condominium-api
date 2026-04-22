@@ -10,3 +10,12 @@ CREATE OR REPLACE FUNCTION public.get_my_building_ids_as_resident()
 $$;
 
 GRANT EXECUTE ON FUNCTION public.get_my_building_ids_as_resident() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_my_building_ids_as_board()
+    RETURNS uuid[] LANGUAGE sql STABLE SECURITY DEFINER AS $$
+    SELECT COALESCE(array_agg(DISTINCT bm.building_id), ARRAY[]::uuid[])
+    FROM public.building_members bm
+    WHERE bm.profile_id = auth.uid() AND bm.role = 'board';
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_my_building_ids_as_board() TO authenticated;
