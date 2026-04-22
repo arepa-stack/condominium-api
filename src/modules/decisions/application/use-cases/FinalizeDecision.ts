@@ -35,6 +35,15 @@ export class FinalizeDecision {
 
     // --- RECEPTION → VOTING ---
     if (d.status === DecisionStatus.RECEPTION) {
+      // §7.6: cannot advance to VOTING without at least one active quote
+      const activeQuotesForVoting = await this.quotes.listForDecision(d.id, false);
+      if (activeQuotesForVoting.length === 0) {
+        throw new DomainError(
+          'cannot advance to VOTING: no active quotes',
+          'DECISION_NO_ACTIVE_QUOTES',
+          422,
+        );
+      }
       d.advanceToVoting();
       await this.decisions.update(d);
       await this.audit.record({

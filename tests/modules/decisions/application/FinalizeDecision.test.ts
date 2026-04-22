@@ -25,17 +25,37 @@ const makeVote = (id: string, apt: string, quote: string, round = 1) =>
   new DecisionVote({ id, decision_id: 'd1', round, apartment_id: apt, quote_id: quote, voted_by_user_id: 'u' + id });
 
 describe('FinalizeDecision', () => {
-  it('RECEPTION expired → advances to VOTING', async () => {
+  it('RECEPTION expired with quotes → advances to VOTING', async () => {
     const decRepo = new InMemoryDecisionRepo();
     const quoteRepo = new InMemoryQuoteRepo();
     const voteRepo = new InMemoryVoteRepo();
     const audit = new InMemoryAuditRepo();
     await decRepo.create(makeDecisionReceptionExpired());
+    await quoteRepo.create(makeQuote('q1'));
     const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
     expect(result.outcome).toBe('ADVANCED_TO_VOTING');
     const logs = await audit.listForDecision('d1');
     expect(logs[0].event).toBe(AuditEvent.PHASE_ADVANCED);
+  });
+
+  it('RECEPTION expired with NO active quotes → throws 422 DECISION_NO_ACTIVE_QUOTES (§7.6)', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const audit = new InMemoryAuditRepo();
+    await decRepo.create(makeDecisionReceptionExpired());
+    // no quotes at all
+    const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), audit);
+    await expect(uc.execute({ decision_id: 'd1', actor_user_id: 'system' })).rejects.toThrow();
+  });
+
+  it('RECEPTION expired with only deleted quotes → throws 422 DECISION_NO_ACTIVE_QUOTES (§7.6)', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    await decRepo.create(makeDecisionReceptionExpired());
+    await quoteRepo.create(makeQuote('q1', 'd1', true)); // deleted
+    const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), new InMemoryAuditRepo());
+    await expect(uc.execute({ decision_id: 'd1', actor_user_id: 'system' })).rejects.toThrow();
   });
 
   it('VOTING with clear winner → RESOLVED', async () => {
