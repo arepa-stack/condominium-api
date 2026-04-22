@@ -20,7 +20,12 @@ CREATE POLICY decisions_insert ON public.decisions FOR INSERT WITH CHECK (
 );
 
 DROP POLICY IF EXISTS decisions_update ON public.decisions;
-CREATE POLICY decisions_update ON public.decisions FOR UPDATE USING (
+CREATE POLICY decisions_update ON public.decisions FOR UPDATE
+USING (
+    public.get_my_role() = 'admin'
+    OR building_id = ANY (public.get_my_building_ids_as_board())
+)
+WITH CHECK (
     public.get_my_role() = 'admin'
     OR building_id = ANY (public.get_my_building_ids_as_board())
 );
@@ -59,7 +64,23 @@ CREATE POLICY decision_quotes_insert ON public.decision_quotes FOR INSERT WITH C
 );
 
 DROP POLICY IF EXISTS decision_quotes_update ON public.decision_quotes;
-CREATE POLICY decision_quotes_update ON public.decision_quotes FOR UPDATE USING (
+CREATE POLICY decision_quotes_update ON public.decision_quotes FOR UPDATE
+USING (
+    public.get_my_role() = 'admin'
+    OR EXISTS (
+        SELECT 1 FROM public.decisions d
+        WHERE d.id = decision_quotes.decision_id
+        AND d.building_id = ANY (public.get_my_building_ids_as_board())
+    )
+    OR (
+        uploader_user_id = auth.uid()
+        AND EXISTS (
+            SELECT 1 FROM public.decisions d
+            WHERE d.id = decision_quotes.decision_id AND d.status = 'RECEPTION'
+        )
+    )
+)
+WITH CHECK (
     public.get_my_role() = 'admin'
     OR EXISTS (
         SELECT 1 FROM public.decisions d
