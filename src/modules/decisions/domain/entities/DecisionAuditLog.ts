@@ -44,7 +44,7 @@ export class DecisionAuditLog {
             event: this.event,
             actor_user_id: this.actor_user_id,
             payload: this.payload,
-            created_at: this.created_at,
+            created_at: this.created_at.toISOString(),
         };
     }
 }

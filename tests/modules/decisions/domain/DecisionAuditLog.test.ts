@@ -63,6 +63,6 @@ describe('DecisionAuditLog', () => {
         expect(Object.values(AuditEvent).sort()).toEqual([
             'CANCELLED','CHARGE_GENERATED','CREATED','DEADLINE_EXTENDED',
             'FINALIZED','PHASE_ADVANCED','QUOTE_DELETED','TIEBREAK_OPENED','WINNER_SET_MANUAL',
-        ]);
+        ] as AuditEvent[]);
     });
 });

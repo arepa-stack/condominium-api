@@ -35,7 +35,7 @@ export class DecisionVote {
             apartment_id: this.apartment_id,
             quote_id: this.quote_id,
             voted_by_user_id: this.voted_by_user_id,
-            created_at: this.created_at,
+            created_at: this.created_at.toISOString(),
         };
     }
 }

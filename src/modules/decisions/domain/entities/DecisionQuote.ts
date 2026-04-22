@@ -63,11 +63,11 @@ export class DecisionQuote {
             amount: this.amount,
             notes: this.notes,
             file_url: this.file_url,
-            deleted_at: this.deleted_at,
+            deleted_at: this.deleted_at?.toISOString() ?? null,
             deleted_by: this.deleted_by,
             deletion_reason: this.deletion_reason,
-            created_at: this.created_at,
-            updated_at: this.updated_at,
+            created_at: this.created_at.toISOString(),
+            updated_at: this.updated_at.toISOString(),
         };
     }
 }

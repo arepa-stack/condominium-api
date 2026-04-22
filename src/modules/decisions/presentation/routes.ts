@@ -38,10 +38,12 @@ import { supabaseAdmin } from '@/infrastructure/supabase';
 
 // ── TypeBox schemas ───────────────────────────────────────────────────────────
 import {
+  DecisionSchema,
   QuoteSchema,
   VoteSchema,
   AuditEntrySchema,
   TallyResponseSchema,
+  PaginatedDecisionSchema,
   CreateDecisionBody,
   ExtendDeadlinesBody,
   CancelDecisionBody,
@@ -111,7 +113,7 @@ export function createDecisionRoutes(tag: string) {
       return d.toJSON();
     }, {
       body: CreateDecisionBody,
-      response: t.Any(),
+      response: DecisionSchema,
       detail: { tags: [tag], summary: 'Create a decision', security: [{ BearerAuth: [] }] },
     })
 
@@ -171,7 +173,7 @@ export function createDecisionRoutes(tag: string) {
         page: t.Optional(t.String()),
         limit: t.Optional(t.String()),
       }),
-      response: t.Any(),
+      response: PaginatedDecisionSchema,
       detail: { tags: [tag], summary: 'List decisions', security: [{ BearerAuth: [] }] },
     })
 
@@ -197,7 +199,7 @@ export function createDecisionRoutes(tag: string) {
       return d.toJSON();
     }, {
       body: ExtendDeadlinesBody,
-      response: t.Any(),
+      response: DecisionSchema,
       detail: { tags: [tag], summary: 'Extend deadlines', security: [{ BearerAuth: [] }] },
     })
 
@@ -211,7 +213,7 @@ export function createDecisionRoutes(tag: string) {
       return d.toJSON();
     }, {
       body: CancelDecisionBody,
-      response: t.Any(),
+      response: DecisionSchema,
       detail: { tags: [tag], summary: 'Cancel a decision', security: [{ BearerAuth: [] }] },
     })
 
@@ -233,7 +235,7 @@ export function createDecisionRoutes(tag: string) {
       return d.toJSON();
     }, {
       body: ResolveTiebreakBody,
-      response: t.Any(),
+      response: DecisionSchema,
       detail: { tags: [tag], summary: 'Manually resolve a tiebreak', security: [{ BearerAuth: [] }] },
     })
 
@@ -282,7 +284,7 @@ export function createDecisionRoutes(tag: string) {
         notes: t.Optional(t.String()),
       }),
       type: 'multipart/form-data',
-      response: t.Any(),
+      response: QuoteSchema,
       detail: { tags: [tag], summary: 'Upload a quote', security: [{ BearerAuth: [] }] },
     })
 
@@ -309,7 +311,7 @@ export function createDecisionRoutes(tag: string) {
       return q.toJSON();
     }, {
       body: t.Optional(DeleteQuoteBody),
-      response: t.Any(),
+      response: QuoteSchema,
       detail: { tags: [tag], summary: 'Soft-delete a quote', security: [{ BearerAuth: [] }] },
     })
 
@@ -324,7 +326,7 @@ export function createDecisionRoutes(tag: string) {
       return v.toJSON();
     }, {
       body: CastVoteBody,
-      response: t.Any(),
+      response: VoteSchema,
       detail: { tags: [tag], summary: 'Cast a vote', security: [{ BearerAuth: [] }] },
     })
 

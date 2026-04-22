@@ -196,17 +196,17 @@ export class Decision {
             photo_url: this.photo_url,
             status: this.status,
             current_round: this.current_round,
-            reception_deadline: this.reception_deadline,
-            voting_deadline: this.voting_deadline,
+            reception_deadline: this.reception_deadline.toISOString(),
+            voting_deadline: this.voting_deadline.toISOString(),
             tiebreak_duration_hours: this.tiebreak_duration_hours,
             winner_quote_id: this.winner_quote_id,
             resulting_type: this.resulting_type,
             resulting_id: this.resulting_id,
-            finalized_at: this.finalized_at,
-            cancelled_at: this.cancelled_at,
+            finalized_at: this.finalized_at?.toISOString() ?? null,
+            cancelled_at: this.cancelled_at?.toISOString() ?? null,
             cancel_reason: this.cancel_reason,
-            created_at: this.created_at,
-            updated_at: this.updated_at,
+            created_at: this.created_at.toISOString(),
+            updated_at: this.updated_at.toISOString(),
         };
     }
 }
