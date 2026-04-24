@@ -114,6 +114,12 @@ export const TallyResponseSchema = t.Object({
   tallies: t.Array(TallyEntrySchema),
   winner_quote_id: NullableString,
   is_tied: t.Boolean(),
+  is_early_finalizable: t.Boolean(),
+  early_finalize_reason: t.Union([
+    t.Literal('ALL_VOTED'),
+    t.Literal('MATHEMATICALLY_DECIDED'),
+    t.Null(),
+  ]),
 });
 
 // ------------------------------------------------------------------ Pagination

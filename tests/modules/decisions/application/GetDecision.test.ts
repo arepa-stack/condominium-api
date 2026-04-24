@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { GetDecision } from '@/modules/decisions/application/use-cases/GetDecision';
 import { InMemoryDecisionRepo, InMemoryQuoteRepo, InMemoryVoteRepo } from '../fakes';
-import { Decision } from '@/modules/decisions/domain/entities/Decision';
+import { Decision, DecisionStatus } from '@/modules/decisions/domain/entities/Decision';
 import { DecisionQuote } from '@/modules/decisions/domain/entities/DecisionQuote';
 import { DecisionVote } from '@/modules/decisions/domain/entities/DecisionVote';
 
@@ -82,5 +82,41 @@ describe('GetDecision', () => {
     const result = await uc.execute('d1', { caller_user_id: 'u1' });
     expect(result.my_vote).not.toBeNull();
     expect(result.my_vote!.quote_id).toBe('q1');
+  });
+
+  it('tally exposes early-finalize signals (ALL_VOTED) when VOTING and everyone voted', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const voteRepo = new InMemoryVoteRepo();
+    const d = new Decision({
+      id: 'd1',
+      building_id: 'b1',
+      created_by: 'u1',
+      title: 'Reparación portón',
+      reception_deadline: new Date(Date.now() - 5000),
+      voting_deadline: new Date(Date.now() + 60_000),
+      status: DecisionStatus.VOTING,
+    });
+    await decRepo.create(d);
+    await quoteRepo.create(makeQuote('q1'));
+    await voteRepo.create(makeVote('v1', 'u1', 'apt1', 'q1'));
+    await voteRepo.create(makeVote('v2', 'u2', 'apt2', 'q1'));
+    await voteRepo.create(makeVote('v3', 'u3', 'apt3', 'q1'));
+    const uc = new GetDecision(decRepo, quoteRepo, voteRepo, totalApartments);
+    const result = await uc.execute('d1', { caller_user_id: null });
+    expect(result.tally.is_early_finalizable).toBe(true);
+    expect(result.tally.early_finalize_reason).toBe('ALL_VOTED');
+  });
+
+  it('tally exposes null signal in RECEPTION', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const voteRepo = new InMemoryVoteRepo();
+    await decRepo.create(makeDecision());
+    await quoteRepo.create(makeQuote('q1'));
+    const uc = new GetDecision(decRepo, quoteRepo, voteRepo, totalApartments);
+    const result = await uc.execute('d1', { caller_user_id: null });
+    expect(result.tally.is_early_finalizable).toBe(false);
+    expect(result.tally.early_finalize_reason).toBeNull();
   });
 });
