@@ -70,17 +70,13 @@ The presentation layer maps between `snake_case` HTTP fields and `camelCase` use
 
 - Mix `camelCase` and `snake_case` TypeBox field names in the same route file.
 - Expose a camelCase getter (e.g. `get buildingId()`) from a domain entity — the HTTP contract must never depend on entity shape.
-- Write a new module fully in camelCase (`leads`, `directory` are legacy outliers, not a pattern to follow).
 - Rename a Postgres column to camelCase — DB stays snake_case.
 
-### Known outliers (pending normalization)
+### Known outliers
 
-- `src/modules/leads/*` — entire module in camelCase
-- `src/modules/directory/BoardMember.ts` — getter exposes camel (`buildingId`)
-- `src/modules/billing/presentation/routes.ts` — some endpoints use `invoiceId`, `issueDate`
-- `src/modules/users/presentation/routes.ts` — mixed `body.buildingId` vs `body.building_id`
+None pending. The shared pagination metadata (`total_pages`, `has_next_page`, `has_prev_page`) was migrated to snake_case alongside the other HTTP fields.
 
-New code MUST follow the table above. Legacy outliers are fixed incrementally, not by adding more mixed code.
+New code MUST follow the table above.
 
 ## Commits
 

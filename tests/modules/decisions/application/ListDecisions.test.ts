@@ -25,7 +25,7 @@ describe('ListDecisions', () => {
     const result = await uc.execute({ page: 1, limit: 2 });
     expect(result.data.length).toBe(2);
     expect(result.metadata.total).toBe(3);
-    expect(result.metadata.hasNextPage).toBe(true);
+    expect(result.metadata.has_next_page).toBe(true);
   });
 
   it('filters by building_id', async () => {

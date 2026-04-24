@@ -1,7 +1,7 @@
 # Condominio API Server — Documentación Funcional
 
 > **Última actualización**: 2026-04-20 — Refleja el estado post-PR `feat/normalize-pagination`.
-> **Paginación uniforme** en los 10 endpoints de listado. Response shape estándar `{ data: [...], metadata: { total, page, limit, totalPages, hasNextPage, hasPrevPage } }`. Query params estándar: `?page=<1-indexed>&limit=<number|"all">`. Defaults: `page=1`, `limit=20`. Cap numérico `100` (silent clamp); `limit=all` truncado a `10000` (el metadata señaliza truncación via `hasNextPage`). Filtros preexistentes intactos. Ver "Paginación estándar" abajo y `docs/petty-cash-client-handoff.md` para el contrato completo. **Breaking** para cualquier cliente que leía `data[]` directo del body — ahora debe desenvolver `response.data`.
+> **Paginación uniforme** en los 10 endpoints de listado. Response shape estándar `{ data: [...], metadata: { total, page, limit, total_pages, has_next_page, has_prev_page } }`. Query params estándar: `?page=<1-indexed>&limit=<number|"all">`. Defaults: `page=1`, `limit=20`. Cap numérico `100` (silent clamp); `limit=all` truncado a `10000` (el metadata señaliza truncación via `has_next_page`). Filtros preexistentes intactos. Ver "Paginación estándar" abajo y `docs/petty-cash-client-handoff.md` para el contrato completo. **Breaking** para cualquier cliente que leía `data[]` directo del body — ahora debe desenvolver `response.data`.
 > Cambios anteriores (caja chica, roles, auth, payments) siguen vigentes — ver más abajo.
 > **Última actualización**: 2026-04-19 — Refleja el estado post-PR Phase 3 (final) del rediseño de Caja Chica (`feat/petty-cash-ledger-phase-3`).
 > Cambios destacados de Phase 3: se **dropearon** `petty_cash_transactions`, `petty_cash_fund.current_balance` y `petty_cash_fund.currency`. El entity `PettyCashFund` ahora es solo metadata (`id`, `building_id`, `updated_at`). Balance vive exclusivamente en la vista `petty_cash_balance`. Nuevo endpoint `POST /petty-cash/funds/:buildingId/entries/:entryId/reverse` para emitir counter-asientos manuales sobre cualquier entry — idempotente, append-only, rechaza reversar una reversal. Secciones 4.1/7.5/7.6/7.9 de este doc reescritas al estado final.
@@ -418,7 +418,7 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/billing/invoices?tag=&page=&limit=` | GET | Lista **paginada** de invoices. Query params: `page` (default `1`), `limit` (default `10`), `unit_id`, `building_id`, `status`, `period`, `year`, `user_id`, `tag` (NORMAL / PETTY_CASH). Response: `{ data: AdminInvoice[], metadata: { total, page, limit, totalPages, hasNextPage, hasPrevPage } }`. |
+| `/billing/invoices?tag=&page=&limit=` | GET | Lista **paginada** de invoices. Query params: `page` (default `1`), `limit` (default `10`), `unit_id`, `building_id`, `status`, `period`, `year`, `user_id`, `tag` (NORMAL / PETTY_CASH). Response: `{ data: AdminInvoice[], metadata: { total, page, limit, total_pages, has_next_page, has_prev_page } }`. |
 | `/billing/invoices/preview` | POST | Pre-visualizar facturas desde Excel |
 | `/billing/invoices/confirm` | POST | Confirmar y cargar facturas desde Excel |
 | `/billing/debt` | POST | Cargar deuda manual a una unidad |
@@ -505,7 +505,7 @@ Todos los endpoints de **listado del panel admin** devuelven el mismo shape. Los
 | Param | Tipo | Default | Reglas |
 |---|---|---|---|
 | `page` | number (1-indexed) | `1` | Cualquier valor `< 1` se trata como `1` |
-| `limit` | number \| `"all"` | `20` | Numérico → clamp silencioso a `[1..100]`. `"all"` → devuelve hasta `10000` rows (cap hard); si el total excede el cap, `metadata.hasNextPage = true` para indicar truncación |
+| `limit` | number \| `"all"` | `20` | Numérico → clamp silencioso a `[1..100]`. `"all"` → devuelve hasta `10000` rows (cap hard); si el total excede el cap, `metadata.has_next_page = true` para indicar truncación |
 
 Filtros preexistentes de cada endpoint (ej: `status`, `building_id`, `period`, `tag`) **siguen funcionando y componen** con `page`/`limit`. `metadata.total` refleja el total del conjunto filtrado, no el total absoluto de la tabla.
 
@@ -518,19 +518,19 @@ Filtros preexistentes de cada endpoint (ej: `status`, `building_id`, `period`, `
     "total": 142,            // rows totales que matchean filtros
     "page": 3,               // página devuelta
     "limit": 20,             // items por página (o items.length si limit=all)
-    "totalPages": 8,         // Math.ceil(total/limit). 0 si total=0
-    "hasNextPage": true,     // page < totalPages
-    "hasPrevPage": true      // page > 1
+    "total_pages": 8,         // Math.ceil(total/limit). 0 si total=0
+    "has_next_page": true,     // page < total_pages
+    "has_prev_page": true      // page > 1
   }
 }
 ```
 
 #### Edge cases
 
-- **Lista vacía** → `{ data: [], metadata: { total: 0, page: 1, limit: 20, totalPages: 0, hasNextPage: false, hasPrevPage: false } }`.
-- **page > totalPages** → `data: []` con metadata correcto (sigue siendo 200, no 404).
+- **Lista vacía** → `{ data: [], metadata: { total: 0, page: 1, limit: 20, total_pages: 0, has_next_page: false, has_prev_page: false } }`.
+- **page > total_pages** → `data: []` con metadata correcto (sigue siendo 200, no 404).
 - **limit fuera de rango** → clamp silencioso al max (100 numérico; 10k para `all`).
-- **limit=all con total > 10000** → `data` trunca a 10000 items; `metadata.hasNextPage=true` señala que hay más.
+- **limit=all con total > 10000** → `data` trunca a 10000 items; `metadata.has_next_page=true` señala que hay más.
 - **page o limit no numéricos** (y no `"all"`) → 400 `VALIDATION_ERROR` por Elysia schema validation.
 
 #### Endpoints paginados (10)
@@ -559,12 +559,12 @@ Filtros preexistentes de cada endpoint (ej: `status`, `building_id`, `period`, `
 ```js
 const res = await fetch('/api/v1/admin/billing/invoices?page=2&limit=20&status=PENDING');
 const { data: invoices, metadata } = await res.json();
-console.log(`Mostrando ${invoices.length} de ${metadata.total} (página ${metadata.page}/${metadata.totalPages})`);
+console.log(`Mostrando ${invoices.length} de ${metadata.total} (página ${metadata.page}/${metadata.total_pages})`);
 
 // "Dame todo sin paginar" — útil para exports, autocompletes, dropdowns.
 const all = await fetch('/api/v1/admin/users?limit=all');
 const { data: users, metadata: meta } = await all.json();
-if (meta.hasNextPage) {
+if (meta.has_next_page) {
     console.warn(`Truncado: el servidor devolvió los primeros ${meta.limit} de ${meta.total}`);
 }
 ```

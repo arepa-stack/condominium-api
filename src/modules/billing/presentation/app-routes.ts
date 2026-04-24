@@ -39,7 +39,7 @@ const InvoiceSchema = t.Object({
 });
 
 const BalanceDetailSchema = t.Object({
-    invoiceId: t.String(),
+    invoice_id: t.String(),
     amount: t.Number(),
     paid: t.Number(),
     remaining: t.Number(),
@@ -49,10 +49,10 @@ const BalanceDetailSchema = t.Object({
 
 const BalanceSchema = t.Object({
     unit: t.String(),
-    totalDebt: t.Number(),
-    pendingInvoices: t.Number(),
-    creditBalance: t.Number(),
-    netBalance: t.Number(),
+    total_debt: t.Number(),
+    pending_invoices: t.Number(),
+    credit_balance: t.Number(),
+    net_balance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 
@@ -102,7 +102,22 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
             const hasAccess = profile.profile_units?.some((u: { unit_id: string }) => u.unit_id === params.id);
             if (!hasAccess) throw new UnauthorizedError('Unauthorized');
         }
-        return await getUnitBalance.execute(params.id);
+        const balance = await getUnitBalance.execute(params.id);
+        return {
+            unit: balance.unit,
+            total_debt: balance.totalDebt,
+            pending_invoices: balance.pendingInvoices,
+            credit_balance: balance.creditBalance,
+            net_balance: balance.netBalance,
+            details: balance.details.map(d => ({
+                invoice_id: d.invoiceId,
+                amount: d.amount,
+                paid: d.paid,
+                remaining: d.remaining,
+                period: d.period,
+                status: d.status
+            }))
+        };
     }, {
         response: BalanceSchema,
         detail: { tags: ['App - Billing'], summary: 'Get unit balance and pending invoices' }

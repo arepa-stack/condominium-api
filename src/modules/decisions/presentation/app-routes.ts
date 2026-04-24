@@ -155,7 +155,7 @@ export function createDecisionAppRoutes(tag: string) {
           total: result.metadata.total,
           page: result.metadata.page,
           limit: result.metadata.limit,
-          total_pages: result.metadata.totalPages,
+          total_pages: result.metadata.total_pages,
         },
       };
     }, {

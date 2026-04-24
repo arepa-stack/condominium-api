@@ -301,7 +301,7 @@ Crea un usuario con rol `board`, lo asigna al edificio y le envía por email una
   "name": "María González",               // string, minLength: 1
   "email": "maria@edificio.com",          // string, formato email
   "phone": "+58 412 5551234",             // string, opcional
-  "buildingId": "uuid-del-edificio",      // string, UUID
+  "building_id": "uuid-del-edificio",     // string, UUID
   "board_position": "Presidenta"          // string, opcional — cargo en la junta
 }
 ```

@@ -82,27 +82,27 @@ describe('buildPaginatedResult — numeric limit', () => {
             total: 50,
             page: 2,
             limit: 3,
-            totalPages: 17,
-            hasNextPage: true,
-            hasPrevPage: true,
+            total_pages: 17,
+            has_next_page: true,
+            has_prev_page: true,
         });
     });
 
-    it('reports totalPages=0 and hasNextPage=false when total=0', () => {
+    it('reports total_pages=0 and has_next_page=false when total=0', () => {
         const r = buildPaginatedResult<number>([], 0, { page: 1, limit: 20, isAll: false });
         expect(r.metadata.total).toBe(0);
-        expect(r.metadata.totalPages).toBe(0);
-        expect(r.metadata.hasNextPage).toBe(false);
-        expect(r.metadata.hasPrevPage).toBe(false);
+        expect(r.metadata.total_pages).toBe(0);
+        expect(r.metadata.has_next_page).toBe(false);
+        expect(r.metadata.has_prev_page).toBe(false);
     });
 
     it('handles page past the end — data can be empty but metadata still accurate', () => {
         const r = buildPaginatedResult<number>([], 15, { page: 10, limit: 20, isAll: false });
         expect(r.data).toEqual([]);
         expect(r.metadata.total).toBe(15);
-        expect(r.metadata.totalPages).toBe(1);
-        expect(r.metadata.hasNextPage).toBe(false);
-        expect(r.metadata.hasPrevPage).toBe(true); // page=10 > 1
+        expect(r.metadata.total_pages).toBe(1);
+        expect(r.metadata.has_next_page).toBe(false);
+        expect(r.metadata.has_prev_page).toBe(true); // page=10 > 1
     });
 });
 
@@ -114,26 +114,26 @@ describe('buildPaginatedResult — limit=all', () => {
         expect(r.metadata.total).toBe(42);
         expect(r.metadata.page).toBe(1);
         expect(r.metadata.limit).toBe(42);
-        expect(r.metadata.totalPages).toBe(1);
-        expect(r.metadata.hasNextPage).toBe(false);
+        expect(r.metadata.total_pages).toBe(1);
+        expect(r.metadata.has_next_page).toBe(false);
     });
 
-    it('when total exceeds cap, flags hasNextPage=true so the client knows it was truncated', () => {
+    it('when total exceeds cap, flags has_next_page=true so the client knows it was truncated', () => {
         const items = Array.from({ length: ALL_LIMIT_CAP }, (_, i) => i);
         const r = buildPaginatedResult(items, 15_000, { page: 1, limit: ALL_LIMIT_CAP, isAll: true });
 
         expect(r.data.length).toBe(ALL_LIMIT_CAP);
         expect(r.metadata.total).toBe(15_000);
         expect(r.metadata.limit).toBe(ALL_LIMIT_CAP);
-        expect(r.metadata.totalPages).toBe(2); // ceil(15000 / 10000)
-        expect(r.metadata.hasNextPage).toBe(true);
+        expect(r.metadata.total_pages).toBe(2); // ceil(15000 / 10000)
+        expect(r.metadata.has_next_page).toBe(true);
     });
 
     it('empty result with isAll still produces well-formed metadata', () => {
         const r = buildPaginatedResult<number>([], 0, { page: 1, limit: ALL_LIMIT_CAP, isAll: true });
         expect(r.metadata.total).toBe(0);
-        expect(r.metadata.totalPages).toBe(0);
-        expect(r.metadata.hasNextPage).toBe(false);
+        expect(r.metadata.total_pages).toBe(0);
+        expect(r.metadata.has_next_page).toBe(false);
         expect(r.metadata.limit).toBe(0);
     });
 });

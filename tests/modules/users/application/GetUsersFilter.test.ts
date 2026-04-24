@@ -136,9 +136,9 @@ describe("GetUsers Building Filter", () => {
             total: expect.any(Number),
             page: expect.any(Number),
             limit: expect.any(Number),
-            totalPages: expect.any(Number),
-            hasNextPage: expect.any(Boolean),
-            hasPrevPage: expect.any(Boolean),
+            total_pages: expect.any(Number),
+            has_next_page: expect.any(Boolean),
+            has_prev_page: expect.any(Boolean),
         });
     });
 });

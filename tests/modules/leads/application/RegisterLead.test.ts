@@ -26,7 +26,7 @@ describe('RegisterLead Use Case', () => {
 
         expect(repo.save).toHaveBeenCalled();
         const savedLead = (repo.save as any).mock.calls[0][0] as Lead;
-        expect(savedLead.fullName).toBe(data.fullName);
+        expect(savedLead.full_name).toBe(data.fullName);
         expect(savedLead.email).toBe(data.email);
     });
 

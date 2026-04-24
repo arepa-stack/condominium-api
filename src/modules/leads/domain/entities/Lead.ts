@@ -2,20 +2,20 @@ import { ValidationError } from '@/core/errors';
 
 export interface LeadProps {
     id?: string;
-    fullName: string;
+    full_name: string;
     contact: string;
     email: string;
-    buildingName: string;
+    building_name: string;
     location: string;
-    estimatedUsers: string;
-    createdAt?: Date;
+    estimated_users: string;
+    created_at?: Date;
 }
 
 export class Lead {
     private constructor(private props: LeadProps) {
         this.validate();
-        if (!this.props.createdAt) {
-            this.props.createdAt = new Date();
+        if (!this.props.created_at) {
+            this.props.created_at = new Date();
         }
     }
 
@@ -24,9 +24,9 @@ export class Lead {
     }
 
     private validate(): void {
-        const { fullName, contact, email, buildingName, location, estimatedUsers } = this.props;
+        const { full_name, contact, email, building_name, location, estimated_users } = this.props;
 
-        if (!fullName || fullName.trim().length === 0) {
+        if (!full_name || full_name.trim().length === 0) {
             throw new ValidationError('Full name is required');
         }
 
@@ -42,7 +42,7 @@ export class Lead {
             throw new ValidationError('Invalid email format');
         }
 
-        if (!buildingName || buildingName.trim().length === 0) {
+        if (!building_name || building_name.trim().length === 0) {
             throw new ValidationError('Building name is required');
         }
 
@@ -50,7 +50,7 @@ export class Lead {
             throw new ValidationError('Location is required');
         }
 
-        if (!estimatedUsers || estimatedUsers.trim().length === 0) {
+        if (!estimated_users || estimated_users.trim().length === 0) {
             throw new ValidationError('Estimated users range is required');
         }
     }
@@ -61,13 +61,13 @@ export class Lead {
     }
 
     get id(): string | undefined { return this.props.id; }
-    get fullName(): string { return this.props.fullName; }
+    get full_name(): string { return this.props.full_name; }
     get contact(): string { return this.props.contact; }
     get email(): string { return this.props.email; }
-    get buildingName(): string { return this.props.buildingName; }
+    get building_name(): string { return this.props.building_name; }
     get location(): string { return this.props.location; }
-    get estimatedUsers(): string { return this.props.estimatedUsers; }
-    get createdAt(): Date { return this.props.createdAt!; }
+    get estimated_users(): string { return this.props.estimated_users; }
+    get created_at(): Date { return this.props.created_at!; }
 
     public toPlain(): LeadProps {
         return { ...this.props };
