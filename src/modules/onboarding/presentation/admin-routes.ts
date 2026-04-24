@@ -46,13 +46,13 @@ export const onboardingAdminRoutes = new Elysia({ prefix: '/registration-request
         const results = await listRequests.execute({
             requesterAppRole: profile.app_role,
             requesterBoardBuildingIds: profile.boardBuildingIds,
-            buildingId: query.buildingId,
+            buildingId: query.building_id,
             status: query.status as any,
         });
         return results.map(r => r.toJSON());
     }, {
         query: t.Object({
-            buildingId: t.Optional(t.String()),
+            building_id: t.Optional(t.String()),
             status: t.Optional(t.Union([
                 t.Literal('pending'),
                 t.Literal('approved'),

@@ -37,14 +37,14 @@ export const onboardingAppRoutes = new Elysia({ prefix: '/unit-invitations' })
     .post('/', async ({ profile, body }) => {
         const result = await createInvitation.execute({
             inviterProfileId: profile.id,
-            inviteeEmail: body.inviteeEmail,
-            inviteeName: body.inviteeName,
+            inviteeEmail: body.invitee_email,
+            inviteeName: body.invitee_name,
         });
         return result.toJSON();
     }, {
         body: t.Object({
-            inviteeEmail: t.String({ format: 'email' }),
-            inviteeName: t.Optional(t.String()),
+            invitee_email: t.String({ format: 'email' }),
+            invitee_name: t.Optional(t.String()),
         }),
         response: InvitationResponse,
         detail: {
