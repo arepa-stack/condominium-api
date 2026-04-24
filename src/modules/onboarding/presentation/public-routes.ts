@@ -36,23 +36,23 @@ const RegistrationRequestResponse = t.Object({
 export const onboardingPublicRoutes = new Elysia()
     .post('/registration-requests', async ({ body }) => {
         const result = await submitRequest.execute({
-            buildingCode: body.buildingCode,
-            unitId: body.unitId,
+            buildingCode: body.building_code,
+            unitId: body.unit_id,
             email: body.email,
-            firstName: body.firstName,
-            lastName: body.lastName,
-            documentId: body.documentId,
+            firstName: body.first_name,
+            lastName: body.last_name,
+            documentId: body.document_id,
             phone: body.phone,
         });
         return result.toJSON();
     }, {
         body: t.Object({
-            buildingCode: t.String({ minLength: 1, examples: ['COND-ABCD1234'] }),
-            unitId: t.String({ format: 'uuid' }),
+            building_code: t.String({ minLength: 1, examples: ['COND-ABCD1234'] }),
+            unit_id: t.String({ format: 'uuid' }),
             email: t.String({ format: 'email' }),
-            firstName: t.String({ minLength: 1 }),
-            lastName: t.String({ minLength: 1 }),
-            documentId: t.String({ minLength: 1 }),
+            first_name: t.String({ minLength: 1 }),
+            last_name: t.String({ minLength: 1 }),
+            document_id: t.String({ minLength: 1 }),
             phone: t.Optional(t.String()),
         }),
         response: RegistrationRequestResponse,
@@ -63,8 +63,22 @@ export const onboardingPublicRoutes = new Elysia()
         }
     })
     .get('/invitations/:token', async ({ params }) => {
-        return await getInvitationMeta.execute(params.token);
+        const meta = await getInvitationMeta.execute(params.token);
+        return {
+            inviter_name: meta.inviterName,
+            unit_name: meta.unitName,
+            building_name: meta.buildingName,
+            expires_at: meta.expiresAt,
+            is_valid: meta.isValid,
+        };
     }, {
+        response: t.Object({
+            inviter_name: t.String(),
+            unit_name: t.String(),
+            building_name: t.String(),
+            expires_at: t.Any(),
+            is_valid: t.Boolean(),
+        }),
         detail: {
             tags: ['Onboarding - Public'],
             summary: 'Get invitation metadata by token',
@@ -74,17 +88,17 @@ export const onboardingPublicRoutes = new Elysia()
     .post('/invitations/:token/accept', async ({ params, body }) => {
         const result = await acceptInvitation.execute({
             token: params.token,
-            firstName: body.firstName,
-            lastName: body.lastName,
-            documentId: body.documentId,
+            firstName: body.first_name,
+            lastName: body.last_name,
+            documentId: body.document_id,
             phone: body.phone,
         });
         return result.toJSON();
     }, {
         body: t.Object({
-            firstName: t.String({ minLength: 1 }),
-            lastName: t.String({ minLength: 1 }),
-            documentId: t.String({ minLength: 1 }),
+            first_name: t.String({ minLength: 1 }),
+            last_name: t.String({ minLength: 1 }),
+            document_id: t.String({ minLength: 1 }),
             phone: t.Optional(t.String()),
         }),
         response: RegistrationRequestResponse,

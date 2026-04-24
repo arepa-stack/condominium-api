@@ -371,12 +371,12 @@ Envía una solicitud de registro desde el formulario del QR. El Board recibe una
 **Request body:**
 ```json
 {
-  "buildingCode": "COND-A1B2C3D4",   // string — del QR
-  "unitId": "uuid-de-la-unidad",     // string, UUID
+  "building_code": "COND-A1B2C3D4",  // string — del QR
+  "unit_id": "uuid-de-la-unidad",    // string, UUID
   "email": "residente@email.com",    // string, formato email
-  "firstName": "Carlos",             // string, minLength: 1
-  "lastName": "Pérez",               // string, minLength: 1
-  "documentId": "V-12345678",        // string, minLength: 1
+  "first_name": "Carlos",            // string, minLength: 1
+  "last_name": "Pérez",              // string, minLength: 1
+  "document_id": "V-12345678",       // string, minLength: 1
   "phone": "+58 414 1234567"         // string, opcional
 }
 ```
@@ -400,7 +400,7 @@ Lista las solicitudes de registro. El Board solo ve las de sus edificios; el Adm
 
 **Query params:**
 ```
-buildingId?: string (UUID) — filtrar por edificio
+building_id?: string (UUID) — filtrar por edificio
 status?: "pending" | "approved" | "rejected" — filtrar por estado
 ```
 
@@ -469,8 +469,8 @@ El residente invita a alguien a compartir su unidad. Genera un token y envía un
 **Request body:**
 ```json
 {
-  "inviteeEmail": "vecino@email.com",   // string, formato email
-  "inviteeName": "Luis Torres"          // string, opcional
+  "invitee_email": "vecino@email.com",  // string, formato email
+  "invitee_name": "Luis Torres"         // string, opcional
 }
 ```
 
@@ -527,11 +527,11 @@ Obtiene los metadatos públicos de una invitación por su token (para pre-rellen
 
 ```json
 {
-  "inviterName": "Carlos Pérez",
-  "unitName": "Apto 4B",
-  "buildingName": "Residencias El Pinar",
-  "expiresAt": "2026-05-01T12:00:00Z",
-  "isValid": true
+  "inviter_name": "Carlos Pérez",
+  "unit_name": "Apto 4B",
+  "building_name": "Residencias El Pinar",
+  "expires_at": "2026-05-01T12:00:00Z",
+  "is_valid": true
 }
 ```
 
@@ -554,9 +554,9 @@ El invitado acepta la invitación con sus datos personales. Crea una `Registrati
 **Request body:**
 ```json
 {
-  "firstName": "Luis",          // string, minLength: 1
-  "lastName": "Torres",         // string, minLength: 1
-  "documentId": "V-98765432",   // string, minLength: 1
+  "first_name": "Luis",         // string, minLength: 1
+  "last_name": "Torres",        // string, minLength: 1
+  "document_id": "V-98765432",  // string, minLength: 1
   "phone": "+58 416 9876543"    // string, opcional
 }
 ```
