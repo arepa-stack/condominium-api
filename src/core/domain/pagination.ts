@@ -7,7 +7,7 @@
  *   ?limit=<number | "all">           default 20, clamp [1..100], "all" up to 10_000
  *
  * Response shape:
- *   { data: T[], metadata: { total, page, limit, totalPages, hasNextPage, hasPrevPage } }
+ *   { data: T[], metadata: { total, page, limit, total_pages, has_next_page, has_prev_page } }
  *
  * The helpers here encapsulate:
  *   1. Normalizing the raw page/limit input (parsePaginationFilters).
@@ -25,9 +25,9 @@ export interface PaginatedResult<T> {
         total: number;
         page: number;
         limit: number;
-        totalPages: number;
-        hasNextPage: boolean;
-        hasPrevPage: boolean;
+        total_pages: number;
+        has_next_page: boolean;
+        has_prev_page: boolean;
     };
 }
 
@@ -125,12 +125,12 @@ export function toRange(filters: PaginationFilters): { from: number; to: number 
  *   - metadata.limit reflects how many rows were actually sent
  *     (= items.length). That's the usual client-intuitive value.
  *   - If `total` > ALL_LIMIT_CAP, items got truncated. metadata then
- *     reports totalPages = Math.ceil(total / ALL_LIMIT_CAP) and
- *     hasNextPage = true, signalling "there is more — page again".
+ *     reports total_pages = Math.ceil(total / ALL_LIMIT_CAP) and
+ *     has_next_page = true, signalling "there is more — page again".
  *
  * When isAll=false (normal numeric limit):
  *   - metadata.limit = filters.limit (the effective cap applied).
- *   - totalPages = Math.ceil(total / limit). If total===0, totalPages=0.
+ *   - total_pages = Math.ceil(total / limit). If total===0, total_pages=0.
  */
 export function buildPaginatedResult<T>(
     items: T[],
@@ -152,9 +152,9 @@ export function buildPaginatedResult<T>(
                 total: safeTotal,
                 page: filters.page,
                 limit: effectiveLimit,
-                totalPages,
-                hasNextPage: safeTotal > ALL_LIMIT_CAP,
-                hasPrevPage: filters.page > 1,
+                total_pages: totalPages,
+                has_next_page: safeTotal > ALL_LIMIT_CAP,
+                has_prev_page: filters.page > 1,
             },
         };
     }
@@ -169,9 +169,9 @@ export function buildPaginatedResult<T>(
             total: safeTotal,
             page: filters.page,
             limit: filters.limit,
-            totalPages,
-            hasNextPage: filters.page < totalPages,
-            hasPrevPage: filters.page > 1,
+            total_pages: totalPages,
+            has_next_page: filters.page < totalPages,
+            has_prev_page: filters.page > 1,
         },
     };
 }

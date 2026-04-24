@@ -104,9 +104,9 @@ const PaginationMetadataSchema = t.Object({
     total: t.Number(),
     page: t.Number(),
     limit: t.Number(),
-    totalPages: t.Number(),
-    hasNextPage: t.Boolean(),
-    hasPrevPage: t.Boolean()
+    total_pages: t.Number(),
+    has_next_page: t.Boolean(),
+    has_prev_page: t.Boolean()
 });
 
 const PaginatedAdminInvoiceSchema = t.Object({

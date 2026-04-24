@@ -72,11 +72,11 @@ The presentation layer maps between `snake_case` HTTP fields and `camelCase` use
 - Expose a camelCase getter (e.g. `get buildingId()`) from a domain entity — the HTTP contract must never depend on entity shape.
 - Rename a Postgres column to camelCase — DB stays snake_case.
 
-### Known outliers (pending normalization)
+### Known outliers
 
-- Shared pagination metadata (`metadata.totalPages`, `metadata.hasNextPage`, `metadata.hasPrevPage`) is camelCase across all paginated admin list endpoints. Kept intentionally until the APK and admin clients can coordinate a simultaneous rename — changing it breaks 10+ endpoints at once.
+None pending. The shared pagination metadata (`total_pages`, `has_next_page`, `has_prev_page`) was migrated to snake_case alongside the other HTTP fields.
 
-New code MUST follow the table above. Shared contract fields are migrated in coordinated PRs, not by one-off edits.
+New code MUST follow the table above.
 
 ## Commits
 
