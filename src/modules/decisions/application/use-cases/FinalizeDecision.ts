@@ -1,5 +1,5 @@
 import { DomainError } from '@/core/errors';
-import { DecisionStatus } from '@/modules/decisions/domain/entities/Decision';
+import { Decision, DecisionStatus } from '@/modules/decisions/domain/entities/Decision';
 import { AuditEvent } from '@/modules/decisions/domain/entities/DecisionAuditLog';
 import {
   DecisionRepository,
@@ -9,17 +9,17 @@ import {
 } from '@/modules/decisions/domain/repository';
 import { computeTally } from '@/modules/decisions/domain/services/TallyService';
 
-export type FinalizeOutcome =
-  | 'ADVANCED_TO_VOTING'
-  | 'RESOLVED'
-  | 'TIEBREAK_OPENED'
-  | 'TIEBREAK_PENDING_MANUAL';
-
 export interface FinalizeDecisionInput {
   decision_id: string;
   actor_user_id: string;
 }
 
+/**
+ * Advances or resolves a decision based on current phase and deadlines.
+ * Per spec §7.6: idempotent — calling again on a terminal state (RESOLVED,
+ * CANCELLED) returns the current decision without mutation. Returns the
+ * latest Decision so the client can re-render without refetching.
+ */
 export class FinalizeDecision {
   constructor(
     private readonly decisions: DecisionRepository,
@@ -28,10 +28,15 @@ export class FinalizeDecision {
     private readonly audit: DecisionAuditLogRepository,
   ) {}
 
-  async execute(input: FinalizeDecisionInput): Promise<{ outcome: FinalizeOutcome }> {
+  async execute(input: FinalizeDecisionInput): Promise<Decision> {
     await this.decisions.acquireFinalizeLock(input.decision_id);
     const d = await this.decisions.findByIdLocked(input.decision_id);
     if (!d) throw new DomainError('decision not found', 'DECISION_NOT_FOUND', 404);
+
+    // Idempotency: terminal statuses return current state unchanged.
+    if (d.status === DecisionStatus.RESOLVED || d.status === DecisionStatus.CANCELLED) {
+      return d;
+    }
 
     // --- RECEPTION → VOTING ---
     if (d.status === DecisionStatus.RECEPTION) {
@@ -45,14 +50,14 @@ export class FinalizeDecision {
         );
       }
       d.advanceToVoting();
-      await this.decisions.update(d);
+      const saved = await this.decisions.update(d);
       await this.audit.record({
         decision_id: d.id,
         event: AuditEvent.PHASE_ADVANCED,
         actor_user_id: input.actor_user_id,
         payload: { from: 'RECEPTION', to: 'VOTING' },
       });
-      return { outcome: 'ADVANCED_TO_VOTING' };
+      return saved;
     }
 
     // --- VOTING → finalize ---
@@ -60,14 +65,14 @@ export class FinalizeDecision {
       const activeQuotes = await this.quotes.listForDecision(d.id, false);
       if (activeQuotes.length === 0) {
         d.markTiebreakPendingManual();
-        await this.decisions.update(d);
+        const saved = await this.decisions.update(d);
         await this.audit.record({
           decision_id: d.id,
           event: AuditEvent.TIEBREAK_OPENED,
           actor_user_id: input.actor_user_id,
           payload: { reason: 'NO_ACTIVE_QUOTES' },
         });
-        return { outcome: 'TIEBREAK_PENDING_MANUAL' };
+        return saved;
       }
 
       const currentVotes = await this.votes.listForDecision(d.id, d.current_round);
@@ -82,53 +87,54 @@ export class FinalizeDecision {
 
       if (tally.total_votes === 0) {
         d.markTiebreakPendingManual();
-        await this.decisions.update(d);
+        const saved = await this.decisions.update(d);
         await this.audit.record({
           decision_id: d.id,
           event: AuditEvent.TIEBREAK_OPENED,
           actor_user_id: input.actor_user_id,
           payload: { reason: 'NO_VOTES_CAST' },
         });
-        return { outcome: 'TIEBREAK_PENDING_MANUAL' };
+        return saved;
       }
 
       if (!tally.is_tied) {
         d.resolve(tally.winner_quote_id!);
-        await this.decisions.update(d);
+        const saved = await this.decisions.update(d);
         await this.audit.record({
           decision_id: d.id,
           event: AuditEvent.FINALIZED,
           actor_user_id: input.actor_user_id,
           payload: { winner_quote_id: tally.winner_quote_id },
         });
-        return { outcome: 'RESOLVED' };
+        return saved;
       }
 
       // Tie
       if (d.current_round === 1) {
         d.openTiebreak();
-        await this.decisions.update(d);
+        const saved = await this.decisions.update(d);
         await this.audit.record({
           decision_id: d.id,
           event: AuditEvent.TIEBREAK_OPENED,
           actor_user_id: input.actor_user_id,
           payload: { reason: 'TIE_ROUND_1', tied_quote_ids: tally.tied_quote_ids },
         });
-        return { outcome: 'TIEBREAK_OPENED' };
+        return saved;
       }
 
       // Round >= 2: manual resolution required
       d.markTiebreakPendingManual();
-      await this.decisions.update(d);
+      const saved = await this.decisions.update(d);
       await this.audit.record({
         decision_id: d.id,
         event: AuditEvent.TIEBREAK_OPENED,
         actor_user_id: input.actor_user_id,
         payload: { reason: 'TIE_ROUND_2_MANUAL', tied_quote_ids: tally.tied_quote_ids },
       });
-      return { outcome: 'TIEBREAK_PENDING_MANUAL' };
+      return saved;
     }
 
+    // TIEBREAK_PENDING: manual action required via resolve-tiebreak
     throw new DomainError(
       `cannot finalize decision in status ${d.status}`,
       'DECISION_WRONG_STATUS',

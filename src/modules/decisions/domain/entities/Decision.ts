@@ -10,6 +10,11 @@ export enum DecisionStatus {
 
 export type DecisionResultingType = 'INVOICE' | 'ASSESSMENT';
 
+export interface ProfileRef {
+    id: string;
+    name: string;
+}
+
 export interface DecisionProps {
     id: string;
     building_id: string;
@@ -30,6 +35,9 @@ export interface DecisionProps {
     cancel_reason?: string | null;
     created_at?: Date;
     updated_at?: Date;
+    // Hydrated by repo joins / computed. Not persisted.
+    creator?: ProfileRef | null;
+    quote_count?: number;
 }
 
 export class Decision {
@@ -68,6 +76,7 @@ export class Decision {
     get id(): string { return this.props.id; }
     get building_id(): string { return this.props.building_id; }
     get created_by(): string | null { return this.props.created_by; }
+    get creator(): ProfileRef | null { return this.props.creator ?? null; }
     get title(): string { return this.props.title; }
     get description(): string | null { return this.props.description ?? null; }
     get photo_url(): string | null { return this.props.photo_url ?? null; }
@@ -84,6 +93,23 @@ export class Decision {
     get cancel_reason(): string | null { return this.props.cancel_reason ?? null; }
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
+    get quote_count(): number { return this.props.quote_count ?? 0; }
+
+    /**
+     * Deadline-driven finalize eligibility. True when the current phase's
+     * deadline has passed and a manual finalize call would advance state.
+     * Terminal and manual-pending statuses are never "deadline_passed".
+     */
+    get is_deadline_passed(): boolean {
+        const now = Date.now();
+        if (this.status === DecisionStatus.RECEPTION) {
+            return this.reception_deadline.getTime() <= now;
+        }
+        if (this.status === DecisionStatus.VOTING) {
+            return this.voting_deadline.getTime() <= now;
+        }
+        return false;
+    }
 
     advanceToVoting(): void {
         if (this.status !== DecisionStatus.RECEPTION) {
@@ -186,11 +212,16 @@ export class Decision {
         this.props.resulting_id = id;
     }
 
+    /**
+     * Wire-format DTO. photo_url is the stored path here — the presentation
+     * layer re-signs it with a short TTL before returning to the client.
+     * Per spec §6.4: created_by is expanded as { id, name } | null.
+     */
     toJSON() {
         return {
             id: this.id,
             building_id: this.building_id,
-            created_by: this.created_by,
+            created_by: this.creator,
             title: this.title,
             description: this.description,
             photo_url: this.photo_url,
@@ -207,6 +238,8 @@ export class Decision {
             cancel_reason: this.cancel_reason,
             created_at: this.created_at.toISOString(),
             updated_at: this.updated_at.toISOString(),
+            quote_count: this.quote_count,
+            is_deadline_passed: this.is_deadline_passed,
         };
     }
 }

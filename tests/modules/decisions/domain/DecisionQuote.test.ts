@@ -57,4 +57,17 @@ describe('DecisionQuote Entity', () => {
         expect(() => q.softDelete('', 'valid reason')).toThrow();
         expect(() => q.softDelete('   ', 'valid reason')).toThrow();
     });
+
+    it('toJSON emits uploader + deleted_by as expanded ProfileRef or null (spec §6.4)', () => {
+        const q = new DecisionQuote(base({
+            uploader: { id: 'u1', name: 'María' },
+        }));
+        const j = q.toJSON();
+        expect(j.uploader).toEqual({ id: 'u1', name: 'María' });
+        expect(j.deleted_by).toBeNull();
+
+        q.softDelete('admin', 'spam');
+        (q as any).props.deleter = { id: 'admin', name: 'Admin User' };
+        expect(q.toJSON().deleted_by).toEqual({ id: 'admin', name: 'Admin User' });
+    });
 });

@@ -45,18 +45,28 @@ describe('DecisionAuditLog', () => {
         expect(e.payload).toBeNull();
     });
 
-    it('toJSON returns enumerated fields', () => {
+    it('toJSON returns enumerated fields (actor expanded per spec §6.4)', () => {
         const e = new DecisionAuditLog({
             id: 'a1', decision_id: 'd1', event: AuditEvent.CREATED,
             actor_user_id: 'u1', payload: { foo: 1 },
+            actor: { id: 'u1', name: 'Admin' },
         });
         const j = e.toJSON();
         expect(j).toHaveProperty('id');
         expect(j).toHaveProperty('decision_id');
         expect(j).toHaveProperty('event');
-        expect(j).toHaveProperty('actor_user_id');
+        expect(j).toHaveProperty('actor');
+        expect(j.actor).toEqual({ id: 'u1', name: 'Admin' });
         expect(j).toHaveProperty('payload');
         expect(j).toHaveProperty('created_at');
+    });
+
+    it('toJSON actor is null when profile reference unavailable', () => {
+        const e = new DecisionAuditLog({
+            id: 'a1', decision_id: 'd1', event: AuditEvent.CREATED,
+            actor_user_id: null, payload: null,
+        });
+        expect(e.toJSON().actor).toBeNull();
     });
 
     it('enum has exactly 9 values matching DB CHECK', () => {

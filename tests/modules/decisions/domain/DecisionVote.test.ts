@@ -38,15 +38,21 @@ describe('DecisionVote Entity', () => {
         expect(v.voted_by_user_id).toBeNull();
     });
 
-    it('toJSON returns enumerated fields', () => {
-        const v = new DecisionVote(base());
+    it('toJSON returns enumerated fields (voted_by expanded per spec §6.4)', () => {
+        const v = new DecisionVote(base({ voted_by: { id: 'u1', name: 'Juan' } }));
         const j = v.toJSON();
         expect(j).toHaveProperty('id');
         expect(j).toHaveProperty('decision_id');
         expect(j).toHaveProperty('round');
         expect(j).toHaveProperty('apartment_id');
         expect(j).toHaveProperty('quote_id');
-        expect(j).toHaveProperty('voted_by_user_id');
+        expect(j).toHaveProperty('voted_by');
+        expect(j.voted_by).toEqual({ id: 'u1', name: 'Juan' });
         expect(j).toHaveProperty('created_at');
+    });
+
+    it('toJSON voted_by is null when profile reference unavailable', () => {
+        const v = new DecisionVote(base({ voted_by_user_id: null }));
+        expect(v.toJSON().voted_by).toBeNull();
     });
 });

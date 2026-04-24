@@ -151,7 +151,7 @@ describe('Flow A — happy path (clear winner → INVOICE)', () => {
     await ctx.decisionRepo.update(d!);
 
     const result = await ctx.finalizeDecision.execute({ decision_id: decisionId, actor_user_id: 'system' });
-    expect(result.outcome).toBe('ADVANCED_TO_VOTING');
+    expect(result.status).toBe(DecisionStatus.VOTING);
 
     const updated = await ctx.decisionRepo.findById(decisionId);
     expect(updated!.status).toBe(DecisionStatus.VOTING);
@@ -184,7 +184,8 @@ describe('Flow A — happy path (clear winner → INVOICE)', () => {
     await ctx.decisionRepo.update(d!);
 
     const result = await ctx.finalizeDecision.execute({ decision_id: decisionId, actor_user_id: 'system' });
-    expect(result.outcome).toBe('RESOLVED');
+    expect(result.status).toBe(DecisionStatus.RESOLVED);
+    expect(result.winner_quote_id).toBe(q2Id);
 
     const resolved = await ctx.decisionRepo.findById(decisionId);
     expect(resolved!.status).toBe(DecisionStatus.RESOLVED);
@@ -258,7 +259,7 @@ describe('Flow B — tiebreak (manual resolution → ASSESSMENT)', () => {
     await ctx.decisionRepo.update(d!);
 
     const result = await ctx.finalizeDecision.execute({ decision_id: decisionId, actor_user_id: 'system' });
-    expect(result.outcome).toBe('ADVANCED_TO_VOTING');
+    expect(result.status).toBe(DecisionStatus.VOTING);
   });
 
   it('B3: round 1 is a tie (1 vote each) → opens round 2', async () => {
@@ -270,7 +271,8 @@ describe('Flow B — tiebreak (manual resolution → ASSESSMENT)', () => {
     await ctx.decisionRepo.update(d!);
 
     const result = await ctx.finalizeDecision.execute({ decision_id: decisionId, actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_OPENED');
+    expect(result.status).toBe(DecisionStatus.VOTING);
+    expect(result.current_round).toBe(2);
 
     const updated = await ctx.decisionRepo.findById(decisionId);
     expect(updated!.current_round).toBe(2);
@@ -287,7 +289,7 @@ describe('Flow B — tiebreak (manual resolution → ASSESSMENT)', () => {
     await ctx.decisionRepo.update(d!);
 
     const result = await ctx.finalizeDecision.execute({ decision_id: decisionId, actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_PENDING_MANUAL');
+    expect(result.status).toBe(DecisionStatus.TIEBREAK_PENDING);
 
     const updated = await ctx.decisionRepo.findById(decisionId);
     expect(updated!.status).toBe(DecisionStatus.TIEBREAK_PENDING);

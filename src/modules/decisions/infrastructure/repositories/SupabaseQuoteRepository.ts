@@ -2,11 +2,25 @@ import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { DecisionQuoteRepository } from '@/modules/decisions/domain/repository';
 import { DecisionQuote, DecisionQuoteProps } from '@/modules/decisions/domain/entities/DecisionQuote';
+import type { ProfileRef } from '@/modules/decisions/domain/entities/Decision';
+
+const SELECT_QUERY =
+  '*, uploader:profiles!uploader_user_id(id, name), deleter:profiles!deleted_by(id, name)';
 
 export class SupabaseQuoteRepository implements DecisionQuoteRepository {
   // ------------------------------------------------------------------ mapping
 
   private toDomain(row: Record<string, unknown>): DecisionQuote {
+    const uploaderRow = row.uploader as { id: string; name: string } | null | undefined;
+    const uploader: ProfileRef | null = uploaderRow
+      ? { id: uploaderRow.id, name: uploaderRow.name }
+      : null;
+
+    const deleterRow = row.deleter as { id: string; name: string } | null | undefined;
+    const deleter: ProfileRef | null = deleterRow
+      ? { id: deleterRow.id, name: deleterRow.name }
+      : null;
+
     const props: DecisionQuoteProps = {
       id: row.id as string,
       decision_id: row.decision_id as string,
@@ -21,6 +35,8 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
       deletion_reason: (row.deletion_reason as string | null) ?? undefined,
       created_at: new Date(row.created_at as string),
       updated_at: new Date(row.updated_at as string),
+      uploader,
+      deleter,
     };
     return new DecisionQuote(props);
   }
@@ -48,7 +64,7 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
     const { data, error } = await supabase
       .from('decision_quotes')
       .insert({ ...this.toPersistence(q), created_at: q.created_at?.toISOString() ?? new Date().toISOString() })
-      .select()
+      .select(SELECT_QUERY)
       .single();
 
     if (error) throw new DomainError('Error creating quote: ' + error.message, 'DB_ERROR', 500);
@@ -60,7 +76,7 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
       .from('decision_quotes')
       .update(this.toPersistence(q))
       .eq('id', q.id)
-      .select()
+      .select(SELECT_QUERY)
       .single();
 
     if (error) throw new DomainError('Error updating quote: ' + error.message, 'DB_ERROR', 500);
@@ -72,7 +88,7 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
   async findById(id: string): Promise<DecisionQuote | null> {
     const { data, error } = await supabase
       .from('decision_quotes')
-      .select('*')
+      .select(SELECT_QUERY)
       .eq('id', id)
       .single();
 
@@ -86,7 +102,7 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
   async listForDecision(decisionId: string, includeDeleted = false): Promise<DecisionQuote[]> {
     let query = supabase
       .from('decision_quotes')
-      .select('*')
+      .select(SELECT_QUERY)
       .eq('decision_id', decisionId)
       .order('created_at', { ascending: true });
 
