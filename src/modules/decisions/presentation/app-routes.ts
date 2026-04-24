@@ -53,14 +53,7 @@ const voteRepo = new SupabaseVoteRepository();
 const auditRepo = new SupabaseAuditLogRepository();
 const storageService = new DecisionFileStorageService();
 
-const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo);
-const listDecisions = new ListDecisions(decisionRepo);
-const uploadQuote = new UploadQuote(decisionRepo, quoteRepo);
-const deleteQuote = new DeleteQuote(decisionRepo, quoteRepo, auditRepo);
-const castVote = new CastVote(decisionRepo, quoteRepo, voteRepo);
-const listVotes = new ListVotes(voteRepo);
-
-/** Count active units in a building — injected into GetResults */
+/** Count active units in a building — injected into GetDecision + GetResults */
 const totalApartments = async (buildingId: string): Promise<number> => {
   const { count } = await supabaseAdmin
     .from('units')
@@ -68,6 +61,13 @@ const totalApartments = async (buildingId: string): Promise<number> => {
     .eq('building_id', buildingId);
   return count ?? 0;
 };
+
+const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo, totalApartments);
+const listDecisions = new ListDecisions(decisionRepo);
+const uploadQuote = new UploadQuote(decisionRepo, quoteRepo);
+const deleteQuote = new DeleteQuote(decisionRepo, quoteRepo, auditRepo);
+const castVote = new CastVote(decisionRepo, quoteRepo, voteRepo);
+const listVotes = new ListVotes(voteRepo);
 
 const getResults = new GetResults(decisionRepo, quoteRepo, voteRepo, totalApartments);
 
