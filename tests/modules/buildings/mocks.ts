@@ -28,6 +28,10 @@ export class MockBuildingRepository implements IBuildingRepository {
         return this.buildings.find(b => b.id === id) || null;
     }
 
+    async findByCode(buildingCode: string): Promise<Building | null> {
+        return this.buildings.find(b => b.building_code === buildingCode) || null;
+    }
+
     async update(building: Building): Promise<Building> {
         const index = this.buildings.findIndex(b => b.id === building.id);
         if (index !== -1) {

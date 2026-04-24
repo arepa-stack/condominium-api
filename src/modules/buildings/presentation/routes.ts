@@ -5,13 +5,13 @@ import { SupabaseUserRepository } from '@/modules/users/infrastructure/repositor
 import { CreateBuilding } from '../application/use-cases/CreateBuilding';
 import { GetBuildings } from '../application/use-cases/GetBuildings';
 import { GetBuildingById } from '../application/use-cases/GetBuildingById';
+import { GetBuildingByCode } from '../application/use-cases/GetBuildingByCode';
 import { UpdateBuilding } from '../application/use-cases/UpdateBuilding';
 import { DeleteBuilding } from '../application/use-cases/DeleteBuilding';
 import { CreateUnit } from '../application/use-cases/CreateUnit';
 import { BatchCreateUnits } from '../application/use-cases/BatchCreateUnits';
 import { GetUnitsByBuilding } from '../application/use-cases/GetUnitsByBuilding';
 import { GetUnitById } from '../application/use-cases/GetUnitById';
-import { authMiddleware } from '@/modules/auth/presentation/middleware';
 import { supabase } from '@/infrastructure/supabase';
 import { UnauthorizedError } from '@/core/errors';
 
@@ -24,6 +24,7 @@ const userRepo = new SupabaseUserRepository();
 const createBuilding = new CreateBuilding(buildingRepo, userRepo);
 const getBuildings = new GetBuildings(buildingRepo);
 const getBuildingById = new GetBuildingById(buildingRepo);
+const getBuildingByCode = new GetBuildingByCode(buildingRepo, unitRepo);
 const updateBuilding = new UpdateBuilding(buildingRepo, userRepo);
 const deleteBuilding = new DeleteBuilding(buildingRepo, userRepo);
 const createUnit = new CreateUnit(unitRepo, buildingRepo);
@@ -35,6 +36,8 @@ const BuildingSchema = t.Object({
     id: t.String(),
     name: t.String(),
     address: t.String(),
+    building_code: t.Optional(t.String()),
+    max_residents_per_unit: t.Optional(t.Number()),
     created_at: t.Optional(t.Any()),
     updated_at: t.Optional(t.Any())
 });
@@ -75,6 +78,26 @@ const PaginatedUnitSchema = t.Object({
 
 // Public routes — no auth required (used for registration flow)
 export const buildingPublicRoutes = new Elysia({ prefix: '/buildings' })
+    .get('/by-code/:code', async ({ params }) => {
+        const { building } = await getBuildingByCode.execute(params.code);
+        return building.toJSON();
+    }, {
+        detail: {
+            tags: ['Buildings'],
+            summary: 'Get building by QR code (public)',
+            description: 'Lookup a building using its permanent QR code. Used in the resident self-registration flow.'
+        }
+    })
+    .get('/by-code/:code/units', async ({ params }) => {
+        const { units } = await getBuildingByCode.execute(params.code);
+        return units.map(u => u.toJSON());
+    }, {
+        detail: {
+            tags: ['Buildings'],
+            summary: 'List units for a building by QR code (public)',
+            description: 'Returns the list of units for a building identified by its QR code. Used to populate the registration form.'
+        }
+    })
     .get('/', async () => {
         const buildings = await getBuildings.execute();
         return buildings.map(b => b.toJSON());

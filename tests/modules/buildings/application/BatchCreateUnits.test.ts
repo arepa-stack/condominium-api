@@ -29,6 +29,7 @@ class MockBuildingRepository implements IBuildingRepository {
         }
         return null;
     }
+    async findByCode(_code: string) { return null; }
     async create(b: Building) { return b; }
     async findAll() { return []; }
     async findAllPaginated() { return { items: [], total: 0 }; }

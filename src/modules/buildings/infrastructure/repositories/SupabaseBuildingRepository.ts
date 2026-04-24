@@ -3,6 +3,7 @@ import { IBuildingRepository } from '../../domain/repository';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { PaginationFilters, toRange } from '@/core/domain/pagination';
+import { Config } from '@/core/config';
 
 export class SupabaseBuildingRepository implements IBuildingRepository {
     private toDomain(data: any): Building {
@@ -10,6 +11,8 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             id: data.id,
             name: data.name,
             address: data.address,
+            building_code: data.building_code,
+            max_residents_per_unit: data.max_residents_per_unit ?? Config.DEFAULT_MAX_RESIDENTS_PER_UNIT,
             created_at: new Date(data.created_at),
             updated_at: new Date(data.updated_at),
         };
@@ -21,6 +24,8 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             id: building.id,
             name: building.name,
             address: building.address,
+            building_code: building.building_code,
+            max_residents_per_unit: building.max_residents_per_unit,
             updated_at: building.updated_at,
         };
     }
@@ -75,6 +80,21 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             items: (data || []).map(d => this.toDomain(d)),
             total: count || 0,
         };
+    }
+
+    async findByCode(buildingCode: string): Promise<Building | null> {
+        const { data, error } = await supabase
+            .from('buildings')
+            .select('*')
+            .eq('building_code', buildingCode)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            throw new DomainError('Error fetching building by code', 'DB_ERROR', 500);
+        }
+
+        return this.toDomain(data);
     }
 
     async findById(id: string): Promise<Building | null> {

@@ -7,6 +7,7 @@ import { randomUUID } from 'crypto';
 import { authRoutes } from './modules/auth/presentation/routes';
 import { buildingPublicRoutes } from './modules/buildings/presentation/routes';
 import { leadRoutes } from './modules/leads/presentation/routes';
+import { onboardingPublicRoutes } from './modules/onboarding/presentation/public-routes';
 // v1 grouped routes (APK-facing + Admin-facing)
 import { appRoutes } from './presentation/app-routes';
 import { adminRoutes } from './presentation/admin-routes';
@@ -41,7 +42,10 @@ export const app = new Elysia()
                 { name: 'Admin - Users', description: 'User management — Web Admin (Board + Admin)' },
                 { name: 'App - Decisions', description: 'Decisions/Presupuestos — APK (Residents)' },
                 { name: 'Admin - Decisions', description: 'Decisions/Presupuestos — Web Admin (Board + Admin)' },
-                { name: 'Directory', description: 'Building members and board directory' }
+                { name: 'Directory', description: 'Building members and board directory' },
+                { name: 'Onboarding - Public', description: 'Registration requests and invitation acceptance (public)' },
+                { name: 'Admin - Onboarding', description: 'Approve/reject registration requests (Board + Admin)' },
+                { name: 'App - Onboarding', description: 'Unit invitations (Residents)' }
             ],
             components: {
                 securitySchemes: {
@@ -70,6 +74,7 @@ export const app = new Elysia()
     .use(authRoutes)
     .use(leadRoutes)
     .use(buildingPublicRoutes)
+    .use(onboardingPublicRoutes)
     .derive(({ request }) => {
         return {
             requestId: request.headers.get('x-request-id') || randomUUID()

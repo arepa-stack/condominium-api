@@ -7,6 +7,7 @@ import { UserStatus } from '@/core/domain/enums';
 export interface LoginResponse {
     token: AuthSession;
     user: User;
+    must_change_password: boolean;
 }
 
 export class LoginUser {
@@ -30,7 +31,8 @@ export class LoginUser {
 
         return {
             token: session,
-            user
+            user,
+            must_change_password: user.must_change_password,
         };
     }
 }

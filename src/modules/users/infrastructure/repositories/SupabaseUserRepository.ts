@@ -21,6 +21,7 @@ export class SupabaseUserRepository implements IUserRepository {
             buildingRoles: buildingRoles,
             app_role: data.app_role as AppRole,
             status: data.status as UserStatus || UserStatus.PENDING,
+            must_change_password: data.must_change_password ?? false,
             created_at: new Date(data.created_at),
             updated_at: new Date(data.updated_at),
         };
@@ -35,6 +36,7 @@ export class SupabaseUserRepository implements IUserRepository {
             phone: user.phone,
             app_role: user.app_role,
             status: user.status,
+            must_change_password: user.must_change_password,
             updated_at: user.updated_at
         };
     }
@@ -69,7 +71,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, app_role, status, created_at, updated_at, 
+                id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -89,7 +91,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, app_role, status, created_at, updated_at, 
+                id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -178,7 +180,7 @@ export class SupabaseUserRepository implements IUserRepository {
     async findAll(filters?: FindAllUsersFilters): Promise<User[]> {
         // Base query with joins
         let query = supabase.from('profiles').select(`
-            id, email, name, phone, app_role, status, created_at, updated_at, 
+            id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
             profile_units(*, units(name, building_id, buildings(name))),
             building_members(*, buildings(name))
         `);
