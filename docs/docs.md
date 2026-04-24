@@ -1312,8 +1312,9 @@ Acceso: token de sesión válido vía Supabase Auth. El `userId` y las `unitIds`
 ```
 
 - `winner_quote_id`: `null` mientras la decisión no esté en `RESOLVED`. En `RESOLVED`, refleja el ganador persistido.
-- `tallies`: ordenados por votos desc. El primero es el líder provisional durante VOTING.
+- `tallies`: ordenados por votos desc. El primero es el líder provisional durante VOTING. Siempre presente — `[]` si no hay quotes/votos.
 - `participation_pct`: relativo al total de apartamentos del edificio (`totalApartments` lookup).
+- **Misma shape embebida en `GET /decisions/:id`** bajo el campo `tally`. Front puede renderizar el widget de resultados desde cualquiera de los dos endpoints con la misma lógica.
 
 ### 12.7 Integración con Facturación
 

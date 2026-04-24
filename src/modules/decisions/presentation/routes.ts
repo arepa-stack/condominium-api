@@ -87,7 +87,7 @@ const totalApartments = async (buildingId: string): Promise<number> => {
 };
 
 const createDecision = new CreateDecision(decisionRepo, auditRepo);
-const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo);
+const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo, totalApartments);
 const listDecisions = new ListDecisions(decisionRepo);
 const finalizeDecision = new FinalizeDecision(decisionRepo, quoteRepo, voteRepo, auditRepo);
 const extendDeadlines = new ExtendDeadlines(decisionRepo, auditRepo);
