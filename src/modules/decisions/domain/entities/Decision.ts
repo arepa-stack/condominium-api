@@ -111,11 +111,17 @@ export class Decision {
         return false;
     }
 
-    advanceToVoting(): void {
+    /**
+     * Advances RECEPTION → VOTING. By default the reception deadline must have
+     * passed. Passing `{ force: true }` (admin/board override) bypasses the
+     * deadline check — the caller is responsible for justifying this in the
+     * audit log (e.g. "all residents confirmed quotes submitted").
+     */
+    advanceToVoting(opts: { force?: boolean } = {}): void {
         if (this.status !== DecisionStatus.RECEPTION) {
             throw new DomainError('decision is not in RECEPTION', 'DECISION_WRONG_STATUS', 422);
         }
-        if (this.reception_deadline.getTime() > Date.now()) {
+        if (!opts.force && this.reception_deadline.getTime() > Date.now()) {
             throw new DomainError(
                 'reception_deadline not yet passed',
                 'DECISION_DEADLINE_NOT_YET_PASSED',

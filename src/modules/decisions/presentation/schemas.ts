@@ -150,6 +150,18 @@ export const CancelDecisionBody = t.Object({
   reason: t.String({ minLength: 1 }),
 });
 
+/**
+ * Body for POST /decisions/:id/finalize. All fields optional — empty body is
+ * valid (normal finalize flow). `force: true` requires a non-empty `reason`
+ * and bypasses the reception_deadline check for RECEPTION → VOTING.
+ */
+export const FinalizeDecisionBody = t.Optional(
+  t.Object({
+    force: t.Optional(t.Boolean()),
+    reason: t.Optional(t.String({ minLength: 1 })),
+  }),
+);
+
 export const ResolveTiebreakBody = t.Object({
   winner_quote_id: t.String(),
 });

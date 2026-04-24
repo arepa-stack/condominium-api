@@ -161,4 +161,88 @@ describe('FinalizeDecision', () => {
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
     expect(result.status).toBe(DecisionStatus.CANCELLED);
   });
+
+  // --- force advance (RECEPTION → VOTING override) -------------------------
+
+  const makeDecisionReceptionFuture = () =>
+    new Decision({ id: 'd1', building_id: 'b1', created_by: 'u1', title: 'Reparación portón', reception_deadline: future(60_000), voting_deadline: future(120_000) });
+
+  it('force:true with reason advances before reception_deadline', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const audit = new InMemoryAuditRepo();
+    await decRepo.create(makeDecisionReceptionFuture());
+    await quoteRepo.create(makeQuote('q1'));
+    const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), audit);
+    const result = await uc.execute({
+      decision_id: 'd1',
+      actor_user_id: 'admin-1',
+      force: true,
+      reason: 'All expected quotes submitted',
+    });
+    expect(result.status).toBe(DecisionStatus.VOTING);
+    const logs = await audit.listForDecision('d1');
+    expect(logs[0].event).toBe(AuditEvent.PHASE_ADVANCED);
+    const payload = logs[0].payload as Record<string, unknown>;
+    expect(payload.forced).toBe(true);
+    expect(payload.reason).toBe('All expected quotes submitted');
+    expect(payload.previous_reception_deadline).toEqual(expect.any(String));
+  });
+
+  it('force:true without reason → 400 VALIDATION_ERROR', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    await decRepo.create(makeDecisionReceptionFuture());
+    await quoteRepo.create(makeQuote('q1'));
+    const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), new InMemoryAuditRepo());
+    await expect(
+      uc.execute({ decision_id: 'd1', actor_user_id: 'admin-1', force: true }),
+    ).rejects.toThrow();
+    await expect(
+      uc.execute({ decision_id: 'd1', actor_user_id: 'admin-1', force: true, reason: '   ' }),
+    ).rejects.toThrow();
+  });
+
+  it('force:true still requires at least one active quote', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    await decRepo.create(makeDecisionReceptionFuture());
+    const uc = new FinalizeDecision(decRepo, new InMemoryQuoteRepo(), new InMemoryVoteRepo(), new InMemoryAuditRepo());
+    await expect(
+      uc.execute({ decision_id: 'd1', actor_user_id: 'admin-1', force: true, reason: 'go now' }),
+    ).rejects.toThrow(); // DECISION_NO_ACTIVE_QUOTES
+  });
+
+  it('force is ignored without effect when deadline already passed (normal audit payload)', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const audit = new InMemoryAuditRepo();
+    await decRepo.create(makeDecisionReceptionExpired()); // already past
+    await quoteRepo.create(makeQuote('q1'));
+    const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), audit);
+    // no force — advances normally; audit payload stays clean
+    const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'admin-1' });
+    expect(result.status).toBe(DecisionStatus.VOTING);
+    const payload = (await audit.listForDecision('d1'))[0].payload as Record<string, unknown>;
+    expect(payload.forced).toBeUndefined();
+    expect(payload.reason).toBeUndefined();
+  });
+
+  it('force has no effect on VOTING → finalize path (no deadline check there)', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const quoteRepo = new InMemoryQuoteRepo();
+    const voteRepo = new InMemoryVoteRepo();
+    const audit = new InMemoryAuditRepo();
+    await decRepo.create(makeVotingDecision());
+    await quoteRepo.create(makeQuote('q1'));
+    await voteRepo.create(makeVote('v1', 'apt1', 'q1'));
+    const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
+    // force:true should not require reason on VOTING path; reaches RESOLVED normally
+    const result = await uc.execute({
+      decision_id: 'd1',
+      actor_user_id: 'admin-1',
+      force: true,
+      reason: 'irrelevant here',
+    });
+    expect(result.status).toBe(DecisionStatus.RESOLVED);
+  });
 });

@@ -51,6 +51,23 @@ describe('Decision Entity', () => {
         expect(() => d.advanceToVoting()).toThrow();
     });
 
+    it('advanceToVoting({ force: true }) bypasses reception_deadline check', () => {
+        const d = new Decision(baseProps()); // deadline in future
+        expect(() => d.advanceToVoting({ force: true })).not.toThrow();
+        expect(d.status).toBe(DecisionStatus.VOTING);
+    });
+
+    it('advanceToVoting({ force: true }) still refuses non-RECEPTION status', () => {
+        const past = new Date(Date.now() - 1000);
+        const d = new Decision(baseProps({
+            reception_deadline: past,
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        d.resolve('q1');
+        expect(() => d.advanceToVoting({ force: true })).toThrow();
+    });
+
     it('resolve(quoteId) only allowed in VOTING or TIEBREAK_PENDING', () => {
         const past = new Date(Date.now() - 1000);
         const d = new Decision(baseProps({
