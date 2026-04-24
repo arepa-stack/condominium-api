@@ -1,6 +1,10 @@
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
-import { DecisionAuditLogRepository } from '@/modules/decisions/domain/repository';
+import {
+  DecisionAuditLogRepository,
+  PaginatedResult,
+  PaginationOptions,
+} from '@/modules/decisions/domain/repository';
 import {
   DecisionAuditLog,
   AuditEvent,
@@ -62,5 +66,26 @@ export class SupabaseAuditLogRepository implements DecisionAuditLogRepository {
 
     if (error) throw new DomainError('Error listing audit log: ' + error.message, 'DB_ERROR', 500);
     return (data ?? []).map((r) => this.toDomain(r));
+  }
+
+  async listForDecisionPaginated(
+    decisionId: string,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionAuditLog>> {
+    const from = (pagination.page - 1) * pagination.limit;
+    const to = from + pagination.limit - 1;
+
+    const { data, count, error } = await supabase
+      .from('decision_audit_log')
+      .select(SELECT_QUERY, { count: 'exact' })
+      .eq('decision_id', decisionId)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) throw new DomainError('Error listing audit log: ' + error.message, 'DB_ERROR', 500);
+    return {
+      items: (data ?? []).map((r) => this.toDomain(r)),
+      total: count ?? 0,
+    };
   }
 }

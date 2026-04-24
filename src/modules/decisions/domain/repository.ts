@@ -37,11 +37,21 @@ export interface DecisionQuoteRepository {
   update(q: DecisionQuote): Promise<DecisionQuote>;
   findById(id: string): Promise<DecisionQuote | null>;
   listForDecision(decisionId: string, includeDeleted?: boolean): Promise<DecisionQuote[]>;
+  listForDecisionPaginated(
+    decisionId: string,
+    includeDeleted: boolean,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionQuote>>;
 }
 
 export interface DecisionVoteRepository {
   create(v: DecisionVote): Promise<DecisionVote>;
   listForDecision(decisionId: string, round?: number): Promise<DecisionVote[]>;
+  listForDecisionPaginated(
+    decisionId: string,
+    round: number | undefined,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionVote>>;
   findByDecisionApartmentRound(
     decisionId: string,
     apartmentId: string,
@@ -58,4 +68,8 @@ export interface DecisionAuditLogRepository {
     payload?: Record<string, unknown> | null;
   }): Promise<DecisionAuditLog>;
   listForDecision(decisionId: string): Promise<DecisionAuditLog[]>;
+  listForDecisionPaginated(
+    decisionId: string,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionAuditLog>>;
 }

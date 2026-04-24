@@ -68,6 +68,7 @@ export const VoteSchema = t.Object({
   decision_id: t.String(),
   round: t.Number(),
   apartment_id: t.String(),
+  apartment_label: NullableString,
   quote_id: t.String(),
   voted_by: NullableProfileRef,
   created_at: t.String(),
@@ -117,16 +118,42 @@ export const TallyResponseSchema = t.Object({
 
 // ------------------------------------------------------------------ Pagination
 
-export const PaginationMetadataSchema = t.Object({
+/**
+ * Full pagination metadata emitted by every paginated list endpoint in
+ * this module. Matches the contract produced by core `buildPaginatedResult`.
+ */
+export const PaginationMetadataFullSchema = t.Object({
   total: t.Number(),
   page: t.Number(),
   limit: t.Number(),
   total_pages: t.Number(),
+  has_next_page: t.Boolean(),
+  has_prev_page: t.Boolean(),
 });
 
 export const PaginatedDecisionSchema = t.Object({
-  items: t.Array(DecisionSchema),
-  metadata: PaginationMetadataSchema,
+  data: t.Array(DecisionSchema),
+  metadata: PaginationMetadataFullSchema,
+});
+
+export const PaginatedQuoteSchema = t.Object({
+  data: t.Array(QuoteSchema),
+  metadata: PaginationMetadataFullSchema,
+});
+
+export const PaginatedVoteSchema = t.Object({
+  data: t.Array(VoteSchema),
+  metadata: PaginationMetadataFullSchema,
+});
+
+export const PaginatedAuditEntrySchema = t.Object({
+  data: t.Array(AuditEntrySchema),
+  metadata: PaginationMetadataFullSchema,
+});
+
+export const PaginationQuerySchema = t.Object({
+  page: t.Optional(t.String()),
+  limit: t.Optional(t.String()),
 });
 
 // ------------------------------------------------------------------ Request bodies

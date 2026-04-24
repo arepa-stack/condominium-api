@@ -9,6 +9,7 @@ import {
   DecisionAuditLogRepository,
   DecisionListFilters,
   PaginatedResult,
+  PaginationOptions,
 } from '@/modules/decisions/domain/repository';
 import { randomUUID } from 'crypto';
 
@@ -72,6 +73,17 @@ export class InMemoryQuoteRepo implements DecisionQuoteRepository {
       (q) => q.decision_id === did && (includeDeleted || !q.isDeleted),
     );
   }
+
+  async listForDecisionPaginated(
+    did: string,
+    includeDeleted: boolean,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionQuote>> {
+    const all = await this.listForDecision(did, includeDeleted);
+    const total = all.length;
+    const start = (pagination.page - 1) * pagination.limit;
+    return { items: all.slice(start, start + pagination.limit), total };
+  }
 }
 
 export class InMemoryVoteRepo implements DecisionVoteRepository {
@@ -95,6 +107,17 @@ export class InMemoryVoteRepo implements DecisionVoteRepository {
     return [...this.store.values()].filter(
       (v) => v.decision_id === did && (round === undefined || v.round === round),
     );
+  }
+
+  async listForDecisionPaginated(
+    did: string,
+    round: number | undefined,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionVote>> {
+    const all = await this.listForDecision(did, round);
+    const total = all.length;
+    const start = (pagination.page - 1) * pagination.limit;
+    return { items: all.slice(start, start + pagination.limit), total };
   }
 
   async findByDecisionApartmentRound(did: string, apt: string, r: number) {
@@ -136,5 +159,15 @@ export class InMemoryAuditRepo implements DecisionAuditLogRepository {
 
   async listForDecision(did: string) {
     return this.store.filter((e) => e.decision_id === did);
+  }
+
+  async listForDecisionPaginated(
+    did: string,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionAuditLog>> {
+    const all = await this.listForDecision(did);
+    const total = all.length;
+    const start = (pagination.page - 1) * pagination.limit;
+    return { items: all.slice(start, start + pagination.limit), total };
   }
 }

@@ -35,6 +35,7 @@ import {
   VoteSchema,
   TallyResponseSchema,
   PaginatedDecisionSchema,
+  PaginatedVoteSchema,
   CastVoteBody,
 } from './schemas';
 
@@ -134,7 +135,17 @@ export function createDecisionAppRoutes(tag: string) {
       const limit = query.limit ? parseInt(query.limit) : 20;
 
       if (!resident.buildingIds.length) {
-        return { items: [], metadata: { total: 0, page, limit, total_pages: 0 } };
+        return {
+          data: [],
+          metadata: {
+            total: 0,
+            page,
+            limit,
+            total_pages: 0,
+            has_next_page: false,
+            has_prev_page: page > 1,
+          },
+        };
       }
 
       // Scope to the first building (residents typically belong to one building)
@@ -148,16 +159,8 @@ export function createDecisionAppRoutes(tag: string) {
         limit,
       });
 
-      const items = await serializeDecisions(result.data, storageService);
-      return {
-        items,
-        metadata: {
-          total: result.metadata.total,
-          page: result.metadata.page,
-          limit: result.metadata.limit,
-          total_pages: result.metadata.total_pages,
-        },
-      };
+      const data = await serializeDecisions(result.data, storageService);
+      return { data, metadata: result.metadata };
     }, {
       query: t.Object({
         building_id: t.Optional(t.String()),
@@ -283,11 +286,23 @@ export function createDecisionAppRoutes(tag: string) {
     // ── GET /decisions/:id/votes ─────────────────────────────────────────────
     .get('/decisions/:id/votes', async ({ params, query }) => {
       const round = query.round ? parseInt(query.round) : undefined;
-      const votes = await listVotes.execute(params.id, round);
-      return votes.map((v: any) => v.toJSON());
+      const result = await listVotes.executePaginated({
+        decision_id: params.id,
+        round,
+        page: query.page,
+        limit: query.limit,
+      });
+      return {
+        data: result.data.map((v) => v.toJSON()),
+        metadata: result.metadata,
+      };
     }, {
-      query: t.Object({ round: t.Optional(t.String()) }),
-      response: t.Array(VoteSchema),
+      query: t.Object({
+        round: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+      response: PaginatedVoteSchema,
       detail: { tags: [tag], summary: 'List votes', security: [{ BearerAuth: [] }] },
     })
 
