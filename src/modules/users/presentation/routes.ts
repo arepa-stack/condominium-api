@@ -5,7 +5,6 @@ import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/r
 import { GetUserById } from '../application/use-cases/GetUserById';
 import { GetUsers } from '../application/use-cases/GetUsers';
 import { CreateUser } from '../application/use-cases/CreateUser';
-import { CreateBoardMember } from '../application/use-cases/CreateBoardMember';
 import { UpdateUser } from '../application/use-cases/UpdateUser';
 import { ApproveUser } from '../application/use-cases/ApproveUser';
 import { DeleteUser } from '../application/use-cases/DeleteUser';
@@ -23,8 +22,7 @@ const getUsers = new GetUsers(userRepo);
 const updateUser = new UpdateUser(userRepo);
 const approveUser = new ApproveUser(userRepo);
 const deleteUser = new DeleteUser(userRepo);
-const createUser = new CreateUser(userRepo, authRepo);
-const createBoardMember = new CreateBoardMember(userRepo, authRepo, buildingRepo, emailService);
+const createUser = new CreateUser(userRepo, authRepo, buildingRepo, emailService);
 
 // New Phase 2 Use Cases
 import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
@@ -342,18 +340,14 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
         if (error || !user) throw new UnauthorizedError('Invalid or expired token');
         return { user };
     })
-    .post('/', async ({ body, user }) => {
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('app_role')
-            .eq('id', user.id)
-            .single();
-        return await createBoardMember.execute({
-            callerAppRole: (profile as any)?.app_role ?? 'user',
-            name: body.name,
+    .post('/', async ({ body }) => {
+        return await createUser.execute({
             email: body.email,
+            name: body.name,
             phone: body.phone,
-            buildingId: body.buildingId,
+            role: 'board' as any,
+            building_id: body.buildingId,
+            board_position: body.board_position,
         });
     }, {
         body: t.Object({
@@ -361,6 +355,7 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
             email: t.String({ format: 'email', examples: ['maria@edificio.com'] }),
             phone: t.Optional(t.String({ examples: ['+58 412 5551234'] })),
             buildingId: t.String({ format: 'uuid', examples: ['d047cca7-d97f-480f-b747-042b88c26228'] }),
+            board_position: t.Optional(t.String({ examples: ['Presidente', 'Tesorero'] })),
         }),
         response: UserResponse,
         detail: {
