@@ -340,6 +340,13 @@ interface TallyDTO {
   }>;
   winner_quote_id: string | null;
   is_tied: boolean;
+  // Señal derivada — solo significativa mientras status === 'VOTING'.
+  // UI la usa para habilitar "Finalizar ahora" antes de voting_deadline.
+  // No autoritativa: FinalizeDecision re-computa el tally bajo lock.
+  is_early_finalizable: boolean;
+  early_finalize_reason: 'ALL_VOTED' | 'MATHEMATICALLY_DECIDED' | null;
+  // ALL_VOTED: total_votes >= total_apartments
+  // MATHEMATICALLY_DECIDED: leader_votes - second_best_votes > remaining_voters
 }
 
 interface AuditEntryDTO {
