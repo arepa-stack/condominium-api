@@ -1403,9 +1403,32 @@ Los DTOs siguen spec §6.4 con los siguientes puntos concretos:
 
 ### 12.12 `POST /decisions/:id/finalize` — Contrato
 
+- **Body**: opcional. Vacío corre el flujo normal. Para override admin/board:
+  ```json
+  { "force": true, "reason": "Todos los quotes confirmados, no hay razón para esperar" }
+  ```
 - **Response**: `DecisionDTO` (200). No se devuelve un `outcome` string — el cliente infiere la transición del `status` resultante.
 - **Idempotencia** (spec §7.6): si la decisión ya está en estado terminal (`RESOLVED` o `CANCELLED`), devuelve el estado actual con 200 sin mutar ni escribir en audit log. Esto evita errores confusos ante double-clicks o retries post-timeout.
 - **`TIEBREAK_PENDING`** no es idempotente: sigue devolviendo `422 DECISION_WRONG_STATUS` porque requiere resolución manual vía `POST /decisions/:id/resolve-tiebreak`.
+
+**Force advance — override del `reception_deadline`** (admin/board)
+
+Por default el flujo `RECEPTION → VOTING` requiere que `reception_deadline` haya pasado (`422 DECISION_DEADLINE_NOT_YET_PASSED`). Cuando el admin sabe que ya están todos los quotes y esperar no agrega valor:
+
+- `POST /decisions/:id/finalize` con body `{ "force": true, "reason": "<texto>" }`.
+- `reason` es **obligatorio** cuando `force: true` (400 `VALIDATION_ERROR` si falta o es vacío). Misma rigurosidad que `cancel` / `extend-deadlines`.
+- Sigue aplicando la regla §7.6 de mínimo un quote activo. Sin quotes → `422 DECISION_NO_ACTIVE_QUOTES`.
+- Audit log (`AuditEvent.PHASE_ADVANCED`) queda con payload:
+  ```json
+  {
+    "from": "RECEPTION",
+    "to": "VOTING",
+    "forced": true,
+    "reason": "<texto>",
+    "previous_reception_deadline": "2026-05-12T15:00:00.000Z"
+  }
+  ```
+- Solo tiene efecto en la transición `RECEPTION → VOTING`. En `VOTING → finalize` no existe deadline check — los flags `force`/`reason` son ignorados sin error.
 
 ### 12.13 Firma de URLs — `photo_url` + `file_url`
 

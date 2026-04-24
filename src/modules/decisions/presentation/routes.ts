@@ -51,6 +51,7 @@ import {
   GenerateChargeBody,
   CastVoteBody,
   DeleteQuoteBody,
+  FinalizeDecisionBody,
 } from './schemas';
 
 // ── Serializers ──────────────────────────────────────────────────────────────
@@ -236,12 +237,24 @@ export function createDecisionRoutes(tag: string) {
     })
 
     // ── POST /decisions/:id/finalize ──────────────────────────────────────────
-    .post('/decisions/:id/finalize', async ({ profile, params }) => {
-      const d = await finalizeDecision.execute({ decision_id: params.id, actor_user_id: profile.id });
+    .post('/decisions/:id/finalize', async ({ profile, params, body }) => {
+      const d = await finalizeDecision.execute({
+        decision_id: params.id,
+        actor_user_id: profile.id,
+        force: body?.force,
+        reason: body?.reason,
+      });
       return serializeDecision(d, storageService);
     }, {
+      body: FinalizeDecisionBody,
       response: DecisionSchema,
-      detail: { tags: [tag], summary: 'Advance or resolve a decision', security: [{ BearerAuth: [] }] },
+      detail: {
+        tags: [tag],
+        summary: 'Advance or resolve a decision',
+        description:
+          'Empty body runs the normal flow. Pass `{ force: true, reason: "..." }` to bypass the reception_deadline check for RECEPTION → VOTING (admin/board override — reason is captured in the audit log).',
+        security: [{ BearerAuth: [] }],
+      },
     })
 
     // ── POST /decisions/:id/resolve-tiebreak ──────────────────────────────────
