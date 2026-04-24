@@ -4,7 +4,10 @@ import {
   DecisionQuoteRepository,
   DecisionVoteRepository,
 } from '@/modules/decisions/domain/repository';
-import { computeTally } from '@/modules/decisions/domain/services/TallyService';
+import {
+  computeTally,
+  computeEarlyFinalizeSignal,
+} from '@/modules/decisions/domain/services/TallyService';
 import type { ResultsDTO, TallyEntry, TotalApartmentsLookup } from './GetResults';
 
 /**
@@ -52,6 +55,8 @@ export class GetDecision {
       })
       .sort((a, b) => b.votes - a.votes);
 
+    const earlySignal = computeEarlyFinalizeSignal(raw, totalApt, decision.status);
+
     const tally: ResultsDTO = {
       round,
       status: decision.status,
@@ -61,6 +66,8 @@ export class GetDecision {
       tallies,
       winner_quote_id: decision.status === 'RESOLVED' ? decision.winner_quote_id : null,
       is_tied: raw.is_tied,
+      is_early_finalizable: earlySignal.is_early_finalizable,
+      early_finalize_reason: earlySignal.early_finalize_reason,
     };
 
     const my_vote =
