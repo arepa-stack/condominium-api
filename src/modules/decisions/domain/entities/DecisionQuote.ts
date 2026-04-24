@@ -1,4 +1,5 @@
 import { DomainError } from '@/core/errors';
+import type { ProfileRef } from './Decision';
 
 export interface DecisionQuoteProps {
     id: string;
@@ -14,6 +15,9 @@ export interface DecisionQuoteProps {
     deletion_reason?: string | null;
     created_at?: Date;
     updated_at?: Date;
+    // Hydrated by repo joins. Not persisted.
+    uploader?: ProfileRef | null;
+    deleter?: ProfileRef | null;
 }
 
 export class DecisionQuote {
@@ -33,12 +37,14 @@ export class DecisionQuote {
     get decision_id() { return this.props.decision_id; }
     get uploader_user_id() { return this.props.uploader_user_id; }
     get uploader_unit_id() { return this.props.uploader_unit_id ?? null; }
+    get uploader(): ProfileRef | null { return this.props.uploader ?? null; }
     get provider_name() { return this.props.provider_name; }
     get amount() { return this.props.amount; }
     get notes() { return this.props.notes ?? null; }
     get file_url() { return this.props.file_url; }
     get deleted_at() { return this.props.deleted_at ?? null; }
     get deleted_by() { return this.props.deleted_by ?? null; }
+    get deleter(): ProfileRef | null { return this.props.deleter ?? null; }
     get deletion_reason() { return this.props.deletion_reason ?? null; }
     get created_at() { return this.props.created_at!; }
     get updated_at() { return this.props.updated_at!; }
@@ -53,18 +59,22 @@ export class DecisionQuote {
         this.props.deletion_reason = reason;
     }
 
+    /**
+     * Wire-format DTO. file_url is the stored path — presentation layer re-signs
+     * it. Per spec §6.4: uploader and deleted_by are expanded as { id, name } | null.
+     */
     toJSON() {
         return {
             id: this.id,
             decision_id: this.decision_id,
-            uploader_user_id: this.uploader_user_id,
+            uploader: this.uploader,
             uploader_unit_id: this.uploader_unit_id,
             provider_name: this.provider_name,
             amount: this.amount,
             notes: this.notes,
             file_url: this.file_url,
             deleted_at: this.deleted_at?.toISOString() ?? null,
-            deleted_by: this.deleted_by,
+            deleted_by: this.deleter,
             deletion_reason: this.deletion_reason,
             created_at: this.created_at.toISOString(),
             updated_at: this.updated_at.toISOString(),

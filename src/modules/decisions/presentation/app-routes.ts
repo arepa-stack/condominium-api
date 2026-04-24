@@ -38,6 +38,14 @@ import {
   CastVoteBody,
 } from './schemas';
 
+// ── Serializers ──────────────────────────────────────────────────────────────
+import {
+  serializeDecision,
+  serializeDecisions,
+  serializeQuote,
+  serializeQuotes,
+} from './serializers';
+
 // ── DI ───────────────────────────────────────────────────────────────────────
 const decisionRepo = new SupabaseDecisionRepository();
 const quoteRepo = new SupabaseQuoteRepository();
@@ -120,8 +128,9 @@ export function createDecisionAppRoutes(tag: string) {
         limit,
       });
 
+      const items = await serializeDecisions(result.data, storageService);
       return {
-        items: result.data.map((d: any) => d.toJSON()),
+        items,
         metadata: {
           total: result.metadata.total,
           page: result.metadata.page,
@@ -145,7 +154,16 @@ export function createDecisionAppRoutes(tag: string) {
     .get('/decisions/:id', async ({ resident, params }) => {
       const result = await getDecision.execute(params.id, { caller_user_id: resident.userId });
       if (!result) throw new DomainError('decision not found', 'DECISION_NOT_FOUND', 404);
-      return result;
+      const [decision, quotes] = await Promise.all([
+        serializeDecision(result.decision, storageService),
+        serializeQuotes(result.quotes, storageService),
+      ]);
+      return {
+        decision,
+        quotes,
+        tally: result.tally,
+        my_vote: result.my_vote?.toJSON() ?? null,
+      };
     }, {
       response: t.Any(),
       detail: { tags: [tag], summary: 'Get decision detail', security: [{ BearerAuth: [] }] },
@@ -177,7 +195,7 @@ export function createDecisionAppRoutes(tag: string) {
         notes: typeof body.notes === 'string' ? body.notes : undefined,
         file_url: file_path,
       });
-      return q.toJSON();
+      return serializeQuote(q, storageService);
     }, {
       body: t.Object({
         file: t.File(),
@@ -207,7 +225,7 @@ export function createDecisionAppRoutes(tag: string) {
         actor_role: 'resident',
         reason: 'Deleted by uploader',
       });
-      return q.toJSON();
+      return serializeQuote(q, storageService);
     }, {
       response: QuoteSchema,
       detail: {

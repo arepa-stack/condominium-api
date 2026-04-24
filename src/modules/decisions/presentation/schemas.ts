@@ -4,12 +4,19 @@ import { t } from 'elysia';
 
 const NullableString = t.Union([t.String(), t.Null()]);
 
+const ProfileRefSchema = t.Object({
+  id: t.String(),
+  name: t.String(),
+});
+
+const NullableProfileRef = t.Union([ProfileRefSchema, t.Null()]);
+
 // ------------------------------------------------------------------ Decision
 
 export const DecisionSchema = t.Object({
   id: t.String(),
   building_id: t.String(),
-  created_by: NullableString,
+  created_by: NullableProfileRef,
   title: t.String(),
   description: NullableString,
   photo_url: NullableString,
@@ -32,6 +39,8 @@ export const DecisionSchema = t.Object({
   cancel_reason: NullableString,
   created_at: t.String(),
   updated_at: t.String(),
+  quote_count: t.Number(),
+  is_deadline_passed: t.Boolean(),
 });
 
 // ------------------------------------------------------------------ Quote
@@ -39,14 +48,14 @@ export const DecisionSchema = t.Object({
 export const QuoteSchema = t.Object({
   id: t.String(),
   decision_id: t.String(),
-  uploader_user_id: NullableString,
+  uploader: NullableProfileRef,
   uploader_unit_id: NullableString,
   provider_name: t.String(),
   amount: t.Number(),
   notes: NullableString,
   file_url: t.String(),
   deleted_at: NullableString,
-  deleted_by: NullableString,
+  deleted_by: NullableProfileRef,
   deletion_reason: NullableString,
   created_at: t.String(),
   updated_at: t.String(),
@@ -60,7 +69,7 @@ export const VoteSchema = t.Object({
   round: t.Number(),
   apartment_id: t.String(),
   quote_id: t.String(),
-  voted_by_user_id: NullableString,
+  voted_by: NullableProfileRef,
   created_at: t.String(),
 });
 
@@ -80,7 +89,7 @@ export const AuditEntrySchema = t.Object({
     t.Literal('CHARGE_GENERATED'),
     t.Literal('PHASE_ADVANCED'),
   ]),
-  actor_user_id: NullableString,
+  actor: NullableProfileRef,
   payload: t.Optional(t.Union([t.Any(), t.Null()])),
   created_at: t.String(),
 });

@@ -1,4 +1,5 @@
 import { DomainError } from '@/core/errors';
+import type { ProfileRef } from './Decision';
 
 export interface DecisionVoteProps {
     id: string;
@@ -8,6 +9,8 @@ export interface DecisionVoteProps {
     quote_id: string;
     voted_by_user_id: string | null;
     created_at?: Date;
+    // Hydrated by repo joins. Not persisted.
+    voted_by?: ProfileRef | null;
 }
 
 export class DecisionVote {
@@ -25,8 +28,10 @@ export class DecisionVote {
     get apartment_id() { return this.props.apartment_id; }
     get quote_id() { return this.props.quote_id; }
     get voted_by_user_id() { return this.props.voted_by_user_id; }
+    get voted_by(): ProfileRef | null { return this.props.voted_by ?? null; }
     get created_at() { return this.props.created_at!; }
 
+    /** Wire-format DTO. Per spec §6.4: voted_by is { id, name } | null. */
     toJSON() {
         return {
             id: this.id,
@@ -34,7 +39,7 @@ export class DecisionVote {
             round: this.round,
             apartment_id: this.apartment_id,
             quote_id: this.quote_id,
-            voted_by_user_id: this.voted_by_user_id,
+            voted_by: this.voted_by,
             created_at: this.created_at.toISOString(),
         };
     }

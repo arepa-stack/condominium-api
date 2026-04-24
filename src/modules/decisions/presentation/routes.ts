@@ -53,6 +53,14 @@ import {
   DeleteQuoteBody,
 } from './schemas';
 
+// ── Serializers ──────────────────────────────────────────────────────────────
+import {
+  serializeDecision,
+  serializeDecisions,
+  serializeQuote,
+  serializeQuotes,
+} from './serializers';
+
 // ── DI ───────────────────────────────────────────────────────────────────────
 const decisionRepo = new SupabaseDecisionRepository();
 const quoteRepo = new SupabaseQuoteRepository();
@@ -110,7 +118,7 @@ export function createDecisionRoutes(tag: string) {
         voting_deadline: new Date(body.voting_deadline),
         tiebreak_duration_hours: body.tiebreak_duration_hours,
       });
-      return d.toJSON();
+      return serializeDecision(d, storageService);
     }, {
       body: CreateDecisionBody,
       response: DecisionSchema,
@@ -129,12 +137,12 @@ export function createDecisionRoutes(tag: string) {
         bytes,
         mime: file.type,
       });
-      const signedUrl = await storageService.getSignedUrl(file_path);
 
-      // Store the file_path so it can be re-signed on each request
+      // Persist the storage path; it gets signed on each read per spec §7.8.
       (d as any).props = { ...(d as any).props, photo_url: file_path };
       await decisionRepo.update(d);
 
+      const signedUrl = await storageService.getSignedUrl(file_path);
       return { photo_url: signedUrl };
     }, {
       body: t.Object({ photo: t.File() }),
@@ -156,8 +164,9 @@ export function createDecisionRoutes(tag: string) {
         page: query.page ? parseInt(query.page) : undefined,
         limit: query.limit,
       });
+      const items = await serializeDecisions(result.data, storageService);
       return {
-        items: result.data.map((d: any) => d.toJSON()),
+        items,
         metadata: {
           total: result.metadata.total,
           page: result.metadata.page,
@@ -181,7 +190,16 @@ export function createDecisionRoutes(tag: string) {
     .get('/decisions/:id', async ({ profile, params }) => {
       const result = await getDecision.execute(params.id, { caller_user_id: profile.id });
       if (!result) throw new DomainError('decision not found', 'DECISION_NOT_FOUND', 404);
-      return result;
+      const [decision, quotes] = await Promise.all([
+        serializeDecision(result.decision, storageService),
+        serializeQuotes(result.quotes, storageService),
+      ]);
+      return {
+        decision,
+        quotes,
+        tally: result.tally,
+        my_vote: result.my_vote?.toJSON() ?? null,
+      };
     }, {
       response: t.Any(),
       detail: { tags: [tag], summary: 'Get decision detail', security: [{ BearerAuth: [] }] },
@@ -196,7 +214,7 @@ export function createDecisionRoutes(tag: string) {
         reason: body.reason,
         actor_user_id: profile.id,
       });
-      return d.toJSON();
+      return serializeDecision(d, storageService);
     }, {
       body: ExtendDeadlinesBody,
       response: DecisionSchema,
@@ -210,7 +228,7 @@ export function createDecisionRoutes(tag: string) {
         reason: body.reason,
         actor_user_id: profile.id,
       });
-      return d.toJSON();
+      return serializeDecision(d, storageService);
     }, {
       body: CancelDecisionBody,
       response: DecisionSchema,
@@ -219,9 +237,10 @@ export function createDecisionRoutes(tag: string) {
 
     // ── POST /decisions/:id/finalize ──────────────────────────────────────────
     .post('/decisions/:id/finalize', async ({ profile, params }) => {
-      return finalizeDecision.execute({ decision_id: params.id, actor_user_id: profile.id });
+      const d = await finalizeDecision.execute({ decision_id: params.id, actor_user_id: profile.id });
+      return serializeDecision(d, storageService);
     }, {
-      response: t.Any(),
+      response: DecisionSchema,
       detail: { tags: [tag], summary: 'Advance or resolve a decision', security: [{ BearerAuth: [] }] },
     })
 
@@ -232,7 +251,7 @@ export function createDecisionRoutes(tag: string) {
         winner_quote_id: body.winner_quote_id,
         actor_user_id: profile.id,
       });
-      return d.toJSON();
+      return serializeDecision(d, storageService);
     }, {
       body: ResolveTiebreakBody,
       response: DecisionSchema,
@@ -275,7 +294,7 @@ export function createDecisionRoutes(tag: string) {
         notes: typeof body.notes === 'string' ? body.notes : undefined,
         file_url: file_path,
       });
-      return q.toJSON();
+      return serializeQuote(q, storageService);
     }, {
       body: t.Object({
         file: t.File(),
@@ -292,7 +311,7 @@ export function createDecisionRoutes(tag: string) {
     .get('/decisions/:id/quotes', async ({ params, query }) => {
       const includeDeleted = query.include_deleted === 'true';
       const quotes = await listQuotes.execute(params.id, includeDeleted);
-      return quotes.map((q: any) => q.toJSON());
+      return serializeQuotes(quotes, storageService);
     }, {
       query: t.Object({ include_deleted: t.Optional(t.String()) }),
       response: t.Array(QuoteSchema),
@@ -308,7 +327,7 @@ export function createDecisionRoutes(tag: string) {
         actor_role: profile.app_role === 'admin' ? 'admin' : 'board',
         reason: body?.reason,
       });
-      return q.toJSON();
+      return serializeQuote(q, storageService);
     }, {
       body: t.Optional(DeleteQuoteBody),
       response: QuoteSchema,

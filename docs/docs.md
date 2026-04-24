@@ -1379,3 +1379,39 @@ Resumen de políticas:
 | `INVOICE` | Recibo individual a una unidad |
 | `ASSESSMENT` | Prorrateo a todas las unidades del edificio |
 
+### 12.11 Contrato de Respuesta — DTOs
+
+Los DTOs siguen spec §6.4 con los siguientes puntos concretos:
+
+**`DecisionDTO`**
+- `created_by: { id, name } | null` — objeto expandido (join a `profiles`). Es `null` si el profile original fue eliminado (`ON DELETE SET NULL`). Spec original lo marca como non-null; la realidad de la DB obliga a permitir `null`.
+- `quote_count: number` — cantidad de cotizaciones activas (excluye soft-deleted). Computado en el repo.
+- `is_deadline_passed: boolean` — computado server-side. `true` cuando la fase actual (`RECEPTION` o `VOTING`) tiene deadline vencido; siempre `false` en estados terminales (`RESOLVED`, `CANCELLED`, `TIEBREAK_PENDING`). Autoritativo del servidor para evitar drift de reloj del cliente.
+- `photo_url: string | null` — **signed URL** regenerada por request (TTL 900s / 15 min). El cliente no debe cachearla más allá del TTL.
+
+**`QuoteDTO`**
+- `uploader: { id, name } | null` — reemplaza el UUID pelado.
+- `deleted_by: { id, name } | null` — reemplaza el UUID pelado.
+- `file_url: string` — signed URL, TTL 900s. Re-firmada por request.
+
+**`VoteDTO`**
+- `voted_by: { id, name } | null` — reemplaza `voted_by_user_id` UUID.
+
+**`AuditEntryDTO`**
+- `actor: { id, name } | null` — reemplaza `actor_user_id` UUID.
+
+### 12.12 `POST /decisions/:id/finalize` — Contrato
+
+- **Response**: `DecisionDTO` (200). No se devuelve un `outcome` string — el cliente infiere la transición del `status` resultante.
+- **Idempotencia** (spec §7.6): si la decisión ya está en estado terminal (`RESOLVED` o `CANCELLED`), devuelve el estado actual con 200 sin mutar ni escribir en audit log. Esto evita errores confusos ante double-clicks o retries post-timeout.
+- **`TIEBREAK_PENDING`** no es idempotente: sigue devolviendo `422 DECISION_WRONG_STATUS` porque requiere resolución manual vía `POST /decisions/:id/resolve-tiebreak`.
+
+### 12.13 Firma de URLs — `photo_url` + `file_url`
+
+Per spec §7.8 / §233 / §404 el bucket `issue-files` es privado. Los paths guardados en DB no son públicamente accesibles — el backend firma en **cada lectura** con TTL corto.
+
+- **TTL**: 900s (15 min) en `DecisionFileStorageService.getSignedUrl()`.
+- **Serialización**: `src/modules/decisions/presentation/serializers.ts` define `serializeDecision` y `serializeQuote`, que reemplazan el path crudo con `https://...` firmado antes de responder.
+- **Aplica a**: `GET /decisions`, `GET /decisions/:id`, `POST/GET /decisions/:id/quotes`, `POST /decisions/:id/photo`, y todos los mutativos que devuelven `DecisionDTO` (`/cancel`, `/deadlines`, `/finalize`, `/resolve-tiebreak`).
+- **Cliente**: no cachear la URL más del TTL. Re-fetch del recurso antes de abrir el archivo en sesiones largas.
+

@@ -34,7 +34,7 @@ describe('FinalizeDecision', () => {
     await quoteRepo.create(makeQuote('q1'));
     const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('ADVANCED_TO_VOTING');
+    expect(result.status).toBe(DecisionStatus.VOTING);
     const logs = await audit.listForDecision('d1');
     expect(logs[0].event).toBe(AuditEvent.PHASE_ADVANCED);
   });
@@ -71,10 +71,8 @@ describe('FinalizeDecision', () => {
     await voteRepo.create(makeVote('v3', 'apt3', 'q2'));
     const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('RESOLVED');
-    const d = await decRepo.findById('d1');
-    expect(d!.status).toBe(DecisionStatus.RESOLVED);
-    expect(d!.winner_quote_id).toBe('q1');
+    expect(result.status).toBe(DecisionStatus.RESOLVED);
+    expect(result.winner_quote_id).toBe('q1');
     const logs = await audit.listForDecision('d1');
     expect(logs[0].event).toBe(AuditEvent.FINALIZED);
   });
@@ -91,9 +89,8 @@ describe('FinalizeDecision', () => {
     await voteRepo.create(makeVote('v2', 'apt2', 'q2'));
     const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_OPENED');
-    const d = await decRepo.findById('d1');
-    expect(d!.current_round).toBe(2);
+    expect(result.status).toBe(DecisionStatus.VOTING);
+    expect(result.current_round).toBe(2);
     const logs = await audit.listForDecision('d1');
     expect(logs[0].event).toBe(AuditEvent.TIEBREAK_OPENED);
   });
@@ -110,9 +107,7 @@ describe('FinalizeDecision', () => {
     await voteRepo.create(makeVote('v2', 'apt2', 'q2', 2));
     const uc = new FinalizeDecision(decRepo, quoteRepo, voteRepo, audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_PENDING_MANUAL');
-    const d = await decRepo.findById('d1');
-    expect(d!.status).toBe(DecisionStatus.TIEBREAK_PENDING);
+    expect(result.status).toBe(DecisionStatus.TIEBREAK_PENDING);
   });
 
   it('VOTING with no votes → TIEBREAK_PENDING', async () => {
@@ -123,7 +118,7 @@ describe('FinalizeDecision', () => {
     await quoteRepo.create(makeQuote('q1'));
     const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_PENDING_MANUAL');
+    expect(result.status).toBe(DecisionStatus.TIEBREAK_PENDING);
   });
 
   it('VOTING with no active quotes → TIEBREAK_PENDING', async () => {
@@ -134,7 +129,7 @@ describe('FinalizeDecision', () => {
     await quoteRepo.create(makeQuote('q1', 'd1', true));
     const uc = new FinalizeDecision(decRepo, quoteRepo, new InMemoryVoteRepo(), audit);
     const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
-    expect(result.outcome).toBe('TIEBREAK_PENDING_MANUAL');
+    expect(result.status).toBe(DecisionStatus.TIEBREAK_PENDING);
   });
 
   it('throws 404 when decision not found', async () => {
@@ -142,11 +137,28 @@ describe('FinalizeDecision', () => {
     await expect(uc.execute({ decision_id: 'missing', actor_user_id: 'system' })).rejects.toThrow();
   });
 
-  it('throws when decision already resolved', async () => {
+  it('idempotent when already RESOLVED → returns current state without mutation or audit', async () => {
     const decRepo = new InMemoryDecisionRepo();
+    const audit = new InMemoryAuditRepo();
     const d = new Decision({ id: 'd1', building_id: 'b1', created_by: 'u1', title: 'Reparación portón', reception_deadline: past(10_000), voting_deadline: past(1000), status: DecisionStatus.RESOLVED, winner_quote_id: 'q1' });
     await decRepo.create(d);
-    const uc = new FinalizeDecision(decRepo, new InMemoryQuoteRepo(), new InMemoryVoteRepo(), new InMemoryAuditRepo());
-    await expect(uc.execute({ decision_id: 'd1', actor_user_id: 'system' })).rejects.toThrow();
+    const uc = new FinalizeDecision(decRepo, new InMemoryQuoteRepo(), new InMemoryVoteRepo(), audit);
+    const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
+    expect(result.status).toBe(DecisionStatus.RESOLVED);
+    expect(result.winner_quote_id).toBe('q1');
+    // no new audit entries on idempotent call
+    const logs = await audit.listForDecision('d1');
+    expect(logs).toHaveLength(0);
+  });
+
+  it('idempotent when already CANCELLED → returns current state', async () => {
+    const decRepo = new InMemoryDecisionRepo();
+    const audit = new InMemoryAuditRepo();
+    const d = makeDecisionReceptionExpired();
+    d.cancel('obsolete');
+    await decRepo.create(d);
+    const uc = new FinalizeDecision(decRepo, new InMemoryQuoteRepo(), new InMemoryVoteRepo(), audit);
+    const result = await uc.execute({ decision_id: 'd1', actor_user_id: 'system' });
+    expect(result.status).toBe(DecisionStatus.CANCELLED);
   });
 });

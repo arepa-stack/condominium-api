@@ -99,9 +99,9 @@ export class DecisionFileStorageService {
 
   /**
    * Returns a short-lived signed URL for reading a private file.
-   * TTL default: 600 seconds (10 min) — re-sign on every GET per spec §7.8.
+   * TTL default: 900 seconds (15 min) — re-sign on every GET per spec §7.8.
    */
-  async getSignedUrl(file_path: string, ttlSeconds = 600): Promise<string> {
+  async getSignedUrl(file_path: string, ttlSeconds = 900): Promise<string> {
     const { data, error } = await supabase.storage
       .from(BUCKET)
       .createSignedUrl(file_path, ttlSeconds);

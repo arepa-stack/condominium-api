@@ -1,4 +1,5 @@
 import { DomainError } from '@/core/errors';
+import type { ProfileRef } from './Decision';
 
 export enum AuditEvent {
     CREATED = 'CREATED',
@@ -19,6 +20,8 @@ export interface DecisionAuditLogProps {
     actor_user_id: string | null;
     payload: Record<string, unknown> | null;
     created_at?: Date;
+    // Hydrated by repo joins. Not persisted.
+    actor?: ProfileRef | null;
 }
 
 export class DecisionAuditLog {
@@ -34,15 +37,17 @@ export class DecisionAuditLog {
     get decision_id() { return this.props.decision_id; }
     get event() { return this.props.event; }
     get actor_user_id() { return this.props.actor_user_id; }
+    get actor(): ProfileRef | null { return this.props.actor ?? null; }
     get payload() { return this.props.payload; }
     get created_at() { return this.props.created_at!; }
 
+    /** Wire-format DTO. Per spec §6.4: actor is { id, name } | null. */
     toJSON() {
         return {
             id: this.id,
             decision_id: this.decision_id,
             event: this.event,
-            actor_user_id: this.actor_user_id,
+            actor: this.actor,
             payload: this.payload,
             created_at: this.created_at.toISOString(),
         };

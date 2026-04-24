@@ -5,11 +5,17 @@ import {
   DecisionAuditLog,
   AuditEvent,
 } from '@/modules/decisions/domain/entities/DecisionAuditLog';
+import type { ProfileRef } from '@/modules/decisions/domain/entities/Decision';
+
+const SELECT_QUERY = '*, actor:profiles!actor_user_id(id, name)';
 
 export class SupabaseAuditLogRepository implements DecisionAuditLogRepository {
   // ------------------------------------------------------------------ mapping
 
   private toDomain(row: Record<string, unknown>): DecisionAuditLog {
+    const actorRow = row.actor as { id: string; name: string } | null | undefined;
+    const actor: ProfileRef | null = actorRow ? { id: actorRow.id, name: actorRow.name } : null;
+
     return new DecisionAuditLog({
       id: row.id as string,
       decision_id: row.decision_id as string,
@@ -17,6 +23,7 @@ export class SupabaseAuditLogRepository implements DecisionAuditLogRepository {
       actor_user_id: (row.actor_user_id as string | null) ?? null,
       payload: (row.payload as Record<string, unknown> | null) ?? null,
       created_at: new Date(row.created_at as string),
+      actor,
     });
   }
 
@@ -37,7 +44,7 @@ export class SupabaseAuditLogRepository implements DecisionAuditLogRepository {
         payload: args.payload ?? null,
         created_at: new Date().toISOString(),
       })
-      .select()
+      .select(SELECT_QUERY)
       .single();
 
     if (error) throw new DomainError('Error recording audit: ' + error.message, 'DB_ERROR', 500);
@@ -49,7 +56,7 @@ export class SupabaseAuditLogRepository implements DecisionAuditLogRepository {
   async listForDecision(decisionId: string): Promise<DecisionAuditLog[]> {
     const { data, error } = await supabase
       .from('decision_audit_log')
-      .select('*')
+      .select(SELECT_QUERY)
       .eq('decision_id', decisionId)
       .order('created_at', { ascending: false });
 

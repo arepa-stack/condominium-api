@@ -163,4 +163,66 @@ describe('Decision Entity', () => {
         expect(d.resulting_id).toBe('inv-1');
         expect(() => d.attachCharge('ASSESSMENT', 'a1')).toThrow();
     });
+
+    it('is_deadline_passed is false during RECEPTION before deadline', () => {
+        const d = new Decision(baseProps());
+        expect(d.is_deadline_passed).toBe(false);
+    });
+
+    it('is_deadline_passed is true in RECEPTION after deadline', () => {
+        const d = new Decision(baseProps({
+            reception_deadline: new Date(Date.now() - 1000),
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        expect(d.is_deadline_passed).toBe(true);
+    });
+
+    it('is_deadline_passed reflects voting_deadline once in VOTING', () => {
+        const d = new Decision(baseProps({
+            reception_deadline: new Date(Date.now() - 2000),
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        expect(d.is_deadline_passed).toBe(false);
+        // simulate voting deadline passed
+        (d as any).props.voting_deadline = new Date(Date.now() - 500);
+        expect(d.is_deadline_passed).toBe(true);
+    });
+
+    it('is_deadline_passed is always false for terminal statuses', () => {
+        const past = new Date(Date.now() - 1000);
+        const d = new Decision(baseProps({
+            reception_deadline: past,
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+        d.resolve('q1');
+        expect(d.is_deadline_passed).toBe(false);
+
+        const c = new Decision(baseProps());
+        c.cancel('obsolete');
+        expect(c.is_deadline_passed).toBe(false);
+    });
+
+    it('quote_count defaults to 0 and is readable', () => {
+        const d = new Decision(baseProps());
+        expect(d.quote_count).toBe(0);
+
+        const d2 = new Decision(baseProps({ quote_count: 3 }));
+        expect(d2.quote_count).toBe(3);
+    });
+
+    it('toJSON emits created_by as expanded ProfileRef or null + quote_count + is_deadline_passed', () => {
+        const d = new Decision(baseProps({
+            creator: { id: 'u1', name: 'Juan Pérez' },
+            quote_count: 2,
+        }));
+        const j = d.toJSON();
+        expect(j.created_by).toEqual({ id: 'u1', name: 'Juan Pérez' });
+        expect(j.quote_count).toBe(2);
+        expect(j.is_deadline_passed).toBe(false);
+
+        const d2 = new Decision(baseProps());
+        expect(d2.toJSON().created_by).toBeNull();
+    });
 });

@@ -10,12 +10,18 @@ import {
   DecisionProps,
   DecisionStatus,
   DecisionResultingType,
+  ProfileRef,
 } from '@/modules/decisions/domain/entities/Decision';
+
+const SELECT_QUERY = '*, creator:profiles!created_by(id, name)';
 
 export class SupabaseDecisionRepository implements DecisionRepository {
   // ------------------------------------------------------------------ mapping
 
-  private toDomain(row: Record<string, unknown>): Decision {
+  private toDomain(row: Record<string, unknown>, quote_count = 0): Decision {
+    const creatorRow = row.creator as { id: string; name: string } | null | undefined;
+    const creator: ProfileRef | null = creatorRow ? { id: creatorRow.id, name: creatorRow.name } : null;
+
     const props: DecisionProps = {
       id: row.id as string,
       building_id: row.building_id as string,
@@ -36,6 +42,8 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       cancel_reason: (row.cancel_reason as string | null) ?? null,
       created_at: new Date(row.created_at as string),
       updated_at: new Date(row.updated_at as string),
+      creator,
+      quote_count,
     };
     return new Decision(props);
   }
@@ -63,17 +71,40 @@ export class SupabaseDecisionRepository implements DecisionRepository {
     };
   }
 
+  /**
+   * Batch-counts active quotes grouped by decision_id.
+   * Uses head:true + count:exact per id? No — single query IN (ids), group in JS.
+   */
+  private async fetchQuoteCounts(decisionIds: string[]): Promise<Record<string, number>> {
+    if (decisionIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from('decision_quotes')
+      .select('decision_id')
+      .in('decision_id', decisionIds)
+      .is('deleted_at', null);
+
+    if (error) throw new DomainError('Error counting quotes: ' + error.message, 'DB_ERROR', 500);
+
+    const counts: Record<string, number> = {};
+    for (const id of decisionIds) counts[id] = 0;
+    for (const row of data ?? []) {
+      const id = row.decision_id as string;
+      counts[id] = (counts[id] ?? 0) + 1;
+    }
+    return counts;
+  }
+
   // ------------------------------------------------------------------ write
 
   async create(d: Decision): Promise<Decision> {
     const { data, error } = await supabase
       .from('decisions')
       .insert({ ...this.toPersistence(d), created_at: d.created_at.toISOString() })
-      .select()
+      .select(SELECT_QUERY)
       .single();
 
     if (error) throw new DomainError('Error creating decision: ' + error.message, 'DB_ERROR', 500);
-    return this.toDomain(data);
+    return this.toDomain(data, 0);
   }
 
   async update(d: Decision): Promise<Decision> {
@@ -81,11 +112,12 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       .from('decisions')
       .update(this.toPersistence(d))
       .eq('id', d.id)
-      .select()
+      .select(SELECT_QUERY)
       .single();
 
     if (error) throw new DomainError('Error updating decision: ' + error.message, 'DB_ERROR', 500);
-    return this.toDomain(data);
+    const counts = await this.fetchQuoteCounts([d.id]);
+    return this.toDomain(data, counts[d.id] ?? 0);
   }
 
   // ------------------------------------------------------------------ read
@@ -93,7 +125,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
   async findById(id: string): Promise<Decision | null> {
     const { data, error } = await supabase
       .from('decisions')
-      .select('*')
+      .select(SELECT_QUERY)
       .eq('id', id)
       .single();
 
@@ -101,7 +133,8 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       if (error.code === 'PGRST116') return null;
       throw new DomainError('Error fetching decision: ' + error.message, 'DB_ERROR', 500);
     }
-    return this.toDomain(data);
+    const counts = await this.fetchQuoteCounts([id]);
+    return this.toDomain(data, counts[id] ?? 0);
   }
 
   /**
@@ -120,7 +153,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
 
     let query = supabase
       .from('decisions')
-      .select('*', { count: 'exact' })
+      .select(SELECT_QUERY, { count: 'exact' })
       .order('created_at', { ascending: false });
 
     if (filters.building_id) query = query.eq('building_id', filters.building_id);
@@ -131,8 +164,12 @@ export class SupabaseDecisionRepository implements DecisionRepository {
     const { data, count, error } = await query.range(from, to);
     if (error) throw new DomainError('Error listing decisions: ' + error.message, 'DB_ERROR', 500);
 
+    const rows = data ?? [];
+    const ids = rows.map((r) => r.id as string);
+    const counts = await this.fetchQuoteCounts(ids);
+
     return {
-      items: (data ?? []).map((r) => this.toDomain(r)),
+      items: rows.map((r) => this.toDomain(r, counts[r.id as string] ?? 0)),
       total: count ?? 0,
     };
   }
