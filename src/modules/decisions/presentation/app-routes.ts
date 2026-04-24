@@ -85,15 +85,35 @@ async function resolveResident(request: Request) {
   const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) throw new UnauthorizedError('Invalid or expired token');
 
-  const { data: units } = await supabaseAdmin
-    .from('profile_units')
-    .select('unit_id, building_id, is_primary')
-    .eq('profile_id', user.id);
+  const [unitsRes, boardRes] = await Promise.all([
+    supabaseAdmin
+      .from('profile_units')
+      .select('unit_id, is_primary, units(building_id)')
+      .eq('profile_id', user.id),
+    supabaseAdmin
+      .from('building_members')
+      .select('building_id, role')
+      .eq('profile_id', user.id),
+  ]);
+
+  const units = (unitsRes.data ?? []) as any[];
+  const boardMembers = (boardRes.data ?? []) as any[];
+
+  const unitBuildingIds = units
+    .map(u => {
+      const joined = u.units;
+      if (!joined) return null;
+      return Array.isArray(joined) ? joined[0]?.building_id : joined.building_id;
+    })
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const boardBuildingIds = boardMembers
+    .filter(bm => bm.role === 'board')
+    .map(bm => bm.building_id as string);
 
   return {
     userId: user.id,
-    unitIds: (units ?? []).map(u => u.unit_id as string),
-    buildingIds: [...new Set((units ?? []).map(u => u.building_id as string))],
+    unitIds: units.map(u => u.unit_id as string),
+    buildingIds: [...new Set([...unitBuildingIds, ...boardBuildingIds])],
   };
 }
 
