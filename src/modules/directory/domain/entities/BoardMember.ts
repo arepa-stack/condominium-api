@@ -19,7 +19,7 @@ export class BoardMember {
 
     get id() { return this.props.member_id; }
     get role() { return this.props.role; }
-    get buildingId() { return this.props.building_id; }
+    get building_id() { return this.props.building_id; }
     get profile() { return this.props.profile; }
     get unit() { return this.props.unit; }
 

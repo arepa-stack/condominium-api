@@ -83,7 +83,7 @@ const AllocationSchema = t.Object({
 });
 
 const BalanceDetailSchema = t.Object({
-    invoiceId: t.String(),
+    invoice_id: t.String(),
     amount: t.Number(),
     paid: t.Number(),
     remaining: t.Number(),
@@ -93,10 +93,10 @@ const BalanceDetailSchema = t.Object({
 
 const BalanceSchema = t.Object({
     unit: t.String(),
-    totalDebt: t.Number(),
-    pendingInvoices: t.Number(),
-    creditBalance: t.Number(),
-    netBalance: t.Number(),
+    total_debt: t.Number(),
+    pending_invoices: t.Number(),
+    credit_balance: t.Number(),
+    net_balance: t.Number(),
     details: t.Array(BalanceDetailSchema)
 });
 
@@ -274,7 +274,20 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         if (!file) throw new Error('Excel file is required');
 
         const buffer = Buffer.from(await file.arrayBuffer());
-        return await previewInvoices.execute(buffer, query.building_id);
+        const preview = await previewInvoices.execute(buffer, query.building_id);
+        return {
+            invoices: preview.invoices.map(inv => ({
+                unit_name: inv.unitName,
+                amount: inv.amount,
+                period: inv.period,
+                issue_date: inv.issueDate,
+                receipt_number: inv.receiptNumber,
+                unit_id: inv.unitId,
+                status: inv.status,
+                warning: inv.warning
+            })),
+            units_to_create: preview.unitsToCreate
+        };
     }, {
         query: t.Object({
             building_id: t.String()
@@ -284,16 +297,16 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }),
         response: t.Object({
             invoices: t.Array(t.Object({
-                unitName: t.String(),
+                unit_name: t.String(),
                 amount: t.Number(),
                 period: t.String(),
-                issueDate: t.Any(),
-                receiptNumber: t.String(),
-                unitId: t.Optional(t.String()),
+                issue_date: t.Any(),
+                receipt_number: t.String(),
+                unit_id: t.Optional(t.String()),
                 status: t.String(),
                 warning: t.Optional(t.String())
             })),
-            unitsToCreate: t.Array(t.String())
+            units_to_create: t.Array(t.String())
         }),
         detail: {
             tags: ['Admin - Billing'],
@@ -309,7 +322,11 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
 
         await bulkLoadInvoices.execute({
             invoices: body.invoices.map(item => ({
-                ...item,
+                unitName: item.unit_name,
+                amount: item.amount,
+                period: item.period,
+                issueDate: item.issue_date,
+                receiptNumber: item.receipt_number,
                 status: item.status as 'EXISTS' | 'TO_BE_CREATED'
             })),
             buildingId: query.building_id
@@ -322,11 +339,11 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         }),
         body: t.Object({
             invoices: t.Array(t.Object({
-                unitName: t.String(),
+                unit_name: t.String(),
                 amount: t.Number(),
                 period: t.String(),
-                issueDate: t.String(),
-                receiptNumber: t.String(),
+                issue_date: t.String(),
+                receipt_number: t.String(),
                 status: t.String()
             }))
         }),
@@ -378,7 +395,22 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             throw new UnauthorizedError('Only Admin, Board or the unit resident can see balance');
         }
 
-        return await getUnitBalance.execute(params.id);
+        const balance = await getUnitBalance.execute(params.id);
+        return {
+            unit: balance.unit,
+            total_debt: balance.totalDebt,
+            pending_invoices: balance.pendingInvoices,
+            credit_balance: balance.creditBalance,
+            net_balance: balance.netBalance,
+            details: balance.details.map(d => ({
+                invoice_id: d.invoiceId,
+                amount: d.amount,
+                paid: d.paid,
+                remaining: d.remaining,
+                period: d.period,
+                status: d.status
+            }))
+        };
     }, {
         response: BalanceSchema,
         detail: {

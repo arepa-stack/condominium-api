@@ -1,17 +1,26 @@
-import { Lead, LeadProps } from '../../domain/entities/Lead';
+import { Lead } from '../../domain/entities/Lead';
 import { ILeadRepository } from '../../domain/repository';
+
+export interface RegisterLeadDTO {
+    fullName: string;
+    contact: string;
+    email: string;
+    buildingName: string;
+    location: string;
+    estimatedUsers: string;
+}
 
 export class RegisterLead {
     constructor(private leadRepository: ILeadRepository) {}
 
-    async execute(data: LeadProps): Promise<void> {
+    async execute(data: RegisterLeadDTO): Promise<void> {
         const lead = Lead.create({
-            fullName: data.fullName,
+            full_name: data.fullName,
             contact: data.contact,
             email: data.email,
-            buildingName: data.buildingName,
+            building_name: data.buildingName,
             location: data.location,
-            estimatedUsers: data.estimatedUsers
+            estimated_users: data.estimatedUsers
         });
 
         await this.leadRepository.save(lead);

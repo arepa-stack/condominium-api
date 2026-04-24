@@ -346,7 +346,7 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
             name: body.name,
             phone: body.phone,
             role: 'board' as any,
-            building_id: body.buildingId,
+            building_id: body.building_id,
             board_position: body.board_position,
         });
     }, {
@@ -354,7 +354,7 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
             name: t.String({ minLength: 1, examples: ['María González'] }),
             email: t.String({ format: 'email', examples: ['maria@edificio.com'] }),
             phone: t.Optional(t.String({ examples: ['+58 412 5551234'] })),
-            buildingId: t.String({ format: 'uuid', examples: ['d047cca7-d97f-480f-b747-042b88c26228'] }),
+            building_id: t.String({ format: 'uuid', examples: ['d047cca7-d97f-480f-b747-042b88c26228'] }),
             board_position: t.Optional(t.String({ examples: ['Presidente', 'Tesorero'] })),
         }),
         response: UserResponse,

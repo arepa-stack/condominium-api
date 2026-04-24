@@ -6,13 +6,13 @@ import { DomainError } from '@/core/errors';
 export class SupabaseLeadRepository implements ILeadRepository {
     async save(lead: Lead): Promise<void> {
         const persistenceData = {
-            full_name: lead.fullName,
+            full_name: lead.full_name,
             contact: lead.contact,
             email: lead.email,
-            building_name: lead.buildingName,
+            building_name: lead.building_name,
             location: lead.location,
-            estimated_users: lead.estimatedUsers,
-            created_at: lead.createdAt
+            estimated_users: lead.estimated_users,
+            created_at: lead.created_at
         };
 
         const { error } = await supabase
