@@ -12,6 +12,7 @@ export interface UserProps {
     buildingRoles?: BuildingRole[];
     app_role: AppRole;  // Global capability. 'admin' | 'user'.
     status: UserStatus;
+    must_change_password?: boolean;
     created_at?: Date;
     updated_at?: Date;
 }
@@ -61,6 +62,7 @@ export class User {
 
     get app_role(): AppRole { return this.props.app_role; }
     get status(): UserStatus { return this.props.status; }
+    get must_change_password(): boolean { return this.props.must_change_password ?? false; }
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
 
@@ -87,6 +89,11 @@ export class User {
 
     isResident(): boolean {
         return !this.isAdmin() && !this.isBoardMemberAnywhere();
+    }
+
+    clearPasswordChangeFlag(): void {
+        this.props.must_change_password = false;
+        this.props.updated_at = new Date();
     }
 
     approve(): void {

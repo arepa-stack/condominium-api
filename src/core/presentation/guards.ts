@@ -15,6 +15,7 @@ export interface AuthProfile {
     id: string;
     app_role: AppRole;
     boardBuildingIds: string[];
+    must_change_password?: boolean;
 }
 
 function checkRole(
@@ -69,7 +70,7 @@ export function requireRole(roles: UserRole[]) {
 
             const { data: profile, error: profileError } = await supabaseAdmin
                 .from('profiles')
-                .select('id, app_role, building_members(building_id, role)')
+                .select('id, app_role, must_change_password, building_members(building_id, role)')
                 .eq('id', user.id)
                 .single();
 
@@ -94,6 +95,7 @@ export function requireRole(roles: UserRole[]) {
                     id: profile.id as string,
                     app_role,
                     boardBuildingIds,
+                    must_change_password: profile.must_change_password ?? false,
                 },
             };
         });
@@ -122,6 +124,27 @@ export function requireBuildingAccess(
             if (!profile.boardBuildingIds.includes(buildingId)) {
                 throw new ForbiddenError(
                     `Access denied. You are not a member of building ${buildingId}`
+                );
+            }
+        });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// requireFreshPassword
+//
+// Must run AFTER requireRole. Rejects any request with 403 MUST_CHANGE_PASSWORD
+// if the user's must_change_password flag is true.
+//
+// Apply to appRoutes and adminRoutes, but NOT to the change-password endpoint
+// and NOT to /users/me (so users can at least see their own profile).
+// ──────────────────────────────────────────────────────────────────────────────
+export function requireFreshPassword() {
+    return new Elysia({ name: 'require-fresh-password' })
+        .onBeforeHandle({ as: 'scoped' }, (ctx: any) => {
+            const profile: AuthProfile = ctx.profile;
+            if (profile?.must_change_password) {
+                throw new ForbiddenError(
+                    'You must change your password before accessing this resource.'
                 );
             }
         });

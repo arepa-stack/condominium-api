@@ -7,6 +7,7 @@ export interface IBuildingRepository {
     findAll(): Promise<Building[]>;
     findAllPaginated(pagination: PaginationFilters): Promise<{ items: Building[]; total: number }>;
     findById(id: string): Promise<Building | null>;
+    findByCode(buildingCode: string): Promise<Building | null>;
     update(building: Building): Promise<Building>;
     delete(id: string): Promise<void>;
 }

@@ -1,25 +1,28 @@
 import { Elysia, t } from 'elysia';
 import { SupabaseUserRepository } from '../infrastructure/repositories/SupabaseUserRepository';
 import { SupabaseAuthRepository } from '@/modules/auth/infrastructure/repositories/SupabaseAuthRepository';
+import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseBuildingRepository';
 import { GetUserById } from '../application/use-cases/GetUserById';
 import { GetUsers } from '../application/use-cases/GetUsers';
 import { CreateUser } from '../application/use-cases/CreateUser';
 import { UpdateUser } from '../application/use-cases/UpdateUser';
 import { ApproveUser } from '../application/use-cases/ApproveUser';
 import { DeleteUser } from '../application/use-cases/DeleteUser';
+import { emailService } from '@/infrastructure/email';
 import { UnauthorizedError } from '@/core/errors';
 import { supabase } from '@/infrastructure/supabase';
 
 // Initialize Repository and Use Cases
 // In a real DI system context, these would be injected
 const userRepo = new SupabaseUserRepository();
-const authRepo = new SupabaseAuthRepository(); // Need auth repo for creation
+const authRepo = new SupabaseAuthRepository();
+const buildingRepo = new SupabaseBuildingRepository();
 const getUserById = new GetUserById(userRepo);
 const getUsers = new GetUsers(userRepo);
 const updateUser = new UpdateUser(userRepo);
 const approveUser = new ApproveUser(userRepo);
 const deleteUser = new DeleteUser(userRepo);
-const createUser = new CreateUser(userRepo, authRepo);
+const createUser = new CreateUser(userRepo, authRepo, buildingRepo, emailService);
 
 // New Phase 2 Use Cases
 import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
@@ -323,6 +326,42 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         detail: {
             tags: ['Admin - Users'],
             summary: 'Delete user (Admin only)',
+            security: [{ BearerAuth: [] }]
+        }
+    });
+
+// Board-member registration route — Admin only
+export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
+    .derive(async ({ request }) => {
+        const authHeader = request.headers.get('Authorization');
+        if (!authHeader) throw new UnauthorizedError('Authentication required');
+        const token = authHeader.replace('Bearer ', '');
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (error || !user) throw new UnauthorizedError('Invalid or expired token');
+        return { user };
+    })
+    .post('/', async ({ body }) => {
+        return await createUser.execute({
+            email: body.email,
+            name: body.name,
+            phone: body.phone,
+            role: 'board' as any,
+            building_id: body.buildingId,
+            board_position: body.board_position,
+        });
+    }, {
+        body: t.Object({
+            name: t.String({ minLength: 1, examples: ['María González'] }),
+            email: t.String({ format: 'email', examples: ['maria@edificio.com'] }),
+            phone: t.Optional(t.String({ examples: ['+58 412 5551234'] })),
+            buildingId: t.String({ format: 'uuid', examples: ['d047cca7-d97f-480f-b747-042b88c26228'] }),
+            board_position: t.Optional(t.String({ examples: ['Presidente', 'Tesorero'] })),
+        }),
+        response: UserResponse,
+        detail: {
+            tags: ['Admin - Users'],
+            summary: 'Register a new Board Member (Admin only)',
+            description: 'Creates a board member account, assigns them to the building, and sends credentials by email. The board member must change their password on first login.',
             security: [{ BearerAuth: [] }]
         }
     });

@@ -1,7 +1,11 @@
+import { Config } from '@/core/config';
+
 export interface BuildingProps {
     id: string;
     name: string;
     address: string;
+    building_code?: string;
+    max_residents_per_unit?: number;
     created_at?: Date;
     updated_at?: Date;
 }
@@ -14,11 +18,16 @@ export class Building {
         if (!props.updated_at) {
             this.props.updated_at = new Date();
         }
+        if (this.props.max_residents_per_unit === undefined) {
+            this.props.max_residents_per_unit = Config.DEFAULT_MAX_RESIDENTS_PER_UNIT;
+        }
     }
 
     get id(): string { return this.props.id; }
     get name(): string { return this.props.name; }
     get address(): string { return this.props.address; }
+    get building_code(): string | undefined { return this.props.building_code; }
+    get max_residents_per_unit(): number { return this.props.max_residents_per_unit ?? Config.DEFAULT_MAX_RESIDENTS_PER_UNIT; }
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
 
@@ -38,8 +47,12 @@ export class Building {
         this.props.updated_at = new Date();
     }
 
-    toJSON(): BuildingProps {
-        return this.props;
+    toJSON(): BuildingProps & { building_code: string | undefined; max_residents_per_unit: number } {
+        return {
+            ...this.props,
+            building_code: this.building_code,
+            max_residents_per_unit: this.max_residents_per_unit,
+        };
     }
 
     toString(): string {

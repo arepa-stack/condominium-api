@@ -10,6 +10,7 @@ const makeBuildingRepo = (): IBuildingRepository => ({
     findAll: mock(async () => []),
     findAllPaginated: mock(async () => ({ items: [], total: 0 })),
     findById: mock(async () => null),
+    findByCode: mock(async () => null),
     update: mock(async (b: Building) => b),
     delete: mock(async () => { }),
 });

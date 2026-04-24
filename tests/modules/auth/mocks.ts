@@ -26,4 +26,8 @@ export class MockAuthRepository implements IAuthRepository {
             email
         };
     }
+
+    async changePassword(_userId: string, _newPassword: string): Promise<void> {}
+
+    async resetPasswordForEmail(_email: string): Promise<void> {}
 }
