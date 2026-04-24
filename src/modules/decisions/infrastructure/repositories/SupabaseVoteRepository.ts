@@ -1,10 +1,16 @@
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
-import { DecisionVoteRepository } from '@/modules/decisions/domain/repository';
+import {
+  DecisionVoteRepository,
+  PaginatedResult,
+  PaginationOptions,
+} from '@/modules/decisions/domain/repository';
 import { DecisionVote, DecisionVoteProps } from '@/modules/decisions/domain/entities/DecisionVote';
 import type { ProfileRef } from '@/modules/decisions/domain/entities/Decision';
 
 const SELECT_QUERY = '*, voted_by:profiles!voted_by_user_id(id, name)';
+const SELECT_QUERY_WITH_APARTMENT =
+  '*, voted_by:profiles!voted_by_user_id(id, name), apartment:units!apartment_id(name)';
 
 export class SupabaseVoteRepository implements DecisionVoteRepository {
   // ------------------------------------------------------------------ mapping
@@ -12,6 +18,9 @@ export class SupabaseVoteRepository implements DecisionVoteRepository {
   private toDomain(row: Record<string, unknown>): DecisionVote {
     const voterRow = row.voted_by as { id: string; name: string } | null | undefined;
     const voted_by: ProfileRef | null = voterRow ? { id: voterRow.id, name: voterRow.name } : null;
+
+    const apartmentRow = row.apartment as { name: string } | null | undefined;
+    const apartment_label = apartmentRow?.name ?? null;
 
     const props: DecisionVoteProps = {
       id: row.id as string,
@@ -22,6 +31,7 @@ export class SupabaseVoteRepository implements DecisionVoteRepository {
       voted_by_user_id: row.voted_by_user_id as string,
       created_at: new Date(row.created_at as string),
       voted_by,
+      apartment_label,
     };
     return new DecisionVote(props);
   }
@@ -67,6 +77,30 @@ export class SupabaseVoteRepository implements DecisionVoteRepository {
     const { data, error } = await query;
     if (error) throw new DomainError('Error listing votes: ' + error.message, 'DB_ERROR', 500);
     return (data ?? []).map((r) => this.toDomain(r));
+  }
+
+  async listForDecisionPaginated(
+    decisionId: string,
+    round: number | undefined,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionVote>> {
+    const from = (pagination.page - 1) * pagination.limit;
+    const to = from + pagination.limit - 1;
+
+    let query = supabase
+      .from('decision_votes')
+      .select(SELECT_QUERY_WITH_APARTMENT, { count: 'exact' })
+      .eq('decision_id', decisionId)
+      .order('created_at', { ascending: false });
+
+    if (round !== undefined) query = query.eq('round', round);
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw new DomainError('Error listing votes: ' + error.message, 'DB_ERROR', 500);
+    return {
+      items: (data ?? []).map((r) => this.toDomain(r)),
+      total: count ?? 0,
+    };
   }
 
   async findByDecisionApartmentRound(

@@ -11,6 +11,7 @@ export interface DecisionVoteProps {
     created_at?: Date;
     // Hydrated by repo joins. Not persisted.
     voted_by?: ProfileRef | null;
+    apartment_label?: string | null;
 }
 
 export class DecisionVote {
@@ -29,6 +30,7 @@ export class DecisionVote {
     get quote_id() { return this.props.quote_id; }
     get voted_by_user_id() { return this.props.voted_by_user_id; }
     get voted_by(): ProfileRef | null { return this.props.voted_by ?? null; }
+    get apartment_label(): string | null { return this.props.apartment_label ?? null; }
     get created_at() { return this.props.created_at!; }
 
     /** Wire-format DTO. Per spec §6.4: voted_by is { id, name } | null. */
@@ -38,6 +40,7 @@ export class DecisionVote {
             decision_id: this.decision_id,
             round: this.round,
             apartment_id: this.apartment_id,
+            apartment_label: this.apartment_label,
             quote_id: this.quote_id,
             voted_by: this.voted_by,
             created_at: this.created_at.toISOString(),

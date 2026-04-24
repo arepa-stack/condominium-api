@@ -1,6 +1,10 @@
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
-import { DecisionQuoteRepository } from '@/modules/decisions/domain/repository';
+import {
+  DecisionQuoteRepository,
+  PaginatedResult,
+  PaginationOptions,
+} from '@/modules/decisions/domain/repository';
 import { DecisionQuote, DecisionQuoteProps } from '@/modules/decisions/domain/entities/DecisionQuote';
 import type { ProfileRef } from '@/modules/decisions/domain/entities/Decision';
 
@@ -111,5 +115,29 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
     const { data, error } = await query;
     if (error) throw new DomainError('Error listing quotes: ' + error.message, 'DB_ERROR', 500);
     return (data ?? []).map((r) => this.toDomain(r));
+  }
+
+  async listForDecisionPaginated(
+    decisionId: string,
+    includeDeleted: boolean,
+    pagination: PaginationOptions,
+  ): Promise<PaginatedResult<DecisionQuote>> {
+    const from = (pagination.page - 1) * pagination.limit;
+    const to = from + pagination.limit - 1;
+
+    let query = supabase
+      .from('decision_quotes')
+      .select(SELECT_QUERY, { count: 'exact' })
+      .eq('decision_id', decisionId)
+      .order('created_at', { ascending: false });
+
+    if (!includeDeleted) query = query.is('deleted_at', null);
+
+    const { data, count, error } = await query.range(from, to);
+    if (error) throw new DomainError('Error listing quotes: ' + error.message, 'DB_ERROR', 500);
+    return {
+      items: (data ?? []).map((r) => this.toDomain(r)),
+      total: count ?? 0,
+    };
   }
 }

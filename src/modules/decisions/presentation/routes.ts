@@ -41,9 +41,11 @@ import {
   DecisionSchema,
   QuoteSchema,
   VoteSchema,
-  AuditEntrySchema,
   TallyResponseSchema,
   PaginatedDecisionSchema,
+  PaginatedQuoteSchema,
+  PaginatedVoteSchema,
+  PaginatedAuditEntrySchema,
   CreateDecisionBody,
   ExtendDeadlinesBody,
   CancelDecisionBody,
@@ -165,16 +167,8 @@ export function createDecisionRoutes(tag: string) {
         page: query.page ? parseInt(query.page) : undefined,
         limit: query.limit,
       });
-      const items = await serializeDecisions(result.data, storageService);
-      return {
-        items,
-        metadata: {
-          total: result.metadata.total,
-          page: result.metadata.page,
-          limit: result.metadata.limit,
-          total_pages: result.metadata.total_pages,
-        },
-      };
+      const data = await serializeDecisions(result.data, storageService);
+      return { data, metadata: result.metadata };
     }, {
       query: t.Object({
         building_id: t.Optional(t.String()),
@@ -323,11 +317,21 @@ export function createDecisionRoutes(tag: string) {
     // ── GET /decisions/:id/quotes ─────────────────────────────────────────────
     .get('/decisions/:id/quotes', async ({ params, query }) => {
       const includeDeleted = query.include_deleted === 'true';
-      const quotes = await listQuotes.execute(params.id, includeDeleted);
-      return serializeQuotes(quotes, storageService);
+      const result = await listQuotes.executePaginated({
+        decision_id: params.id,
+        include_deleted: includeDeleted,
+        page: query.page,
+        limit: query.limit,
+      });
+      const data = await serializeQuotes(result.data, storageService);
+      return { data, metadata: result.metadata };
     }, {
-      query: t.Object({ include_deleted: t.Optional(t.String()) }),
-      response: t.Array(QuoteSchema),
+      query: t.Object({
+        include_deleted: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+      response: PaginatedQuoteSchema,
       detail: { tags: [tag], summary: 'List quotes', security: [{ BearerAuth: [] }] },
     })
 
@@ -365,11 +369,23 @@ export function createDecisionRoutes(tag: string) {
     // ── GET /decisions/:id/votes ──────────────────────────────────────────────
     .get('/decisions/:id/votes', async ({ params, query }) => {
       const round = query.round ? parseInt(query.round) : undefined;
-      const votes = await listVotes.execute(params.id, round);
-      return votes.map((v: any) => v.toJSON());
+      const result = await listVotes.executePaginated({
+        decision_id: params.id,
+        round,
+        page: query.page,
+        limit: query.limit,
+      });
+      return {
+        data: result.data.map((v) => v.toJSON()),
+        metadata: result.metadata,
+      };
     }, {
-      query: t.Object({ round: t.Optional(t.String()) }),
-      response: t.Array(VoteSchema),
+      query: t.Object({
+        round: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+      response: PaginatedVoteSchema,
       detail: { tags: [tag], summary: 'List votes', security: [{ BearerAuth: [] }] },
     })
 
@@ -384,11 +400,22 @@ export function createDecisionRoutes(tag: string) {
     })
 
     // ── GET /decisions/:id/audit-log ──────────────────────────────────────────
-    .get('/decisions/:id/audit-log', async ({ params }) => {
-      const entries = await getAuditLog.execute(params.id);
-      return entries.map((e: any) => e.toJSON());
+    .get('/decisions/:id/audit-log', async ({ params, query }) => {
+      const result = await getAuditLog.executePaginated({
+        decision_id: params.id,
+        page: query.page,
+        limit: query.limit,
+      });
+      return {
+        data: result.data.map((e) => e.toJSON()),
+        metadata: result.metadata,
+      };
     }, {
-      response: t.Array(AuditEntrySchema),
+      query: t.Object({
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+      response: PaginatedAuditEntrySchema,
       detail: { tags: [tag], summary: 'Get audit log', security: [{ BearerAuth: [] }] },
     });
 }
