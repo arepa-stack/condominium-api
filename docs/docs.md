@@ -1,5 +1,6 @@
 # Condominio API Server — Documentación Funcional
 
+> **Última actualización**: 2026-04-24 — Refleja el estado post-PR `feat/decisions-early-finalize-signal`. El DTO de tally de decisiones ahora expone `is_early_finalizable` + `early_finalize_reason` (`ALL_VOTED` | `MATHEMATICALLY_DECIDED` | `null`) como señal derivada para habilitar finalizar antes de `voting_deadline`. Ver §12.6.
 > **Última actualización**: 2026-04-20 — Refleja el estado post-PR `feat/normalize-pagination`.
 > **Paginación uniforme** en los 10 endpoints de listado. Response shape estándar `{ data: [...], metadata: { total, page, limit, total_pages, has_next_page, has_prev_page } }`. Query params estándar: `?page=<1-indexed>&limit=<number|"all">`. Defaults: `page=1`, `limit=20`. Cap numérico `100` (silent clamp); `limit=all` truncado a `10000` (el metadata señaliza truncación via `has_next_page`). Filtros preexistentes intactos. Ver "Paginación estándar" abajo y `docs/petty-cash-client-handoff.md` para el contrato completo. **Breaking** para cualquier cliente que leía `data[]` directo del body — ahora debe desenvolver `response.data`.
 > Cambios anteriores (caja chica, roles, auth, payments) siguen vigentes — ver más abajo.
@@ -1292,6 +1293,8 @@ Acceso: token de sesión válido vía Supabase Auth. El `userId` y las `unitIds`
   "participation_pct": 70.0,
   "winner_quote_id": null,
   "is_tied": false,
+  "is_early_finalizable": true,
+  "early_finalize_reason": "MATHEMATICALLY_DECIDED",
   "tallies": [
     {
       "quote_id": "q-...",
@@ -1314,6 +1317,11 @@ Acceso: token de sesión válido vía Supabase Auth. El `userId` y las `unitIds`
 - `winner_quote_id`: `null` mientras la decisión no esté en `RESOLVED`. En `RESOLVED`, refleja el ganador persistido.
 - `tallies`: ordenados por votos desc. El primero es el líder provisional durante VOTING. Siempre presente — `[]` si no hay quotes/votos.
 - `participation_pct`: relativo al total de apartamentos del edificio (`totalApartments` lookup).
+- `is_early_finalizable` / `early_finalize_reason`: señal derivada (no autoritativa) para que el front habilite el botón "Finalizar ahora" antes de `voting_deadline`. Solo significativa mientras `status === 'VOTING'`; en cualquier otro estado retorna `false` / `null`.
+  - `ALL_VOTED`: `total_votes >= total_apartments`. Todos los apartamentos ya votaron (incluso empate cuenta — admin decide cerrar a tiebreak).
+  - `MATHEMATICALLY_DECIDED`: `leader_votes - second_best_votes > remaining_voters`. Ningún voto restante puede cambiar el ganador.
+  - `null`: race todavía abierta, o no hay votos, o status no es VOTING.
+  - **Flag es advisory**. `FinalizeDecision` re-computa el tally bajo `pg_advisory_xact_lock` — fuente de verdad al presionar el botón.
 - **Misma shape embebida en `GET /decisions/:id`** bajo el campo `tally`. Front puede renderizar el widget de resultados desde cualquiera de los dos endpoints con la misma lógica.
 
 ### 12.7 Integración con Facturación
