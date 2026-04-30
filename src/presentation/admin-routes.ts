@@ -19,6 +19,7 @@ import { userAdminRoutes, boardMemberRoutes } from '@/modules/users/presentation
 import { directoryAdminRoutes } from '@/modules/directory/presentation/routes';
 import { decisionRoutes } from '@/modules/decisions/presentation/routes';
 import { onboardingAdminRoutes } from '@/modules/onboarding/presentation/admin-routes';
+import { informationCenterAdminRoutes } from '@/modules/information-center/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -30,4 +31,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(boardMemberRoutes)      // board member registration (admin only)
     .use(directoryAdminRoutes)    // building members directory
     .use(decisionRoutes)          // decisions, quotes, votes, tally, charge gen
-    .use(onboardingAdminRoutes);  // registration request review (approve/reject)
+    .use(onboardingAdminRoutes)   // registration request review (approve/reject)
+    .use(informationCenterAdminRoutes); // announcements, rules, services
