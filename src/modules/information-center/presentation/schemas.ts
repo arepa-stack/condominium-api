@@ -57,7 +57,7 @@ export const CreateAnnouncementBody = t.Object({
     content: t.String({ minLength: 1 }),
     category: t.Optional(AnnouncementCategorySchema),
     attachment: t.Optional(t.File()),
-    is_pinned: t.Optional(t.Boolean()),
+    is_pinned: t.Optional(t.BooleanString()),
     expires_at: t.Optional(NullableString),
 });
 
@@ -66,7 +66,7 @@ export const UpdateAnnouncementBody = t.Object({
     content: t.Optional(t.String({ minLength: 1 })),
     category: t.Optional(AnnouncementCategorySchema),
     attachment: t.Optional(t.File()),
-    is_pinned: t.Optional(t.Boolean()),
+    is_pinned: t.Optional(t.BooleanString()),
     expires_at: t.Optional(NullableString),
 });
 
@@ -137,8 +137,8 @@ export const RuleBody = t.Object({
     title: t.String({ minLength: 3 }),
     content: t.String({ minLength: 1 }),
     attachment: t.Optional(t.File()),
-    is_published: t.Optional(t.Boolean()),
-    sort_order: t.Optional(t.Number()),
+    is_published: t.Optional(t.BooleanString()),
+    sort_order: t.Optional(t.Numeric()),
 });
 
 export const UpdateRuleBody = t.Object({
@@ -146,8 +146,8 @@ export const UpdateRuleBody = t.Object({
     title: t.Optional(t.String({ minLength: 3 })),
     content: t.Optional(t.String({ minLength: 1 })),
     attachment: t.Optional(t.File()),
-    is_published: t.Optional(t.Boolean()),
-    sort_order: t.Optional(t.Number()),
+    is_published: t.Optional(t.BooleanString()),
+    sort_order: t.Optional(t.Numeric()),
 });
 
 export const RecommendedServiceSchema = t.Object({
