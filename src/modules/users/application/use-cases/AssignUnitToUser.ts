@@ -1,8 +1,9 @@
 import { IUserRepository } from '../../domain/repository';
 import { UserUnit } from '../../domain/entities/UserUnit';
-import { DomainError } from '@/core/errors';
+import { DomainError, ForbiddenError, NotFoundError } from '@/core/errors';
 import { BuildingRole } from '../../domain/entities/BuildingRole';
 import { User } from '../../domain/entities/User';
+import { getBuildingScope, isBuildingInScope } from '../scope';
 
 export interface AssignUnitDTO {
     userId: string;
@@ -10,12 +11,25 @@ export interface AssignUnitDTO {
     buildingId: string;
     buildingRole?: string;
     isPrimary?: boolean;
+    requesterId: string;
 }
 
 export class AssignUnitToUser {
     constructor(private userRepository: IUserRepository) { }
 
     async execute(dto: AssignUnitDTO): Promise<void> {
+        const requester = await this.userRepository.findById(dto.requesterId);
+        if (!requester) {
+            throw new NotFoundError('Requester not found');
+        }
+        if (!requester.isAdmin() && !requester.isBoardMember()) {
+            throw new ForbiddenError('Only admins and board members can assign units');
+        }
+        const scope = getBuildingScope(requester);
+        if (!isBuildingInScope(scope, dto.buildingId)) {
+            throw new ForbiddenError('You do not have access to this building');
+        }
+
         const user = await this.userRepository.findById(dto.userId);
         if (!user) {
             throw new DomainError('User not found', 'USER_NOT_FOUND', 404);

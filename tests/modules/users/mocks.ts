@@ -46,12 +46,23 @@ export class MockUserRepository implements IUserRepository {
 
     async findUnitsByProfilePaginated(
         profileId: string,
-        pagination: PaginationFilters
+        pagination: PaginationFilters,
+        buildingIds?: string[]
     ): Promise<{ items: UserUnit[]; total: number }> {
         const user = await this.findById(profileId);
-        const units = user?.units ?? [];
+        let units = user?.units ?? [];
+        if (buildingIds !== undefined) {
+            const set = new Set(buildingIds);
+            units = units.filter(u => u.building_id !== undefined && set.has(u.building_id));
+        }
         const { from, to } = toRange(pagination);
         return { items: units.slice(from, to + 1), total: units.length };
+    }
+
+    async removeUnit(userId: string, unitId: string): Promise<void> {
+        const user = await this.findById(userId);
+        if (!user) return;
+        user.setUnits(user.units.filter(u => u.unit_id !== unitId));
     }
 
     async delete(id: string): Promise<void> {

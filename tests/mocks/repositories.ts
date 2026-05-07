@@ -16,6 +16,7 @@ export const createMockUserRepository = (): IUserRepository => ({
     findAll: mock(async () => []),
     findAllPaginated: mock(async () => ({ items: [], total: 0 })),
     findUnitsByProfilePaginated: mock(async () => ({ items: [], total: 0 })),
+    removeUnit: mock(async () => { }),
     delete: mock(async () => { })
 });
 
