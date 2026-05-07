@@ -1,6 +1,7 @@
 import { IUserRepository } from '../../domain/repository';
 import { User } from '../../domain/entities/User';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
+import { filterUserToScope, getBuildingScope } from '../scope';
 
 interface GetUserByIdRequest {
     targetId: string;
@@ -56,6 +57,9 @@ export class GetUserById {
             }
         }
 
+        // Strip embedded units/buildingRoles outside the requester's scope so a
+        // board in building-A can't read off the target's other buildings.
+        filterUserToScope(targetUser, getBuildingScope(requester));
         return targetUser;
     }
 }

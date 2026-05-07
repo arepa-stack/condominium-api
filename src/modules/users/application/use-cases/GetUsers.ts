@@ -6,6 +6,7 @@ import {
     buildPaginatedResult,
     parsePaginationFilters,
 } from '@/core/domain/pagination';
+import { filterUserToScope, getBuildingScope } from '../scope';
 
 interface GetUsersRequest {
     requesterId: string;
@@ -78,6 +79,10 @@ export class GetUsers {
         }
 
         const { items, total } = await this.userRepo.findAllPaginated(filters, pagination);
+
+        const scope = getBuildingScope(requester);
+        for (const u of items) filterUserToScope(u, scope);
+
         return buildPaginatedResult(items, total, pagination);
     }
 }

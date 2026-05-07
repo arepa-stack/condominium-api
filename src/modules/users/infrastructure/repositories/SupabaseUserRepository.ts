@@ -267,14 +267,24 @@ export class SupabaseUserRepository implements IUserRepository {
 
     async findUnitsByProfilePaginated(
         profileId: string,
-        pagination: PaginationFilters
+        pagination: PaginationFilters,
+        buildingIds?: string[]
     ): Promise<{ items: UserUnit[]; total: number }> {
         const { from, to } = toRange(pagination);
-        const { data, count, error } = await supabase
+        let query = supabase
             .from('profile_units')
-            .select('*, units(name, building_id, buildings(name))', { count: 'exact' })
-            .eq('profile_id', profileId)
-            .range(from, to);
+            .select('*, units!inner(name, building_id, buildings(name))', { count: 'exact' })
+            .eq('profile_id', profileId);
+
+        if (buildingIds !== undefined) {
+            // Empty list means "no scope" — return zero rows without hitting DB.
+            if (buildingIds.length === 0) {
+                return { items: [], total: 0 };
+            }
+            query = query.in('units.building_id', buildingIds);
+        }
+
+        const { data, count, error } = await query.range(from, to);
 
         if (error) {
             throw new DomainError('Error fetching user units: ' + error.message, 'DB_ERROR', 500);
@@ -282,5 +292,17 @@ export class SupabaseUserRepository implements IUserRepository {
 
         const items = this.mapUnitsFromPersistence(data || []);
         return { items, total: count || 0 };
+    }
+
+    async removeUnit(userId: string, unitId: string): Promise<void> {
+        const { error } = await supabase
+            .from('profile_units')
+            .delete()
+            .eq('profile_id', userId)
+            .eq('unit_id', unitId);
+
+        if (error) {
+            throw new DomainError('Error removing user unit: ' + error.message, 'DB_ERROR', 500);
+        }
     }
 }

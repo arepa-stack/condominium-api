@@ -24,7 +24,9 @@ export interface IUserRepository {
     ): Promise<{ items: User[]; total: number }>;
     findUnitsByProfilePaginated(
         profileId: string,
-        pagination: PaginationFilters
+        pagination: PaginationFilters,
+        buildingIds?: string[]
     ): Promise<{ items: UserUnit[]; total: number }>;
+    removeUnit(userId: string, unitId: string): Promise<void>;
     delete(id: string): Promise<void>;
 }

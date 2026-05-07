@@ -28,10 +28,12 @@ const createUser = new CreateUser(userRepo, authRepo, buildingRepo, emailService
 import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
 import { GetUserUnits } from '../application/use-cases/GetUserUnits';
 import { UpdateBuildingRole } from '../application/use-cases/UpdateBuildingRole';
+import { RemoveUnitFromUser } from '../application/use-cases/RemoveUnitFromUser';
 
 const assignUnitToUser = new AssignUnitToUser(userRepo);
 const getUserUnits = new GetUserUnits(userRepo);
 const updateBuildingRole = new UpdateBuildingRole(userRepo);
+const removeUnitFromUser = new RemoveUnitFromUser(userRepo);
 
 const UserUnitSchema = t.Object({
     unit_id: t.String(),
@@ -228,8 +230,8 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             security: [{ BearerAuth: [] }]
         }
     })
-    .get('/:id/units', async ({ params, query }) => {
-        return await getUserUnits.execute(params.id, {
+    .get('/:id/units', async ({ user, params, query }) => {
+        return await getUserUnits.execute(params.id, user.id, {
             page: query.page,
             limit: query.limit,
         });
@@ -245,13 +247,14 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             security: [{ BearerAuth: [] }]
         }
     })
-    .post('/:id/units', async ({ params, body }) => {
+    .post('/:id/units', async ({ user, params, body }) => {
         await assignUnitToUser.execute({
             userId: params.id,
             unitId: body.unit_id,
             buildingId: body.building_id,
             buildingRole: body.building_role,
-            isPrimary: body.is_primary ?? false
+            isPrimary: body.is_primary ?? false,
+            requesterId: user.id,
         });
         return { success: true };
     }, {
@@ -265,6 +268,21 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         detail: {
             tags: ['Admin - Users'],
             summary: 'Assign unit to user (Admin/Board)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .delete('/:id/units/:unitId', async ({ user, params }) => {
+        await removeUnitFromUser.execute({
+            targetUserId: params.id,
+            unitId: params.unitId,
+            requesterId: user.id,
+        });
+        return { success: true };
+    }, {
+        response: SuccessResponse,
+        detail: {
+            tags: ['Admin - Users'],
+            summary: 'Remove unit assignment from user (Admin/Board, building-scoped)',
             security: [{ BearerAuth: [] }]
         }
     })

@@ -109,6 +109,76 @@ describe("GetUsers Building Filter", () => {
         expect(result.data[1].id).toBe("user-2");
     });
 
+    test("board requester sees only embedded units/buildingRoles in their scope", async () => {
+        const board = new User({
+            id: "board-1",
+            email: "board@test.com",
+            name: "Board A",
+            app_role: 'user' as const,
+            status: UserStatus.ACTIVE,
+            buildingRoles: [new BuildingRole({ building_id: "building-A", role: "board" })],
+        });
+
+        const usersInBuilding = [
+            new User({
+                id: "user-1",
+                email: "u1@test.com",
+                name: "User 1",
+                app_role: 'user' as const,
+                status: UserStatus.ACTIVE,
+                units: [
+                    { unit_id: "u1a", building_id: "building-A", is_primary: true } as any,
+                    { unit_id: "u1b", building_id: "building-B", is_primary: false } as any,
+                ],
+                buildingRoles: [
+                    new BuildingRole({ building_id: "building-A", role: "board" }),
+                    new BuildingRole({ building_id: "building-B", role: "board" }),
+                ],
+            }),
+        ];
+
+        mockRepo.findById = mock(async () => board);
+        mockRepo.findAllPaginated = mock(async () => ({ items: usersInBuilding, total: 1 }));
+
+        const result = await useCase.execute({
+            requesterId: "board-1",
+            filters: { building_id: "building-A" },
+        });
+
+        expect(result.data[0].units.map(u => u.building_id)).toEqual(["building-A"]);
+        expect(result.data[0].buildingRoles.map(r => r.building_id)).toEqual(["building-A"]);
+    });
+
+    test("admin requester: embedded units/buildingRoles are not filtered", async () => {
+        const admin = new User({
+            id: "admin-1",
+            email: "a@test.com",
+            name: "Admin",
+            app_role: 'admin' as const,
+            status: UserStatus.ACTIVE,
+        });
+        const usersInBuilding = [
+            new User({
+                id: "user-1",
+                email: "u1@test.com",
+                name: "User 1",
+                app_role: 'user' as const,
+                status: UserStatus.ACTIVE,
+                units: [
+                    { unit_id: "u1a", building_id: "building-A", is_primary: true } as any,
+                    { unit_id: "u1b", building_id: "building-B", is_primary: false } as any,
+                ],
+                buildingRoles: [],
+            }),
+        ];
+        mockRepo.findById = mock(async () => admin);
+        mockRepo.findAllPaginated = mock(async () => ({ items: usersInBuilding, total: 1 }));
+
+        const result = await useCase.execute({ requesterId: "admin-1" });
+
+        expect(result.data[0].units.length).toBe(2);
+    });
+
     test("paginates through the repo when explicit page + limit are provided", async () => {
         const admin = new User({
             id: "admin-1",

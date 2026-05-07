@@ -36,6 +36,11 @@ class MockUserRepository implements IUserRepository {
         const units = user?.units ?? [];
         return { items: units, total: units.length };
     }
+    async removeUnit(userId: string, unitId: string): Promise<void> {
+        const user = this.users.get(userId);
+        if (!user) return;
+        user.setUnits(user.units.filter(u => u.unit_id !== unitId));
+    }
     async delete(id: string): Promise<void> {
         this.users.delete(id);
     }
