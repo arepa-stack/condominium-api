@@ -1,0 +1,17 @@
+name: Deploy Prod (SSH)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Prod
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: prod
+      working_directory: /orgs/condominium/condominium-api-prod
+      branch: main
+      container_name: condominium-api-prod
+      image_name: condominium-api-prod
+      host_port: "3001"
+    secrets: inherit

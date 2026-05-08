@@ -1,0 +1,17 @@
+name: Deploy Beta (SSH)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Beta
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: beta
+      working_directory: /orgs/condominium/condominium-api
+      branch: beta
+      container_name: condominium-api
+      image_name: condominium-api
+      host_port: "3000"
+    secrets: inherit

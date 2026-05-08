@@ -1,15 +1,40 @@
 name: Deploy (SSH)
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Nombre del entorno (beta, prod)"
+        required: true
+        type: string
+      working_directory:
+        description: "Ruta absoluta en el servidor"
+        required: true
+        type: string
+      branch:
+        description: "Rama git a desplegar"
+        required: true
+        type: string
+      container_name:
+        description: "Nombre del contenedor Docker"
+        required: true
+        type: string
+      image_name:
+        description: "Nombre/tag de la imagen Docker"
+        required: true
+        type: string
+      host_port:
+        description: "Puerto del host (el contenedor expone 3000 internamente)"
+        required: true
+        type: string
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ inputs.environment }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy to server
+    name: Deploy ${{ inputs.environment }} to server
     runs-on: ubuntu-latest
     if: contains(fromJSON('["jholbert1","diangogav"]'), github.actor)
 
@@ -22,14 +47,16 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -euo pipefail
-            cd /orgs/condominium/condominium-api
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git config --global --add safe.directory /orgs/condominium/condominium-api
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git pull origin main
+            cd ${{ inputs.working_directory }}
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git config --global --add safe.directory ${{ inputs.working_directory }}
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git fetch origin ${{ inputs.branch }}
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git checkout ${{ inputs.branch }}
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S git reset --hard origin/${{ inputs.branch }}
 
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker build -t condominium-api .
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker build -t ${{ inputs.image_name }} .
 
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker stop condominium-api || true
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker rm condominium-api || true
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker stop ${{ inputs.container_name }} || true
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker rm ${{ inputs.container_name }} || true
 
-            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker run -d --name condominium-api -p 127.0.0.1:3000:3000 --env-file ./.env condominium-api
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker run -d --name ${{ inputs.container_name }} -p 127.0.0.1:${{ inputs.host_port }}:3000 --env-file ./.env ${{ inputs.image_name }}
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S docker image prune -f
