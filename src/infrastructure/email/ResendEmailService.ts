@@ -39,7 +39,7 @@ export class ResendEmailService implements IEmailService {
 
     async send(input: SendEmailInput): Promise<SendEmailResult> {
         const from = input.from ?? this.defaultFrom;
-
+        console.log('Sending email', { to: input.to, subject: input.subject, from });
         const { data, error } = await this.client.emails.send({
             from,
             to: input.to,
