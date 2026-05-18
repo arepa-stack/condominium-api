@@ -6,6 +6,7 @@ import { renderEmail } from '@/infrastructure/email/templates/render';
 import { ResidentApprovedEmail } from '@/infrastructure/email/templates/ResidentApprovedEmail';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
 import { Config } from '@/core/config';
+import { logger } from '@/core/logger';
 import * as React from 'react';
 
 interface ApproveUserDTO {
@@ -56,24 +57,36 @@ export class ApproveUser {
             await this.authRepo.changePassword(targetUser.id, temporaryPassword);
             targetUser.updateProfile({ must_change_password: true });
 
-            const primaryUnit = targetUser.units[0];
-            const { html, text } = await renderEmail(
-                React.createElement(ResidentApprovedEmail, {
-                    name: targetUser.name,
-                    email: targetUser.email,
-                    temporaryPassword,
-                    unitName: primaryUnit?.unit_name ?? '',
-                    buildingName: primaryUnit?.building_name ?? '',
-                    loginUrl: Config.APP_WEB_URL,
-                })
-            );
+            // Persist approval before attempting email — status must be saved even if email fails
+            await this.userRepo.update(targetUser);
 
-            await this.emailService.send({
-                to: targetUser.email,
-                subject: `¡Fuiste aprobado! Accede a Condominio`,
-                html,
-                text,
-            });
+            const primaryUnit = targetUser.units[0];
+            try {
+                const { html, text } = await renderEmail(
+                    React.createElement(ResidentApprovedEmail, {
+                        name: targetUser.name,
+                        email: targetUser.email,
+                        temporaryPassword,
+                        unitName: primaryUnit?.unit_name ?? '',
+                        buildingName: primaryUnit?.building_name ?? '',
+                        loginUrl: Config.APP_WEB_URL,
+                    })
+                );
+                await this.emailService.send({
+                    to: targetUser.email,
+                    subject: `¡Fuiste aprobado! Accede a Condominio`,
+                    html,
+                    text,
+                });
+            } catch (emailError) {
+                logger.error({
+                    type: 'approve_user_email_failed',
+                    userId: targetUser.id,
+                    email: targetUser.email,
+                    message: (emailError as Error).message,
+                });
+            }
+            return;
         }
 
         await this.userRepo.update(targetUser);
