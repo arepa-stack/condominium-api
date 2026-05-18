@@ -1,11 +1,14 @@
 import { randomUUID } from 'crypto';
-import { RegistrationRequest } from '../../domain/entities/RegistrationRequest';
-import { IUnitInvitationRepository, IRegistrationRequestRepository } from '../../domain/repository';
-import { IBuildingRepository } from '@/modules/buildings/domain/repository';
+import { IUnitInvitationRepository } from '../../domain/repository';
+import { IBuildingRepository, IUnitRepository } from '@/modules/buildings/domain/repository';
+import { IAuthRepository } from '@/modules/auth/domain/repository';
+import { IUserRepository } from '@/modules/users/domain/repository';
 import { IEmailService } from '@/core/domain/ports/IEmailService';
+import { User } from '@/modules/users/domain/entities/User';
+import { UserUnit } from '@/modules/users/domain/entities/UserUnit';
 import { renderEmail } from '@/infrastructure/email/templates/render';
 import { NewRegistrationRequestEmail } from '@/infrastructure/email/templates/NewRegistrationRequestEmail';
-import { IUnitRepository } from '@/modules/buildings/domain/repository';
+import { UserStatus } from '@/core/domain/enums';
 import { DomainError, NotFoundError } from '@/core/errors';
 import * as React from 'react';
 import { Config } from '@/core/config';
@@ -18,16 +21,29 @@ export interface AcceptUnitInvitationDTO {
     phone?: string;
 }
 
+export interface PendingInvitationDTO {
+    id: string;
+    building_id: string;
+    unit_id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    source: 'invitation';
+    status: 'pending';
+    created_at: Date;
+}
+
 export class AcceptUnitInvitation {
     constructor(
         private invitationRepo: IUnitInvitationRepository,
-        private requestRepo: IRegistrationRequestRepository,
         private unitRepo: IUnitRepository,
         private buildingRepo: IBuildingRepository,
+        private authRepo: IAuthRepository,
+        private userRepo: IUserRepository,
         private emailService: IEmailService
     ) {}
 
-    async execute(dto: AcceptUnitInvitationDTO): Promise<RegistrationRequest> {
+    async execute(dto: AcceptUnitInvitationDTO): Promise<PendingInvitationDTO> {
         const invitation = await this.invitationRepo.findByToken(dto.token);
         if (!invitation) throw new NotFoundError('Invitation not found');
         if (!invitation.isUsable()) {
@@ -44,9 +60,8 @@ export class AcceptUnitInvitation {
         const building = await this.buildingRepo.findById(invitation.building_id);
         if (!building) throw new NotFoundError('Building not found');
 
-        const approved = await this.requestRepo.countApprovedResidentsForUnit(invitation.unit_id);
-        const pendingReqs = await this.requestRepo.countPendingRequestsForUnit(invitation.unit_id);
-        if (approved + pendingReqs >= building.max_residents_per_unit) {
+        const currentCount = await this.userRepo.countResidentsForUnit(invitation.unit_id);
+        if (currentCount >= building.max_residents_per_unit) {
             throw new DomainError(
                 `Unit has reached max resident capacity (${building.max_residents_per_unit})`,
                 'UNIT_CAPACITY_EXCEEDED',
@@ -54,28 +69,35 @@ export class AcceptUnitInvitation {
             );
         }
 
-        const request = new RegistrationRequest({
-            id: randomUUID(),
-            building_id: invitation.building_id,
-            unit_id: invitation.unit_id,
+        // Create auth user with a random placeholder password (real creds sent upon admin approval)
+        const authUser = await this.authRepo.createUser(invitation.invitee_email, randomUUID());
+
+        const user = new User({
+            id: authUser.id,
             email: invitation.invitee_email,
-            first_name: dto.firstName,
-            last_name: dto.lastName,
-            document_id: dto.documentId,
+            name: `${dto.firstName} ${dto.lastName}`,
             phone: dto.phone,
+            document_id: dto.documentId,
             source: 'invitation',
-            invited_by_profile_id: invitation.inviter_profile_id,
-            invitation_id: invitation.id,
-            status: 'pending',
-            created_at: new Date(),
+            app_role: 'user',
+            status: UserStatus.PENDING,
+            must_change_password: true,
         });
 
-        const saved = await this.requestRepo.create(request);
+        user.setUnits([
+            new UserUnit({
+                unit_id: invitation.unit_id,
+                building_id: invitation.building_id,
+                is_primary: currentCount === 0,
+            }),
+        ]);
+
+        const savedUser = await this.userRepo.create(user);
 
         invitation.claim();
         await this.invitationRepo.update(invitation);
 
-        const boardMembers = await this.requestRepo.findBoardMembersForBuilding(invitation.building_id);
+        const boardMembers = await this.userRepo.findBoardMembersForBuilding(invitation.building_id);
         await Promise.allSettled(
             boardMembers.map(async (bm) => {
                 const { html, text } = await renderEmail(
@@ -85,7 +107,7 @@ export class AcceptUnitInvitation {
                         applicantEmail: invitation.invitee_email,
                         unitName: unit.name,
                         buildingName: building.name,
-                        adminUrl: `${Config.APP_WEB_URL}/admin/registration-requests/${saved.id}`,
+                        adminUrl: `${Config.APP_WEB_URL}/admin/users?status=pending`,
                     })
                 );
                 await this.emailService.send({
@@ -97,6 +119,16 @@ export class AcceptUnitInvitation {
             })
         );
 
-        return saved;
+        return {
+            id: savedUser.id,
+            building_id: invitation.building_id,
+            unit_id: invitation.unit_id,
+            email: invitation.invitee_email,
+            first_name: dto.firstName,
+            last_name: dto.lastName,
+            source: 'invitation',
+            status: 'pending',
+            created_at: savedUser.created_at,
+        };
     }
 }

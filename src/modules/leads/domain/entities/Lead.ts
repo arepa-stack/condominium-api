@@ -1,5 +1,7 @@
 import { ValidationError } from '@/core/errors';
 
+export type LeadStatus = 'new' | 'viewed' | 'contacted' | 'archived';
+
 export interface LeadProps {
     id?: string;
     full_name: string;
@@ -8,6 +10,9 @@ export interface LeadProps {
     building_name: string;
     location: string;
     estimated_users: string;
+    status?: LeadStatus;
+    viewed_at?: Date;
+    contacted_at?: Date;
     created_at?: Date;
 }
 
@@ -16,6 +21,9 @@ export class Lead {
         this.validate();
         if (!this.props.created_at) {
             this.props.created_at = new Date();
+        }
+        if (!this.props.status) {
+            this.props.status = 'new';
         }
     }
 
@@ -67,7 +75,26 @@ export class Lead {
     get building_name(): string { return this.props.building_name; }
     get location(): string { return this.props.location; }
     get estimated_users(): string { return this.props.estimated_users; }
+    get status(): LeadStatus { return this.props.status ?? 'new'; }
+    get viewed_at(): Date | undefined { return this.props.viewed_at; }
+    get contacted_at(): Date | undefined { return this.props.contacted_at; }
     get created_at(): Date { return this.props.created_at!; }
+
+    markViewed(): void {
+        if (this.props.status === 'new') {
+            this.props.status = 'viewed';
+            this.props.viewed_at = new Date();
+        }
+    }
+
+    markContacted(): void {
+        this.props.status = 'contacted';
+        this.props.contacted_at = new Date();
+    }
+
+    archive(): void {
+        this.props.status = 'archived';
+    }
 
     public toPlain(): LeadProps {
         return { ...this.props };

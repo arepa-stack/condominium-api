@@ -1,10 +1,13 @@
 import { randomUUID } from 'crypto';
-import { RegistrationRequest } from '../../domain/entities/RegistrationRequest';
-import { IRegistrationRequestRepository } from '../../domain/repository';
 import { IBuildingRepository, IUnitRepository } from '@/modules/buildings/domain/repository';
+import { IAuthRepository } from '@/modules/auth/domain/repository';
+import { IUserRepository } from '@/modules/users/domain/repository';
 import { IEmailService } from '@/core/domain/ports/IEmailService';
+import { User } from '@/modules/users/domain/entities/User';
+import { UserUnit } from '@/modules/users/domain/entities/UserUnit';
 import { renderEmail } from '@/infrastructure/email/templates/render';
 import { NewRegistrationRequestEmail } from '@/infrastructure/email/templates/NewRegistrationRequestEmail';
+import { UserStatus } from '@/core/domain/enums';
 import { DomainError, NotFoundError } from '@/core/errors';
 import * as React from 'react';
 import { Config } from '@/core/config';
@@ -19,15 +22,28 @@ export interface SubmitRegistrationRequestDTO {
     phone?: string;
 }
 
+export interface PendingRegistrationDTO {
+    id: string;
+    building_id: string;
+    unit_id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    source: 'qr';
+    status: 'pending';
+    created_at: Date;
+}
+
 export class SubmitRegistrationRequest {
     constructor(
-        private requestRepo: IRegistrationRequestRepository,
         private buildingRepo: IBuildingRepository,
         private unitRepo: IUnitRepository,
+        private authRepo: IAuthRepository,
+        private userRepo: IUserRepository,
         private emailService: IEmailService
     ) {}
 
-    async execute(dto: SubmitRegistrationRequestDTO): Promise<RegistrationRequest> {
+    async execute(dto: SubmitRegistrationRequestDTO): Promise<PendingRegistrationDTO> {
         const building = await this.buildingRepo.findByCode(dto.buildingCode);
         if (!building) throw new NotFoundError('Building not found');
 
@@ -36,18 +52,17 @@ export class SubmitRegistrationRequest {
             throw new DomainError('Unit does not belong to this building', 'INVALID_UNIT', 400);
         }
 
-        const alreadyPending = await this.requestRepo.hasPendingRequestForEmail(building.id, dto.email);
-        if (alreadyPending) {
+        const alreadyRegistered = await this.userRepo.hasProfileForEmailInBuilding(building.id, dto.email);
+        if (alreadyRegistered) {
             throw new DomainError(
-                'There is already a pending registration request for this email',
+                'There is already a registration for this email in this building',
                 'DUPLICATE_REQUEST',
                 409
             );
         }
 
-        const approved = await this.requestRepo.countApprovedResidentsForUnit(dto.unitId);
-        const pending = await this.requestRepo.countPendingRequestsForUnit(dto.unitId);
-        if (approved + pending >= building.max_residents_per_unit) {
+        const currentCount = await this.userRepo.countResidentsForUnit(dto.unitId);
+        if (currentCount >= building.max_residents_per_unit) {
             throw new DomainError(
                 `This unit has reached the maximum number of residents (${building.max_residents_per_unit})`,
                 'UNIT_CAPACITY_EXCEEDED',
@@ -55,23 +70,32 @@ export class SubmitRegistrationRequest {
             );
         }
 
-        const request = new RegistrationRequest({
-            id: randomUUID(),
-            building_id: building.id,
-            unit_id: dto.unitId,
+        // Create auth user with a random placeholder password (user will get real creds upon approval)
+        const authUser = await this.authRepo.createUser(dto.email, randomUUID());
+
+        const user = new User({
+            id: authUser.id,
             email: dto.email,
-            first_name: dto.firstName,
-            last_name: dto.lastName,
-            document_id: dto.documentId,
+            name: `${dto.firstName} ${dto.lastName}`,
             phone: dto.phone,
+            document_id: dto.documentId,
             source: 'qr',
-            status: 'pending',
-            created_at: new Date(),
+            app_role: 'user',
+            status: UserStatus.PENDING,
+            must_change_password: true,
         });
 
-        const saved = await this.requestRepo.create(request);
+        user.setUnits([
+            new UserUnit({
+                unit_id: dto.unitId,
+                building_id: building.id,
+                is_primary: currentCount === 0,
+            }),
+        ]);
 
-        const boardMembers = await this.requestRepo.findBoardMembersForBuilding(building.id);
+        const savedUser = await this.userRepo.create(user);
+
+        const boardMembers = await this.userRepo.findBoardMembersForBuilding(building.id);
         await Promise.allSettled(
             boardMembers.map(async (bm) => {
                 const { html, text } = await renderEmail(
@@ -81,7 +105,7 @@ export class SubmitRegistrationRequest {
                         applicantEmail: dto.email,
                         unitName: unit.name,
                         buildingName: building.name,
-                        adminUrl: `${Config.APP_WEB_URL}/admin/registration-requests/${saved.id}`,
+                        adminUrl: `${Config.APP_WEB_URL}/admin/users?status=pending`,
                     })
                 );
                 await this.emailService.send({
@@ -93,6 +117,16 @@ export class SubmitRegistrationRequest {
             })
         );
 
-        return saved;
+        return {
+            id: savedUser.id,
+            building_id: building.id,
+            unit_id: dto.unitId,
+            email: dto.email,
+            first_name: dto.firstName,
+            last_name: dto.lastName,
+            source: 'qr',
+            status: 'pending',
+            created_at: savedUser.created_at,
+        };
     }
 }
