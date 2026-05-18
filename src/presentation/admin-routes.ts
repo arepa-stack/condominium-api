@@ -18,7 +18,7 @@ import { buildingAdminRoutes } from '@/modules/buildings/presentation/routes';
 import { userAdminRoutes, boardMemberRoutes } from '@/modules/users/presentation/routes';
 import { directoryAdminRoutes } from '@/modules/directory/presentation/routes';
 import { decisionRoutes } from '@/modules/decisions/presentation/routes';
-import { onboardingAdminRoutes } from '@/modules/onboarding/presentation/admin-routes';
+import { leadAdminRoutes } from '@/modules/leads/presentation/admin-routes';
 import { informationCenterAdminRoutes } from '@/modules/information-center/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
@@ -31,5 +31,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(boardMemberRoutes)      // board member registration (admin only)
     .use(directoryAdminRoutes)    // building members directory
     .use(decisionRoutes)          // decisions, quotes, votes, tally, charge gen
-    .use(onboardingAdminRoutes)   // registration request review (approve/reject)
+    .use(leadAdminRoutes)         // landing leads management (solicitudes)
     .use(informationCenterAdminRoutes); // announcements, rules, services

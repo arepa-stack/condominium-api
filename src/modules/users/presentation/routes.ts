@@ -20,7 +20,7 @@ const buildingRepo = new SupabaseBuildingRepository();
 const getUserById = new GetUserById(userRepo);
 const getUsers = new GetUsers(userRepo);
 const updateUser = new UpdateUser(userRepo);
-const approveUser = new ApproveUser(userRepo);
+const approveUser = new ApproveUser(userRepo, authRepo, emailService);
 const deleteUser = new DeleteUser(userRepo);
 const createUser = new CreateUser(userRepo, authRepo, buildingRepo, emailService);
 
@@ -29,11 +29,13 @@ import { AssignUnitToUser } from '../application/use-cases/AssignUnitToUser';
 import { GetUserUnits } from '../application/use-cases/GetUserUnits';
 import { UpdateBuildingRole } from '../application/use-cases/UpdateBuildingRole';
 import { RemoveUnitFromUser } from '../application/use-cases/RemoveUnitFromUser';
+import { SendPasswordReset } from '../application/use-cases/SendPasswordReset';
 
 const assignUnitToUser = new AssignUnitToUser(userRepo);
 const getUserUnits = new GetUserUnits(userRepo);
 const updateBuildingRole = new UpdateBuildingRole(userRepo);
 const removeUnitFromUser = new RemoveUnitFromUser(userRepo);
+const sendPasswordReset = new SendPasswordReset(userRepo, authRepo);
 
 const UserUnitSchema = t.Object({
     unit_id: t.String(),
@@ -55,6 +57,8 @@ const UserResponse = t.Object({
     app_role: t.Union([t.Literal('admin'), t.Literal('user')]),
     status: t.String(),
     phone: t.Optional(t.Union([t.String(), t.Null()])),
+    document_id: t.Optional(t.Union([t.String(), t.Null()])),
+    source: t.Optional(t.Union([t.Literal('qr'), t.Literal('invitation'), t.Literal('admin')])),
     units: t.Array(UserUnitSchema),
     buildingRoles: t.Array(BuildingRoleSchema),
     created_at: t.Optional(t.Any()),
@@ -227,6 +231,18 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
         detail: {
             tags: ['Admin - Users'],
             summary: 'Approve user registration (Admin/Board)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .post('/:id/send-password-reset', async ({ user, params }) => {
+        await sendPasswordReset.execute({ targetId: params.id, requesterId: user.id });
+        return { success: true };
+    }, {
+        response: SuccessResponse,
+        detail: {
+            tags: ['Admin - Users'],
+            summary: 'Send password reset email to user (Admin/Board)',
+            description: 'Sends a Supabase password recovery email to the target user. Board members can only reset passwords for users in their building.',
             security: [{ BearerAuth: [] }]
         }
     })

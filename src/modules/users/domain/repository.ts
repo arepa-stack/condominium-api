@@ -12,6 +12,12 @@ export interface FindAllUsersFilters {
     limit?: number | string;
 }
 
+export interface BoardMemberInfo {
+    profile_id: string;
+    name: string;
+    email: string;
+}
+
 export interface IUserRepository {
     create(user: User): Promise<User>;
     findById(id: string): Promise<User | null>;
@@ -29,4 +35,10 @@ export interface IUserRepository {
     ): Promise<{ items: UserUnit[]; total: number }>;
     removeUnit(userId: string, unitId: string): Promise<void>;
     delete(id: string): Promise<void>;
+    /** Count all profiles (any status) linked to a unit via profile_units. */
+    countResidentsForUnit(unitId: string): Promise<number>;
+    /** Check whether a profile with this email already has a unit in this building. */
+    hasProfileForEmailInBuilding(buildingId: string, email: string): Promise<boolean>;
+    /** Fetch board members for a building (used to send notifications). */
+    findBoardMembersForBuilding(buildingId: string): Promise<BoardMemberInfo[]>;
 }

@@ -1,35 +1,33 @@
 import { Elysia, t } from 'elysia';
-import { SupabaseRegistrationRequestRepository } from '../infrastructure/repositories/SupabaseRegistrationRequestRepository';
 import { SupabaseUnitInvitationRepository } from '../infrastructure/repositories/SupabaseUnitInvitationRepository';
 import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseBuildingRepository';
 import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { SupabaseUserRepository } from '@/modules/users/infrastructure/repositories/SupabaseUserRepository';
+import { SupabaseAuthRepository } from '@/modules/auth/infrastructure/repositories/SupabaseAuthRepository';
 import { SubmitRegistrationRequest } from '../application/use-cases/SubmitRegistrationRequest';
 import { AcceptUnitInvitation } from '../application/use-cases/AcceptUnitInvitation';
 import { GetInvitationMetadata } from '../application/use-cases/GetInvitationMetadata';
 import { emailService } from '@/infrastructure/email';
 
-const requestRepo = new SupabaseRegistrationRequestRepository();
 const invitationRepo = new SupabaseUnitInvitationRepository();
 const buildingRepo = new SupabaseBuildingRepository();
 const unitRepo = new SupabaseUnitRepository();
 const userRepo = new SupabaseUserRepository();
+const authRepo = new SupabaseAuthRepository();
 
-const submitRequest = new SubmitRegistrationRequest(requestRepo, buildingRepo, unitRepo, emailService);
-const acceptInvitation = new AcceptUnitInvitation(invitationRepo, requestRepo, unitRepo, buildingRepo, emailService);
+const submitRequest = new SubmitRegistrationRequest(buildingRepo, unitRepo, authRepo, userRepo, emailService);
+const acceptInvitation = new AcceptUnitInvitation(invitationRepo, unitRepo, buildingRepo, authRepo, userRepo, emailService);
 const getInvitationMeta = new GetInvitationMetadata(invitationRepo, unitRepo, buildingRepo, userRepo);
 
-const RegistrationRequestResponse = t.Object({
+const PendingRegistrationResponse = t.Object({
     id: t.String(),
     building_id: t.String(),
     unit_id: t.String(),
     email: t.String(),
     first_name: t.String(),
     last_name: t.String(),
-    document_id: t.String(),
-    phone: t.Optional(t.Union([t.String(), t.Null()])),
     source: t.Union([t.Literal('qr'), t.Literal('invitation')]),
-    status: t.String(),
+    status: t.Literal('pending'),
     created_at: t.Any()
 });
 
@@ -44,7 +42,7 @@ export const onboardingPublicRoutes = new Elysia()
             documentId: body.document_id,
             phone: body.phone,
         });
-        return result.toJSON();
+        return result;
     }, {
         body: t.Object({
             building_code: t.String({ minLength: 1, examples: ['COND-ABCD1234'] }),
@@ -55,11 +53,11 @@ export const onboardingPublicRoutes = new Elysia()
             document_id: t.String({ minLength: 1 }),
             phone: t.Optional(t.String()),
         }),
-        response: RegistrationRequestResponse,
+        response: PendingRegistrationResponse,
         detail: {
             tags: ['Onboarding - Public'],
             summary: 'Submit a registration request (via QR)',
-            description: 'Public endpoint used when a resident scans the building QR code and fills in the form. The Board is notified by email.'
+            description: 'Public endpoint used when a resident scans the building QR code. Creates a pending user profile. The Board is notified by email. Admin approves from the Usuarios section.'
         }
     })
     .get('/invitations/:token', async ({ params }) => {
@@ -93,7 +91,7 @@ export const onboardingPublicRoutes = new Elysia()
             documentId: body.document_id,
             phone: body.phone,
         });
-        return result.toJSON();
+        return result;
     }, {
         body: t.Object({
             first_name: t.String({ minLength: 1 }),
@@ -101,10 +99,10 @@ export const onboardingPublicRoutes = new Elysia()
             document_id: t.String({ minLength: 1 }),
             phone: t.Optional(t.String()),
         }),
-        response: RegistrationRequestResponse,
+        response: PendingRegistrationResponse,
         detail: {
             tags: ['Onboarding - Public'],
             summary: 'Accept a unit invitation',
-            description: 'Claims the invitation token, creates a pending registration request, and notifies the Board.'
+            description: 'Claims the invitation token, creates a pending user profile, and notifies the Board. Admin approves from the Usuarios section.'
         }
     });

@@ -1,10 +1,10 @@
-import { User, UserProps } from '../../domain/entities/User';
+import { User, UserProps, UserSource } from '../../domain/entities/User';
 import { UserUnit } from '../../domain/entities/UserUnit';
 import { BuildingRole } from '../../domain/entities/BuildingRole';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { UserStatus, AppRole } from '@/core/domain/enums';
-import { IUserRepository, FindAllUsersFilters } from '../../domain/repository';
+import { IUserRepository, FindAllUsersFilters, BoardMemberInfo } from '../../domain/repository';
 import { PaginationFilters, toRange } from '@/core/domain/pagination';
 
 export class SupabaseUserRepository implements IUserRepository {
@@ -17,6 +17,8 @@ export class SupabaseUserRepository implements IUserRepository {
             email: data.email,
             name: data.name,
             phone: data.phone,
+            document_id: data.document_id ?? undefined,
+            source: (data.source as UserSource) ?? 'admin',
             units: units,
             buildingRoles: buildingRoles,
             app_role: data.app_role as AppRole,
@@ -34,6 +36,8 @@ export class SupabaseUserRepository implements IUserRepository {
             email: user.email,
             name: user.name,
             phone: user.phone,
+            document_id: user.document_id ?? null,
+            source: user.source,
             app_role: user.app_role,
             status: user.status,
             must_change_password: user.must_change_password,
@@ -71,7 +75,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
+                id, email, name, phone, document_id, source, app_role, status, must_change_password, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -91,7 +95,7 @@ export class SupabaseUserRepository implements IUserRepository {
         const { data, error } = await supabase
             .from('profiles')
             .select(`
-                id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
+                id, email, name, phone, document_id, source, app_role, status, must_change_password, created_at, updated_at, 
                 profile_units(*, units(name, building_id, buildings(name))),
                 building_members(*, buildings(name))
             `)
@@ -180,7 +184,7 @@ export class SupabaseUserRepository implements IUserRepository {
     async findAll(filters?: FindAllUsersFilters): Promise<User[]> {
         // Base query with joins
         let query = supabase.from('profiles').select(`
-            id, email, name, phone, app_role, status, must_change_password, created_at, updated_at, 
+            id, email, name, phone, document_id, source, app_role, status, must_change_password, created_at, updated_at, 
             profile_units(*, units(name, building_id, buildings(name))),
             building_members(*, buildings(name))
         `);
@@ -304,5 +308,45 @@ export class SupabaseUserRepository implements IUserRepository {
         if (error) {
             throw new DomainError('Error removing user unit: ' + error.message, 'DB_ERROR', 500);
         }
+    }
+
+    async countResidentsForUnit(unitId: string): Promise<number> {
+        const { count, error } = await supabase
+            .from('profile_units')
+            .select('*', { count: 'exact', head: true })
+            .eq('unit_id', unitId);
+
+        if (error) throw new DomainError('Error counting unit residents: ' + error.message, 'DB_ERROR', 500);
+        return count ?? 0;
+    }
+
+    async hasProfileForEmailInBuilding(buildingId: string, email: string): Promise<boolean> {
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, profile_units!inner(unit_id, units!inner(building_id))')
+            .eq('email', email)
+            .eq('profile_units.units.building_id', buildingId)
+            .limit(1);
+
+        if (error) throw new DomainError('Error checking profile for email: ' + error.message, 'DB_ERROR', 500);
+        return (data?.length ?? 0) > 0;
+    }
+
+    async findBoardMembersForBuilding(buildingId: string): Promise<BoardMemberInfo[]> {
+        const { data, error } = await supabase
+            .from('building_members')
+            .select('profile_id, profiles(id, name, email)')
+            .eq('building_id', buildingId)
+            .eq('role', 'board');
+
+        if (error) throw new DomainError('Error fetching board members: ' + error.message, 'DB_ERROR', 500);
+
+        return (data || [])
+            .map((bm: any) => ({
+                profile_id: bm.profile_id,
+                name: bm.profiles?.name ?? '',
+                email: bm.profiles?.email ?? '',
+            }))
+            .filter((bm: BoardMemberInfo) => bm.email);
     }
 }

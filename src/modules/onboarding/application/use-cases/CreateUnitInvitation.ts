@@ -1,6 +1,6 @@
 import { randomUUID, randomBytes } from 'crypto';
 import { UnitInvitation } from '../../domain/entities/UnitInvitation';
-import { IUnitInvitationRepository, IRegistrationRequestRepository } from '../../domain/repository';
+import { IUnitInvitationRepository } from '../../domain/repository';
 import { IBuildingRepository, IUnitRepository } from '@/modules/buildings/domain/repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { IEmailService } from '@/core/domain/ports/IEmailService';
@@ -19,7 +19,6 @@ export interface CreateUnitInvitationDTO {
 export class CreateUnitInvitation {
     constructor(
         private invitationRepo: IUnitInvitationRepository,
-        private requestRepo: IRegistrationRequestRepository,
         private userRepo: IUserRepository,
         private unitRepo: IUnitRepository,
         private buildingRepo: IBuildingRepository,
@@ -41,10 +40,9 @@ export class CreateUnitInvitation {
         const building = await this.buildingRepo.findById(unit.building_id);
         if (!building) throw new NotFoundError('Building not found');
 
-        const approved = await this.requestRepo.countApprovedResidentsForUnit(unit.id);
-        const pendingRequests = await this.requestRepo.countPendingRequestsForUnit(unit.id);
+        const occupants = await this.userRepo.countResidentsForUnit(unit.id);
         const pendingInvitations = await this.invitationRepo.countPendingInvitationsForUnit(unit.id);
-        const total = approved + pendingRequests + pendingInvitations;
+        const total = occupants + pendingInvitations;
 
         if (total >= building.max_residents_per_unit) {
             throw new DomainError(

@@ -80,7 +80,12 @@ export class SupabaseAuthRepository implements IAuthRepository {
     }
 
     async resetPasswordForEmail(email: string): Promise<void> {
-        const { error } = await supabase.auth.resetPasswordForEmail(email);
+        const frontendUrl = process.env.FRONTEND_URL || process.env.APP_WEB_URL || '';
+        const redirectTo = frontendUrl ? `${frontendUrl}/reset-password` : undefined;
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            ...(redirectTo && { redirectTo }),
+        });
         
         if (error) {
             throw new ValidationError(error.message);

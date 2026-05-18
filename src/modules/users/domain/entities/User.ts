@@ -3,11 +3,15 @@ import { UserStatus, AppRole } from '@/core/domain/enums';
 import { UserUnit } from './UserUnit';
 import { BuildingRole } from './BuildingRole';
 
+export type UserSource = 'qr' | 'invitation' | 'admin';
+
 export interface UserProps {
     id: string;
     email: string;
     name: string;
     phone?: string;
+    document_id?: string;
+    source?: UserSource;
     units?: UserUnit[];
     buildingRoles?: BuildingRole[];
     app_role: AppRole;  // Global capability. 'admin' | 'user'.
@@ -52,6 +56,8 @@ export class User {
     get email(): string { return this.props.email; }
     get name(): string { return this.props.name; }
     get phone(): string | undefined { return this.props.phone; }
+    get document_id(): string | undefined { return this.props.document_id; }
+    get source(): UserSource { return this.props.source ?? 'admin'; }
 
     get units(): UserUnit[] { return this.props.units || []; }
     get buildingRoles(): BuildingRole[] { return this.props.buildingRoles || []; }
