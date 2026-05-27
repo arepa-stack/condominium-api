@@ -12,6 +12,8 @@ import { CreateUnit } from '../application/use-cases/CreateUnit';
 import { BatchCreateUnits } from '../application/use-cases/BatchCreateUnits';
 import { GetUnitsByBuilding } from '../application/use-cases/GetUnitsByBuilding';
 import { GetUnitById } from '../application/use-cases/GetUnitById';
+import { DeleteUnit } from '../application/use-cases/DeleteUnit';
+import { DeleteUnitsByBuilding } from '../application/use-cases/DeleteUnitsByBuilding';
 import { supabase } from '@/infrastructure/supabase';
 import { UnauthorizedError } from '@/core/errors';
 
@@ -31,6 +33,8 @@ const createUnit = new CreateUnit(unitRepo, buildingRepo);
 const batchCreateUnits = new BatchCreateUnits(unitRepo, buildingRepo);
 const getUnitsByBuilding = new GetUnitsByBuilding(unitRepo);
 const getUnitById = new GetUnitById(unitRepo);
+const deleteUnit = new DeleteUnit(unitRepo, userRepo);
+const deleteUnitsByBuilding = new DeleteUnitsByBuilding(unitRepo, buildingRepo, userRepo);
 
 const BuildingSchema = t.Object({
     id: t.String(),
@@ -74,6 +78,10 @@ const PaginatedBuildingSchema = t.Object({
 const PaginatedUnitSchema = t.Object({
     data: t.Array(UnitSchema),
     metadata: PaginationMetadataSchema
+});
+
+const DeleteUnitsByBuildingResponse = t.Object({
+    deletedCount: t.Number()
 });
 
 // Public routes — no auth required (used for registration flow)
@@ -267,6 +275,40 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
         detail: {
             tags: ['Admin - Buildings'],
             summary: 'Batch create units (Admin only)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .delete('/:id/units/:unitId', async ({ params, user }) => {
+        await deleteUnit.execute({
+            buildingId: params.id,
+            unitId: params.unitId,
+            deleterId: user.id
+        });
+        return { success: true };
+    }, {
+        response: t.Object({ success: t.Boolean() }),
+        detail: {
+            tags: ['Admin - Buildings'],
+            summary: 'Delete one unit (Admin only)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .delete('/:id/units', async ({ params, query, user }) => {
+        return await deleteUnitsByBuilding.execute({
+            buildingId: params.id,
+            deleterId: user.id,
+            excludeIds: query.excludeIds
+                ? query.excludeIds.split(',').map(v => v.trim()).filter(Boolean)
+                : []
+        });
+    }, {
+        query: t.Object({
+            excludeIds: t.Optional(t.String()),
+        }),
+        response: DeleteUnitsByBuildingResponse,
+        detail: {
+            tags: ['Admin - Buildings'],
+            summary: 'Delete units in a building (Admin only)',
             security: [{ BearerAuth: [] }]
         }
     });
