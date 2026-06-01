@@ -324,28 +324,32 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
     .post('/', async ({ body }) => {
         return await createUser.execute({
             email: body.email,
-            name: body.name,
+            firstName: body.first_name,
+            lastName: body.last_name,
+            documentId: body.document_id,
             role: body.role as any,
             building_id: body.building_id,
             unit_id: body.unit_id,
             phone: body.phone,
-            password: body.password
+            board_position: body.board_position,
         });
     }, {
         body: t.Object({
-            email: t.String(),
-            password: t.String(),
-            name: t.String(),
+            email: t.String({ format: 'email' }),
+            first_name: t.String({ minLength: 1 }),
+            last_name: t.String({ minLength: 1 }),
+            document_id: t.String({ minLength: 1 }),
             role: t.Union([t.Literal('admin'), t.Literal('board'), t.Literal('resident')]),
-            building_id: t.String(),
+            building_id: t.String({ format: 'uuid' }),
             unit_id: t.Optional(t.String()),
-            phone: t.Optional(t.String())
+            phone: t.Optional(t.String()),
+            board_position: t.Optional(t.String()),
         }),
         response: UserResponse,
         detail: {
             tags: ['Admin - Users'],
             summary: 'Create new user (Admin only)',
-            description: 'Creates a new user with specified role (e.g. board member). User is auto-activated.',
+            description: 'Creates a new user with the specified role. A temporary password is generated automatically and sent to the user by email (unified onboarding). User is auto-activated.',
             security: [{ BearerAuth: [] }]
         }
     })
@@ -375,9 +379,15 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
         return { user };
     })
     .post('/', async ({ body }) => {
+        // DEPRECATED: body still uses legacy `name` field; split it for the unified DTO.
+        const parts = body.name.trim().split(/\s+/);
+        const firstName = parts[0] ?? body.name;
+        const lastName = parts.slice(1).join(' ') || '-';
         return await createUser.execute({
             email: body.email,
-            name: body.name,
+            firstName,
+            lastName,
+            documentId: body.document_id ?? '-',
             phone: body.phone,
             role: 'board' as any,
             building_id: body.building_id,
@@ -390,12 +400,13 @@ export const boardMemberRoutes = new Elysia({ prefix: '/board-members' })
             phone: t.Optional(t.String({ examples: ['+58 412 5551234'] })),
             building_id: t.String({ format: 'uuid', examples: ['d047cca7-d97f-480f-b747-042b88c26228'] }),
             board_position: t.Optional(t.String({ examples: ['Presidente', 'Tesorero'] })),
+            document_id: t.Optional(t.String()),
         }),
         response: UserResponse,
         detail: {
             tags: ['Admin - Users'],
-            summary: 'Register a new Board Member (Admin only)',
-            description: 'Creates a board member account, assigns them to the building, and sends credentials by email. The board member must change their password on first login.',
+            summary: '[DEPRECATED] Register a new Board Member (Admin only)',
+            description: 'DEPRECATED: use POST /users with role=board instead. This endpoint is kept for backwards compatibility only.',
             security: [{ BearerAuth: [] }]
         }
     });
