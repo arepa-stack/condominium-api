@@ -7,23 +7,33 @@ import { IBuildingRepository } from '@/modules/buildings/domain/repository';
 import { IEmailService } from '@/core/domain/ports/IEmailService';
 import { generateTempPassword } from '@/core/security/password-generator';
 import { renderEmail } from '@/infrastructure/email/templates/render';
-import { BoardInviteEmail } from '@/infrastructure/email/templates/BoardInviteEmail';
+import { WelcomeCredentialsEmail } from '@/infrastructure/email/templates/WelcomeCredentialsEmail';
 import { UserRole, UserStatus } from '@/core/domain/enums';
 import { DomainError, NotFoundError } from '@/core/errors';
 import { Config } from '@/core/config';
+import { logger } from '@/core/logger';
 import * as React from 'react';
+
+const ROLE_LABELS: Record<UserRole, string> = {
+    [UserRole.ADMIN]: 'Administrador',
+    [UserRole.BOARD]: 'Miembro de Junta',
+    [UserRole.RESIDENT]: 'Residente',
+};
 
 export interface CreateUserDTO {
     email: string;
-    name: string;
+    firstName: string;
+    lastName: string;
+    /** Cédula / DNI. Requerido para unificar el modelo con el auto-registro de la app. */
+    documentId: string;
     phone?: string;
     role: UserRole;
     unit_id?: string;
     building_id?: string;
     /**
-     * Si se omite y `role === BOARD`, se genera automáticamente una contraseña
+     * Si se omite (cualquier rol), se genera automáticamente una contraseña
      * segura, se activa `must_change_password` y se envía el email de bienvenida
-     * con credenciales (flujo de onboarding).
+     * con credenciales (flujo de onboarding unificado).
      * Si se provee, se usa tal cual y no se envía email de bienvenida.
      */
     password?: string;
@@ -35,7 +45,7 @@ export class CreateUser {
     constructor(
         private userRepository: IUserRepository,
         private authRepository: IAuthRepository,
-        /** Requerido para enviar el email de bienvenida al crear un board member sin password. */
+        /** Requerido para enviar el email de bienvenida cuando no se provee password. */
         private buildingRepository?: IBuildingRepository,
         private emailService?: IEmailService
     ) {}
@@ -43,18 +53,20 @@ export class CreateUser {
     async execute(dto: CreateUserDTO): Promise<User> {
         await this.ensureUserDoesNotExist(dto.email);
 
-        const isBoardOnboarding = dto.role === UserRole.BOARD && !dto.password;
-        const password = isBoardOnboarding
-            ? generateTempPassword()
-            : (dto.password ?? generateTempPassword());
+        // Unified onboarding: whenever no password is provided (regardless of
+        // role), generate a temporary one, force a password change on first
+        // login and email the credentials to the new user.
+        const isOnboarding = !dto.password;
+        const password = isOnboarding ? generateTempPassword() : dto.password!;
+        const fullName = `${dto.firstName} ${dto.lastName}`;
 
         const authUserId = await this.createAuthUser(dto.email, password);
-        const user = this.buildUser(authUserId, dto, isBoardOnboarding);
+        const user = this.buildUser(authUserId, fullName, dto, isOnboarding);
         this.applyInitialAssignments(user, dto);
         const createdUser = await this.userRepository.create(user);
 
-        if (isBoardOnboarding) {
-            await this.sendBoardWelcomeEmail(createdUser, dto, password);
+        if (isOnboarding) {
+            await this.sendWelcomeEmail(createdUser, fullName, dto, password);
         }
 
         return createdUser;
@@ -72,12 +84,13 @@ export class CreateUser {
         return authUser.id;
     }
 
-    private buildUser(id: string, dto: CreateUserDTO, mustChangePassword: boolean): User {
+    private buildUser(id: string, name: string, dto: CreateUserDTO, mustChangePassword: boolean): User {
         return new User({
             id,
             email: dto.email,
-            name: dto.name,
+            name,
             phone: dto.phone,
+            document_id: dto.documentId,
             app_role: dto.role === UserRole.ADMIN ? 'admin' : 'user',
             status: UserStatus.ACTIVE,
             must_change_password: mustChangePassword,
@@ -105,31 +118,55 @@ export class CreateUser {
         }
     }
 
-    private async sendBoardWelcomeEmail(
+    /**
+     * Sends the welcome email with the generated temporary credentials.
+     * Non-fatal: a failure here is logged but does NOT roll back the already
+     * persisted user (the admin can re-send credentials via password reset).
+     */
+    private async sendWelcomeEmail(
         user: User,
+        fullName: string,
         dto: CreateUserDTO,
         temporaryPassword: string
     ): Promise<void> {
-        if (!this.emailService || !this.buildingRepository || !dto.building_id) return;
-
-        const building = await this.buildingRepository.findById(dto.building_id);
-        if (!building) throw new NotFoundError('Building not found');
-
-        const { html, text } = await renderEmail(
-            React.createElement(BoardInviteEmail, {
-                name: dto.name,
+        if (!this.emailService || !this.buildingRepository || !dto.building_id) {
+            logger.warn({
+                type: 'welcome_email_skipped',
+                userId: user.id,
                 email: dto.email,
-                temporaryPassword,
-                buildingName: building.name,
-                loginUrl: Config.APP_WEB_URL,
-            })
-        );
+                reason: 'missing emailService, buildingRepository or building_id',
+            });
+            return;
+        }
 
-        await this.emailService.send({
-            to: dto.email,
-            subject: `Bienvenido al panel de ${building.name} - Condominio`,
-            html,
-            text,
-        });
+        try {
+            const building = await this.buildingRepository.findById(dto.building_id);
+            if (!building) throw new NotFoundError('Building not found');
+
+            const { html, text } = await renderEmail(
+                React.createElement(WelcomeCredentialsEmail, {
+                    name: fullName,
+                    email: dto.email,
+                    temporaryPassword,
+                    buildingName: building.name,
+                    roleLabel: ROLE_LABELS[dto.role] ?? 'Usuario',
+                    loginUrl: Config.APP_WEB_URL,
+                })
+            );
+
+            await this.emailService.send({
+                to: dto.email,
+                subject: `Bienvenido a ${building.name} - Apto`,
+                html,
+                text,
+            });
+        } catch (emailError) {
+            logger.error({
+                type: 'welcome_email_failed',
+                userId: user.id,
+                email: dto.email,
+                message: (emailError as Error).message,
+            });
+        }
     }
 }
