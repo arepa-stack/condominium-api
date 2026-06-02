@@ -22,10 +22,13 @@ export class CreateUnit {
             throw new NotFoundError('Building not found');
         }
 
+        const floorPrefix = data.floor ? `${data.floor}-` : '';
+        const name = data.name.startsWith(floorPrefix) ? data.name : `${floorPrefix}${data.name}`;
+
         const unit = new Unit({
             id: crypto.randomUUID(),
             building_id: data.building_id,
-            name: data.name,
+            name: name,
             floor: data.floor,
             aliquot: data.aliquot
         });
