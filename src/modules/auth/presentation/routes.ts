@@ -123,17 +123,27 @@ export const authRoutes = new Elysia({ prefix: '/auth' })
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (error || !user) throw new UnauthorizedError('Invalid or expired token');
 
-        await changePasswordFirstLoginUseCase.execute(user.id, body.newPassword);
-        return { success: true };
+        const session = await changePasswordFirstLoginUseCase.execute(user.id, body.newPassword);
+        return {
+            success: true,
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+            expires_in: session.expires_in,
+        };
     }, {
         body: t.Object({
             newPassword: t.String({ minLength: 8, examples: ['MyNewPass1!'] })
         }),
-        response: t.Object({ success: t.Boolean() }),
+        response: t.Object({
+            success: t.Boolean(),
+            access_token: t.String(),
+            refresh_token: t.String(),
+            expires_in: t.Number(),
+        }),
         detail: {
             tags: ['Auth'],
             summary: 'Change password (first login)',
-            description: 'Forces the user to set a new password when must_change_password is true. Validates password policy (≥8 chars, 1 uppercase, 1 digit). Clears the must_change_password flag on success. Does NOT require a fresh password — this IS the endpoint that clears it.',
+            description: 'Forces the user to set a new password when must_change_password is true. Validates password policy (≥8 chars, 1 uppercase, 1 digit). Clears the must_change_password flag and returns a FRESH session (the previous token is invalidated by the password change).',
             security: [{ BearerAuth: [] }]
         }
     });

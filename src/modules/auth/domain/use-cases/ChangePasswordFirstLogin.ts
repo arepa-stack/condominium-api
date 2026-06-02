@@ -1,4 +1,4 @@
-import { IAuthRepository } from '../repository';
+import { IAuthRepository, AuthSession } from '../repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { DomainError, NotFoundError } from '@/core/errors';
 
@@ -8,7 +8,13 @@ export class ChangePasswordFirstLogin {
         private userRepo: IUserRepository
     ) {}
 
-    async execute(userId: string, newPassword: string): Promise<void> {
+    /**
+     * Cambia la contraseña temporal y devuelve una sesión nueva. Es necesario
+     * re-autenticar porque al cambiar la contraseña en el proveedor de auth el
+     * token anterior queda invalidado; sin tokens frescos el cliente recibiría
+     * 401 en la siguiente petición.
+     */
+    async execute(userId: string, newPassword: string): Promise<AuthSession> {
         this.validatePasswordPolicy(newPassword);
 
         const user = await this.userRepo.findById(userId);
@@ -20,6 +26,8 @@ export class ChangePasswordFirstLogin {
 
         user.clearPasswordChangeFlag();
         await this.userRepo.update(user);
+
+        return this.authRepo.signIn(user.email, newPassword);
     }
 
     private validatePasswordPolicy(password: string): void {
