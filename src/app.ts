@@ -8,6 +8,7 @@ import { authRoutes } from './modules/auth/presentation/routes';
 import { buildingPublicRoutes } from './modules/buildings/presentation/routes';
 import { leadRoutes } from './modules/leads/presentation/routes';
 import { onboardingPublicRoutes } from './modules/onboarding/presentation/public-routes';
+import { accountDeletionRoutes } from './modules/account-deletion/routes';
 // v1 grouped routes (APK-facing + Admin-facing)
 import { appRoutes } from './presentation/app-routes';
 import { adminRoutes } from './presentation/admin-routes';
@@ -75,6 +76,7 @@ export const app = new Elysia()
     .use(leadRoutes)
     .use(buildingPublicRoutes)
     .use(onboardingPublicRoutes)
+    .use(accountDeletionRoutes)
     .derive(({ request }) => {
         return {
             requestId: request.headers.get('x-request-id') || randomUUID()

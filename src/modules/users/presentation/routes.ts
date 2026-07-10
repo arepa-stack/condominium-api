@@ -10,7 +10,8 @@ import { ApproveUser } from '../application/use-cases/ApproveUser';
 import { DeleteUser } from '../application/use-cases/DeleteUser';
 import { emailService } from '@/infrastructure/email';
 import { UnauthorizedError } from '@/core/errors';
-import { supabase } from '@/infrastructure/supabase';
+import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
+import { logger } from '@/core/logger';
 
 // Initialize Repository and Use Cases
 // In a real DI system context, these would be injected
@@ -139,6 +140,38 @@ export const userAppRoutes = new Elysia({ prefix: '/users' })
             tags: ['App - Users'],
             summary: 'Change user password',
             description: 'Changes the password for the currently authenticated user.'
+        }
+    })
+    .delete('/me', async ({ user, body }) => {
+        // Soft delete: keep the profile row (financial records retention) but
+        // mark it deleted, store the reason, and ban the auth user so it can
+        // no longer log in and its current token is invalid.
+        const reason = (body?.reason ?? '').trim() || null;
+
+        const { error: profileErr } = await supabaseAdmin
+            .from('profiles')
+            .update({ deleted_at: new Date().toISOString(), deletion_reason: reason })
+            .eq('id', user.id);
+        if (profileErr) throw new Error(`Failed to soft-delete profile: ${profileErr.message}`);
+
+        // ban_duration far in the future = effectively permanent; also revokes
+        // active sessions. Use a long ban rather than hard-deleting the auth
+        // user so the profile FK (auth.users) stays intact.
+        const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
+            ban_duration: '876000h', // ~100 years
+        });
+        if (banErr) logger.error({ err: banErr, userId: user.id }, 'account soft-delete: ban failed');
+
+        return { success: true };
+    }, {
+        body: t.Optional(t.Object({
+            reason: t.Optional(t.String({ examples: ['Ya no vivo en el edificio'] }))
+        })),
+        response: t.Object({ success: t.Boolean() }),
+        detail: {
+            tags: ['App - Users'],
+            summary: 'Delete own account (soft delete)',
+            description: 'Soft-deletes the authenticated user account: marks the profile as deleted with an optional reason and bans the auth user so it can no longer sign in. Financial records are retained.'
         }
     });
 
