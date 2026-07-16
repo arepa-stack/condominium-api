@@ -136,7 +136,8 @@ export class SupabaseUserRepository implements IUserRepository {
             unit_name: u.units?.name,
             building_id: u.units?.building_id,
             building_name: u.units?.buildings?.name,
-            is_primary: u.is_primary
+            is_primary: u.is_primary,
+            status: u.status ?? 'active'
         }));
     }
 
@@ -156,7 +157,8 @@ export class SupabaseUserRepository implements IUserRepository {
         const unitsData = units.map(u => ({
             profile_id: userId,
             unit_id: u.unit_id,
-            is_primary: u.is_primary
+            is_primary: u.is_primary,
+            status: u.status
         }));
 
         const { error } = await supabase.from('profile_units').insert(unitsData);
@@ -199,7 +201,12 @@ export class SupabaseUserRepository implements IUserRepository {
         if (filters?.role === 'admin') {
             query = query.eq('app_role', 'admin');
         }
-        if (filters?.status) {
+        // When scoped to a building, `status` means the per-building MEMBERSHIP
+        // status (profile_units.status), applied in-memory below — a user can be
+        // active in one building and pending in another, so the account-level
+        // profiles.status can't answer it. Only apply the account-level SQL
+        // filter for the unscoped (admin-global) listing.
+        if (filters?.status && !filters?.building_id) {
             query = query.eq('status', filters.status);
         }
 
@@ -223,6 +230,15 @@ export class SupabaseUserRepository implements IUserRepository {
                 user.units.some(u => u.building_id === filters.building_id) ||
                 user.buildingRoles.some(r => r.building_id === filters.building_id)
             );
+
+            // Per-building membership status filter (see the SQL note above).
+            if (filters?.status) {
+                users = users.filter(user =>
+                    user.units.some(u => u.building_id === filters.building_id && u.status === filters.status) ||
+                    // Board-only members carry no unit status; treat them as active.
+                    (filters.status === 'active' && user.buildingRoles.some(r => r.building_id === filters.building_id))
+                );
+            }
         }
 
         if (filters?.unit_id) {

@@ -253,17 +253,22 @@ export const userAdminRoutes = new Elysia({ prefix: '/users' })
             security: [{ BearerAuth: [] }]
         }
     })
-    .post('/:id/approve', async ({ user, params }) => {
+    .post('/:id/approve', async ({ user, params, query }) => {
         await approveUser.execute({
             targetUserId: params.id,
-            approverId: user.id
+            approverId: user.id,
+            buildingId: query.building_id
         });
         return { success: true };
     }, {
+        query: t.Object({
+            building_id: t.Optional(t.String()),
+        }),
         response: SuccessResponse,
         detail: {
             tags: ['Admin - Users'],
             summary: 'Approve user registration (Admin/Board)',
+            description: 'Approves the user\'s membership in a building. Pass building_id to approve a specific building (required when the user has pending memberships in several); omitted approves all pending memberships.',
             security: [{ BearerAuth: [] }]
         }
     })

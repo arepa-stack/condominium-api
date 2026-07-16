@@ -139,6 +139,28 @@ export class User {
         this.props.updated_at = new Date();
     }
 
+    /** True if the user already holds an approved membership in any building. */
+    hasActiveUnit(): boolean {
+        return this.units.some(u => u.status === 'active');
+    }
+
+    /** Approve (activate) all pending memberships in a given building. */
+    activateUnitsInBuilding(buildingId: string): void {
+        this.props.units = this.units.map(u =>
+            u.building_id === buildingId && u.status !== 'active' ? u.withStatus('active') : u
+        );
+        this.props.updated_at = new Date();
+    }
+
+    /** Buildings where the user has a pending (unapproved) membership. */
+    getPendingBuildings(): string[] {
+        const ids = this.units
+            .filter(u => u.status === 'pending')
+            .map(u => u.building_id)
+            .filter(Boolean) as string[];
+        return Array.from(new Set(ids));
+    }
+
     setBuildingRoles(roles: BuildingRole[]) {
         this.props.buildingRoles = roles;
         this.props.updated_at = new Date();

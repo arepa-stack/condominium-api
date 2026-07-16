@@ -70,30 +70,53 @@ export class SubmitRegistrationRequest {
             );
         }
 
-        // Create auth user with a random placeholder password (user will get real creds upon approval)
-        const authUser = await this.authRepo.createUser(dto.email, randomUUID());
+        // A person is one auth user + one profile across all buildings. If they
+        // already exist (e.g. active resident of another building), reuse the
+        // profile and append a PENDING membership for this building — do NOT
+        // create a second auth user (Supabase would reject the duplicate email)
+        // and do NOT touch the account status (that would break other buildings).
+        const existing = await this.userRepo.findByEmail(dto.email);
 
-        const user = new User({
-            id: authUser.id,
-            email: dto.email,
-            name: `${dto.firstName} ${dto.lastName}`,
-            phone: dto.phone,
-            document_id: dto.documentId,
-            source: 'qr',
-            app_role: 'user',
-            status: UserStatus.PENDING,
-            must_change_password: true,
-        });
+        let savedUser: User;
+        if (existing) {
+            existing.setUnits([
+                ...existing.units,
+                new UserUnit({
+                    unit_id: dto.unitId,
+                    building_id: building.id,
+                    is_primary: false, // already has a primary unit elsewhere
+                    status: 'pending',
+                }),
+            ]);
+            savedUser = await this.userRepo.update(existing);
+        } else {
+            // Brand-new person: create auth user with a random placeholder
+            // password (real creds sent on approval).
+            const authUser = await this.authRepo.createUser(dto.email, randomUUID());
 
-        user.setUnits([
-            new UserUnit({
-                unit_id: dto.unitId,
-                building_id: building.id,
-                is_primary: currentCount === 0,
-            }),
-        ]);
+            const user = new User({
+                id: authUser.id,
+                email: dto.email,
+                name: `${dto.firstName} ${dto.lastName}`,
+                phone: dto.phone,
+                document_id: dto.documentId,
+                source: 'qr',
+                app_role: 'user',
+                status: UserStatus.PENDING,
+                must_change_password: true,
+            });
 
-        const savedUser = await this.userRepo.create(user);
+            user.setUnits([
+                new UserUnit({
+                    unit_id: dto.unitId,
+                    building_id: building.id,
+                    is_primary: currentCount === 0,
+                    status: 'pending',
+                }),
+            ]);
+
+            savedUser = await this.userRepo.create(user);
+        }
 
         const boardMembers = await this.userRepo.findBoardMembersForBuilding(building.id);
         await Promise.allSettled(

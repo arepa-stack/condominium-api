@@ -69,30 +69,50 @@ export class AcceptUnitInvitation {
             );
         }
 
-        // Create auth user with a random placeholder password (real creds sent upon admin approval)
-        const authUser = await this.authRepo.createUser(invitation.invitee_email, randomUUID());
+        // One auth user + one profile per person across buildings. Reuse an
+        // existing profile (e.g. resident of another building) and append a
+        // PENDING membership; only create a new auth user for a brand-new person.
+        const existing = await this.userRepo.findByEmail(invitation.invitee_email);
 
-        const user = new User({
-            id: authUser.id,
-            email: invitation.invitee_email,
-            name: `${dto.firstName} ${dto.lastName}`,
-            phone: dto.phone,
-            document_id: dto.documentId,
-            source: 'invitation',
-            app_role: 'user',
-            status: UserStatus.PENDING,
-            must_change_password: true,
-        });
+        let savedUser: User;
+        if (existing) {
+            existing.setUnits([
+                ...existing.units,
+                new UserUnit({
+                    unit_id: invitation.unit_id,
+                    building_id: invitation.building_id,
+                    is_primary: false,
+                    status: 'pending',
+                }),
+            ]);
+            savedUser = await this.userRepo.update(existing);
+        } else {
+            // Create auth user with a random placeholder password (real creds sent upon admin approval)
+            const authUser = await this.authRepo.createUser(invitation.invitee_email, randomUUID());
 
-        user.setUnits([
-            new UserUnit({
-                unit_id: invitation.unit_id,
-                building_id: invitation.building_id,
-                is_primary: currentCount === 0,
-            }),
-        ]);
+            const user = new User({
+                id: authUser.id,
+                email: invitation.invitee_email,
+                name: `${dto.firstName} ${dto.lastName}`,
+                phone: dto.phone,
+                document_id: dto.documentId,
+                source: 'invitation',
+                app_role: 'user',
+                status: UserStatus.PENDING,
+                must_change_password: true,
+            });
 
-        const savedUser = await this.userRepo.create(user);
+            user.setUnits([
+                new UserUnit({
+                    unit_id: invitation.unit_id,
+                    building_id: invitation.building_id,
+                    is_primary: currentCount === 0,
+                    status: 'pending',
+                }),
+            ]);
+
+            savedUser = await this.userRepo.create(user);
+        }
 
         invitation.claim();
         await this.invitationRepo.update(invitation);

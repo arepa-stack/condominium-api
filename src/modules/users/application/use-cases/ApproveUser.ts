@@ -12,6 +12,9 @@ import * as React from 'react';
 interface ApproveUserDTO {
     targetUserId: string;
     approverId: string;
+    // Building whose membership is being approved. Optional: when omitted, all
+    // of the target's pending memberships are approved (admin / single-building).
+    buildingId?: string;
 }
 
 export class ApproveUser {
@@ -21,7 +24,7 @@ export class ApproveUser {
         private emailService?: IEmailService
     ) { }
 
-    async execute({ targetUserId, approverId }: ApproveUserDTO): Promise<void> {
+    async execute({ targetUserId, approverId, buildingId }: ApproveUserDTO): Promise<void> {
         const approver = await this.userRepo.findById(approverId);
         if (!approver) {
             throw new NotFoundError('Approver not found');
@@ -36,22 +39,36 @@ export class ApproveUser {
             throw new NotFoundError('Target user not found');
         }
 
-        // Board members can only approve users in their building
-        if (approver.isBoardMember()) {
+        // Which building memberships are we approving? An explicit buildingId, or
+        // every pending membership the user has.
+        const buildingsToApprove = buildingId ? [buildingId] : targetUser.getPendingBuildings();
+        if (buildingsToApprove.length === 0) {
+            throw new NotFoundError('No pending membership to approve for this user');
+        }
+
+        // Board members can only approve memberships in buildings they govern.
+        if (approver.isBoardMember() && !approver.isAdmin()) {
             const approverBuildings = new Set(approver.getBuildingsWhereBoard());
-            const targetBuildings = targetUser.units.map(u => u.building_id).filter(Boolean);
-
-            const hasCommonBuilding = targetBuildings.some(b => approverBuildings.has(b as string));
-
-            if (!hasCommonBuilding) {
+            const outsideScope = buildingsToApprove.some(b => !approverBuildings.has(b));
+            if (outsideScope) {
                 throw new ForbiddenError('You can only approve users from your building');
             }
         }
 
-        targetUser.approve();
+        // Whether the user already has an approved membership elsewhere BEFORE this
+        // approval — decides if they still need first-time credentials.
+        const alreadyActive = targetUser.hasActiveUnit();
 
-        // For QR / invitation users: set a new temp password and send credentials
-        const needsCredentials = targetUser.source === 'qr' || targetUser.source === 'invitation';
+        for (const b of buildingsToApprove) {
+            targetUser.activateUnitsInBuilding(b);
+        }
+        targetUser.approve(); // account-level active (no-op if already active)
+
+        // Send first-time credentials only for QR/invitation users who are not yet
+        // active anywhere. An existing resident approved into a new building keeps
+        // the password they already use — no new credentials are issued.
+        const needsCredentials =
+            !alreadyActive && (targetUser.source === 'qr' || targetUser.source === 'invitation');
         if (needsCredentials && this.authRepo && this.emailService) {
             const temporaryPassword = generateTempPassword();
             await this.authRepo.changePassword(targetUser.id, temporaryPassword);
@@ -72,9 +89,10 @@ export class ApproveUser {
                         loginUrl: Config.APP_WEB_URL,
                     })
                 );
+                const bn = primaryUnit?.building_name;
                 await this.emailService.send({
                     to: targetUser.email,
-                    subject: `¡Fuiste aprobado! Accede a Condominio`,
+                    subject: bn ? `¡Fuiste aprobado! Accede a Apto — ${bn}` : `¡Fuiste aprobado! Accede a Apto`,
                     html,
                     text,
                 });
