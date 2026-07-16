@@ -19,12 +19,12 @@ export function WelcomeEmail({ name, ctaUrl = 'https://nibs-tech.com' }: Welcome
     return (
         <Html lang="es">
             <Head />
-            <Preview>Bienvenido a Condominio, {name}</Preview>
+            <Preview>Bienvenido a Apto, {name}</Preview>
             <Body style={bodyStyle}>
                 <Container style={containerStyle}>
                     <Heading style={headingStyle}>Bienvenido, {name}</Heading>
                     <Text style={textStyle}>
-                        Tu cuenta en Condominio ha sido creada exitosamente. Ya puedes acceder a la
+                        Tu cuenta en Apto ha sido creada exitosamente. Ya puedes acceder a la
                         aplicación y gestionar tu residencia de forma sencilla.
                     </Text>
                     <Button href={ctaUrl} style={buttonStyle}>

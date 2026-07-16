@@ -85,7 +85,7 @@ export class CreateUnitInvitation {
 
         await this.emailService.send({
             to: dto.inviteeEmail,
-            subject: `Te invitaron a unirte a ${building.name} — Condominio`,
+            subject: `Te invitaron a unirte a ${building.name} — Apto`,
             html,
             text,
         });
