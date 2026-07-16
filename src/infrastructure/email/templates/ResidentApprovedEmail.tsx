@@ -80,7 +80,7 @@ export function ResidentApprovedEmail({
     loginUrl,
 }: ResidentApprovedEmailProps) {
     return (
-        <EmailLayout preview={`¡Aprobado! Accede a Condominio — ${buildingName}`}>
+        <EmailLayout preview={`¡Aprobado! Accede a Apto — ${buildingName}`}>
             <Text style={headingStyle}>¡Tu solicitud fue aprobada! 🎉</Text>
             <Text style={bodyText}>
                 Hola <strong>{name}</strong>, tu solicitud de ingreso a la unidad <strong>{unitName}</strong> en

@@ -7,7 +7,7 @@ import { logger } from '@/core/logger';
 // ponytail: no DB record, just an email to the admin. Add a table if volume
 // ever needs tracking/auditing.
 const ADMIN_INBOX = 'adminnibstech@gmail.com';
-const APP_NAME = 'Condominio';
+const APP_NAME = 'Apto';
 const DEVELOPER_NAME = 'NIBS Tech';
 
 const esc = (s: string) =>

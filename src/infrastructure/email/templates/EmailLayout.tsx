@@ -57,7 +57,7 @@ export function EmailLayout({ preview, children }: EmailLayoutProps) {
             <Body style={{ backgroundColor: '#f3f4f6', fontFamily: 'Inter, Arial, sans-serif', margin: 0, padding: '40px 0' }}>
                 <Container style={containerStyle}>
                     <Section style={headerStyle}>
-                        <Text style={brandStyle}>🏢 Condominio</Text>
+                        <Text style={brandStyle}>🏢 Apto</Text>
                     </Section>
                     <Section style={bodyContainerStyle}>
                         {children}

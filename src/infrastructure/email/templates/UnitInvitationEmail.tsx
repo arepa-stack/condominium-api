@@ -58,7 +58,7 @@ export function UnitInvitationEmail({
             <Text style={headingStyle}>{greeting} 👋</Text>
             <Text style={bodyText}>
                 <strong>{inviterName}</strong> te ha invitado a unirte a la unidad <strong>{unitName}</strong> en
-                el edificio <strong>{buildingName}</strong> a través de la plataforma <strong>Condominio</strong>.
+                el edificio <strong>{buildingName}</strong> a través de la plataforma <strong>Apto</strong>.
             </Text>
             <Text style={bodyText}>
                 Haz clic en el botón de abajo para completar tu solicitud de ingreso. El Miembro de Junta revisará
