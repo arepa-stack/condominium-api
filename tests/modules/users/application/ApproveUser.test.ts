@@ -59,7 +59,7 @@ describe('ApproveUser Use Case', () => {
         const u = new User({
             id, email: 'res@test.com', name: 'Res', app_role: 'user' as const, status: UserStatus.PENDING, created_at: new Date(), updated_at: new Date()
         });
-        u.setUnits([new UserUnit({ unit_id: 'u1', building_id: buildingId, is_primary: true })]);
+        u.setUnits([new UserUnit({ unit_id: 'u1', building_id: buildingId, is_primary: true, status: 'pending' })]);
         return u;
     };
 
@@ -142,6 +142,40 @@ describe('ApproveUser Use Case', () => {
 
         const updated = await repo.findById('res1');
         expect(updated?.status).toBe(UserStatus.ACTIVE);
+    });
+
+    it('approves only the targeted building for a multi-building user, leaving the other active', async () => {
+        const admin = createAdmin('admin1');
+        const multi = new User({
+            id: 'multi', email: 'multi@test.com', name: 'Multi', app_role: 'user' as const,
+            status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+        });
+        multi.setUnits([
+            new UserUnit({ unit_id: 'uA', building_id: 'buildingA', is_primary: true, status: 'active' }),
+            new UserUnit({ unit_id: 'uB', building_id: 'buildingB', is_primary: false, status: 'pending' }),
+        ]);
+        await repo.create(admin);
+        await repo.create(multi);
+
+        await useCase.execute({ targetUserId: 'multi', approverId: 'admin1', buildingId: 'buildingB' });
+
+        const updated = await repo.findById('multi');
+        expect(updated?.units.find(u => u.building_id === 'buildingA')?.status).toBe('active');
+        expect(updated?.units.find(u => u.building_id === 'buildingB')?.status).toBe('active');
+    });
+
+    it('fails when there is no pending membership to approve', async () => {
+        const admin = createAdmin('admin1');
+        const active = new User({
+            id: 'active1', email: 'a@test.com', name: 'A', app_role: 'user' as const,
+            status: UserStatus.ACTIVE, created_at: new Date(), updated_at: new Date()
+        });
+        active.setUnits([new UserUnit({ unit_id: 'uA', building_id: 'buildingA', is_primary: true, status: 'active' })]);
+        await repo.create(admin);
+        await repo.create(active);
+
+        expect(useCase.execute({ targetUserId: 'active1', approverId: 'admin1' }))
+            .rejects.toThrow(NotFoundError);
     });
 
     it('should fail when board member has a unit but no building role', async () => {
