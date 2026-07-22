@@ -21,7 +21,7 @@ export interface CreateDirectDecisionInput {
   providerName: string;
   amount: number;
   notes?: string;
-  fileUrl: string;
+  fileUrl?: string;
   reason: string;
 }
 
@@ -72,7 +72,7 @@ export class CreateDirectDecision {
       provider_name: input.providerName,
       amount: input.amount,
       notes: input.notes ?? null,
-      file_url: input.fileUrl,
+      file_url: input.fileUrl ?? null,
     });
 
     const decision = await this.decisions.create(decisionToCreate);

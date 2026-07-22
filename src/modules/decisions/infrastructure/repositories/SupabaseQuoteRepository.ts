@@ -33,7 +33,7 @@ export class SupabaseQuoteRepository implements DecisionQuoteRepository {
       provider_name: row.provider_name as string,
       amount: Number(row.amount),
       notes: (row.notes as string | null) ?? null,
-      file_url: row.file_url as string,
+      file_url: (row.file_url as string | null) ?? null,
       deleted_at: row.deleted_at ? new Date(row.deleted_at as string) : undefined,
       deleted_by: (row.deleted_by as string | null) ?? undefined,
       deletion_reason: (row.deletion_reason as string | null) ?? undefined,

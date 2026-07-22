@@ -9,7 +9,7 @@ export interface DecisionQuoteProps {
     provider_name: string;
     amount: number;
     notes?: string | null;
-    file_url: string;
+    file_url?: string | null;
     deleted_at?: Date | null;
     deleted_by?: string | null;
     deletion_reason?: string | null;
@@ -28,7 +28,9 @@ export class DecisionQuote {
         if (name.length < 2 || name.length > 200) {
             throw new DomainError('provider_name length 2..200', 'VALIDATION_ERROR', 400);
         }
-        if (!props.file_url?.trim()) throw new DomainError('file_url required', 'VALIDATION_ERROR', 400);
+        if (props.file_url != null && !props.file_url.trim()) {
+            throw new DomainError('file_url cannot be blank', 'VALIDATION_ERROR', 400);
+        }
         this.props.created_at ??= new Date();
         this.props.updated_at ??= new Date();
     }
@@ -41,7 +43,7 @@ export class DecisionQuote {
     get provider_name() { return this.props.provider_name; }
     get amount() { return this.props.amount; }
     get notes() { return this.props.notes ?? null; }
-    get file_url() { return this.props.file_url; }
+    get file_url(): string | null { return this.props.file_url ?? null; }
     get deleted_at() { return this.props.deleted_at ?? null; }
     get deleted_by() { return this.props.deleted_by ?? null; }
     get deleter(): ProfileRef | null { return this.props.deleter ?? null; }
@@ -60,8 +62,8 @@ export class DecisionQuote {
     }
 
     /**
-     * Wire-format DTO. file_url is the stored path — presentation layer re-signs
-     * it. Per spec §6.4: uploader and deleted_by are expanded as { id, name } | null.
+     * Wire-format DTO. file_url is the stored path, or null when a direct quote
+     * has no attachment. The presentation layer re-signs stored paths.
      */
     toJSON() {
         return {

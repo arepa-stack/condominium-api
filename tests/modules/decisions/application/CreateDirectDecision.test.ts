@@ -86,4 +86,16 @@ describe('CreateDirectDecision', () => {
     expect(await ctx.decisions.findById('d1')).toBeNull();
     expect(await ctx.quotes.listForDecision('d1')).toHaveLength(0);
   });
+
+  it('creates a direct decision without an attached quote file', async () => {
+    const ctx = buildUseCase();
+
+    const result = await ctx.useCase.execute({
+      ...input,
+      fileUrl: undefined,
+    });
+
+    expect(result.decision.status).toBe(DecisionStatus.RESOLVED);
+    expect(result.quote.file_url).toBeNull();
+  });
 });
