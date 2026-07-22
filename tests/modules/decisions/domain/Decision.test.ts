@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { Decision, DecisionStatus, DecisionProps } from '@/modules/decisions/domain/entities/Decision';
+import { Decision, DecisionProcessType, DecisionStatus, DecisionProps } from '@/modules/decisions/domain/entities/Decision';
 
 const baseProps = (overrides: Partial<DecisionProps> = {}): DecisionProps => ({
     id: 'd1',
@@ -15,6 +15,7 @@ describe('Decision Entity', () => {
     it('creates with defaults (status=RECEPTION, current_round=1, tiebreak=48)', () => {
         const d = new Decision(baseProps());
         expect(d.status).toBe(DecisionStatus.RECEPTION);
+        expect(d.process_type).toBe(DecisionProcessType.VOTING);
         expect(d.current_round).toBe(1);
         expect(d.tiebreak_duration_hours).toBe(48);
         expect(d.created_at).toBeInstanceOf(Date);
@@ -77,6 +78,7 @@ describe('Decision Entity', () => {
         d.advanceToVoting();
         d.resolve('quote-1');
         expect(d.status).toBe(DecisionStatus.RESOLVED);
+        expect(d.process_type).toBe(DecisionProcessType.VOTING);
         expect(d.winner_quote_id).toBe('quote-1');
         expect(d.finalized_at).toBeInstanceOf(Date);
     });
@@ -87,6 +89,7 @@ describe('Decision Entity', () => {
         d.awardDirectly('quote-1');
 
         expect(d.status).toBe(DecisionStatus.RESOLVED);
+        expect(d.process_type).toBe(DecisionProcessType.DIRECT_AWARD);
         expect(d.winner_quote_id).toBe('quote-1');
         expect(d.current_round).toBe(1);
         expect(d.finalized_at).toBeInstanceOf(Date);

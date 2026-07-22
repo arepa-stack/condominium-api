@@ -52,8 +52,8 @@ describe('AwardSoleQuote', () => {
     await ctx.quotes.create(makeQuote('q1'));
 
     const result = await ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'Es el único proveedor disponible',
     });
 
@@ -79,8 +79,8 @@ describe('AwardSoleQuote', () => {
     await ctx.quotes.create(makeQuote('q-active'));
 
     const result = await ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'Única cotización activa disponible',
     });
 
@@ -92,8 +92,8 @@ describe('AwardSoleQuote', () => {
     await ctx.decisions.create(makeDecision());
 
     await expect(ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'No hay otra alternativa disponible',
     })).rejects.toMatchObject({ code: 'DECISION_NO_ACTIVE_QUOTES' });
   });
@@ -104,8 +104,8 @@ describe('AwardSoleQuote', () => {
     await ctx.quotes.create(makeQuote('q1'));
 
     await expect(ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: '   ',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
@@ -119,8 +119,8 @@ describe('AwardSoleQuote', () => {
     await ctx.quotes.create(makeQuote('q2'));
 
     await expect(ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'Selección administrativa directa',
     })).rejects.toMatchObject({
       code: 'DECISION_DIRECT_AWARD_REQUIRES_SINGLE_QUOTE',
@@ -133,8 +133,8 @@ describe('AwardSoleQuote', () => {
     await ctx.quotes.create(makeQuote('q1'));
 
     await expect(ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'Selección administrativa directa',
     })).rejects.toMatchObject({ code: 'DECISION_WRONG_STATUS' });
   });
@@ -146,8 +146,8 @@ describe('AwardSoleQuote', () => {
     await ctx.decisions.create(decision);
 
     const result = await ctx.useCase.execute({
-      decision_id: 'd1',
-      actor_user_id: 'admin-1',
+      decisionId: 'd1',
+      actorUserId: 'admin-1',
       reason: 'Reintento de la misma operación',
     });
 

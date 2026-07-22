@@ -20,6 +20,7 @@ import { GenerateAssessments } from '@/modules/petty-cash/application/use-cases/
 
 // ── Use Cases ─────────────────────────────────────────────────────────────────
 import { CreateDecision } from '../application/use-cases/CreateDecision';
+import { CreateDirectDecision } from '../application/use-cases/CreateDirectDecision';
 import { GetDecision } from '../application/use-cases/GetDecision';
 import { ListDecisions } from '../application/use-cases/ListDecisions';
 import { FinalizeDecision } from '../application/use-cases/FinalizeDecision';
@@ -56,6 +57,7 @@ import {
   DeleteQuoteBody,
   FinalizeDecisionBody,
   AwardSoleQuoteBody,
+  CreateDirectDecisionBody,
 } from './schemas';
 
 // ── Serializers ──────────────────────────────────────────────────────────────
@@ -92,6 +94,7 @@ const totalApartments = async (buildingId: string): Promise<number> => {
 };
 
 const createDecision = new CreateDecision(decisionRepo, auditRepo);
+const createDirectDecision = new CreateDirectDecision(decisionRepo, quoteRepo, auditRepo);
 const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo, totalApartments);
 const listDecisions = new ListDecisions(decisionRepo);
 const finalizeDecision = new FinalizeDecision(decisionRepo, quoteRepo, voteRepo, auditRepo);
@@ -112,6 +115,49 @@ const getAuditLog = new GetAuditLog(auditRepo);
 export function createDecisionRoutes(tag: string) {
   return new Elysia()
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+
+    // ── POST /decisions/direct ───────────────────────────────────────────────
+    .post('/decisions/direct', async ({ profile, body }) => {
+      const file = body.file as File;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const quoteId = crypto.randomUUID();
+      const decisionId = crypto.randomUUID();
+      const { file_path } = await storageService.uploadQuoteFile(
+        decisionId,
+        quoteId,
+        { name: file.name, bytes, mime: file.type },
+      );
+
+      const result = await createDirectDecision.execute({
+        decisionId,
+        quoteId,
+        buildingId: body.building_id,
+        actorUserId: profile.id,
+        title: body.title,
+        description: typeof body.description === 'string' ? body.description : undefined,
+        providerName: body.provider_name,
+        amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
+        notes: typeof body.notes === 'string' ? body.notes : undefined,
+        fileUrl: file_path,
+        reason: body.reason,
+      });
+
+      return {
+        decision: await serializeDecision(result.decision, storageService),
+        quote: await serializeQuote(result.quote, storageService),
+      };
+    }, {
+      body: CreateDirectDecisionBody,
+      type: 'multipart/form-data',
+      response: t.Object({ decision: DecisionSchema, quote: QuoteSchema }),
+      detail: {
+        tags: [tag],
+        summary: 'Create a directly awarded decision with its sole quote',
+        description:
+          'Creates the decision, stores the sole provider quote, records the justification, and resolves it without reception or voting steps.',
+        security: [{ BearerAuth: [] }],
+      },
+    })
 
     // ── POST /decisions ──────────────────────────────────────────────────────
     .post('/decisions', async ({ profile, body }) => {
@@ -257,8 +303,8 @@ export function createDecisionRoutes(tag: string) {
     // ── POST /decisions/:id/award-sole-quote ─────────────────────────────────
     .post('/decisions/:id/award-sole-quote', async ({ profile, params, body }) => {
       const decision = await awardSoleQuote.execute({
-        decision_id: params.id,
-        actor_user_id: profile.id,
+        decisionId: params.id,
+        actorUserId: profile.id,
         reason: body.reason,
       });
       return serializeDecision(decision, storageService);
