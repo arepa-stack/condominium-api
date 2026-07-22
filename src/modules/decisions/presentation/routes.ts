@@ -118,15 +118,19 @@ export function createDecisionRoutes(tag: string) {
 
     // ── POST /decisions/direct ───────────────────────────────────────────────
     .post('/decisions/direct', async ({ profile, body }) => {
-      const file = body.file as File;
-      const bytes = new Uint8Array(await file.arrayBuffer());
       const quoteId = crypto.randomUUID();
       const decisionId = crypto.randomUUID();
-      const { file_path } = await storageService.uploadQuoteFile(
-        decisionId,
-        quoteId,
-        { name: file.name, bytes, mime: file.type },
-      );
+      const file = body.file as File | undefined;
+      let filePath: string | undefined;
+      if (file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const uploaded = await storageService.uploadQuoteFile(
+          decisionId,
+          quoteId,
+          { name: file.name, bytes, mime: file.type },
+        );
+        filePath = uploaded.file_path;
+      }
 
       const result = await createDirectDecision.execute({
         decisionId,
@@ -138,7 +142,7 @@ export function createDecisionRoutes(tag: string) {
         providerName: body.provider_name,
         amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
         notes: typeof body.notes === 'string' ? body.notes : undefined,
-        fileUrl: file_path,
+        fileUrl: filePath,
         reason: body.reason,
       });
 

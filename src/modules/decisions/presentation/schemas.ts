@@ -57,7 +57,7 @@ export const QuoteSchema = t.Object({
   provider_name: t.String(),
   amount: t.Number(),
   notes: NullableString,
-  file_url: t.String(),
+  file_url: NullableString,
   deleted_at: NullableString,
   deleted_by: NullableProfileRef,
   deletion_reason: NullableString,
@@ -212,7 +212,7 @@ export const CreateDirectDecisionBody = t.Object({
   amount: t.Union([t.Number(), t.String()]),
   notes: t.Optional(t.String()),
   reason: t.String({ minLength: 5, maxLength: 500 }),
-  file: t.File(),
+  file: t.Optional(t.File()),
 });
 
 export const ResolveTiebreakBody = t.Object({

@@ -28,7 +28,11 @@ describe('DecisionQuote Entity', () => {
         expect(() => new DecisionQuote(base({ provider_name: '\t\n' }))).toThrow();
     });
 
-    it('rejects empty file_url', () => {
+    it('allows a missing file_url for a direct quote', () => {
+        expect(new DecisionQuote(base({ file_url: null })).file_url).toBeNull();
+    });
+
+    it('rejects a blank file_url', () => {
         expect(() => new DecisionQuote(base({ file_url: '' }))).toThrow();
     });
 
