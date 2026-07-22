@@ -87,6 +87,7 @@ export const AuditEntrySchema = t.Object({
     t.Literal('FINALIZED'),
     t.Literal('TIEBREAK_OPENED'),
     t.Literal('WINNER_SET_MANUAL'),
+    t.Literal('DIRECT_AWARD'),
     t.Literal('CHARGE_GENERATED'),
     t.Literal('PHASE_ADVANCED'),
   ]),
@@ -194,6 +195,10 @@ export const FinalizeDecisionBody = t.Optional(
     reason: t.Optional(t.String({ minLength: 1 })),
   }),
 );
+
+export const AwardSoleQuoteBody = t.Object({
+  reason: t.String({ minLength: 5, maxLength: 500 }),
+});
 
 export const ResolveTiebreakBody = t.Object({
   winner_quote_id: t.String(),

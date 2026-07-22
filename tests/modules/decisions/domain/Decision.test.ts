@@ -81,6 +81,27 @@ describe('Decision Entity', () => {
         expect(d.finalized_at).toBeInstanceOf(Date);
     });
 
+    it('awardDirectly(quoteId) resolves from RECEPTION without opening voting', () => {
+        const d = new Decision(baseProps());
+
+        d.awardDirectly('quote-1');
+
+        expect(d.status).toBe(DecisionStatus.RESOLVED);
+        expect(d.winner_quote_id).toBe('quote-1');
+        expect(d.current_round).toBe(1);
+        expect(d.finalized_at).toBeInstanceOf(Date);
+    });
+
+    it('awardDirectly(quoteId) rejects decisions outside RECEPTION', () => {
+        const d = new Decision(baseProps({
+            reception_deadline: new Date(Date.now() - 1_000),
+            voting_deadline: new Date(Date.now() + 60_000),
+        }));
+        d.advanceToVoting();
+
+        expect(() => d.awardDirectly('quote-1')).toThrow();
+    });
+
     it('openTiebreak(tiedQuoteIds) increments round and extends voting_deadline', () => {
         const past = new Date(Date.now() - 1000);
         const d = new Decision(baseProps({
