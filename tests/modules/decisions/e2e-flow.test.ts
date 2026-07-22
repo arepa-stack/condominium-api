@@ -11,6 +11,7 @@
  *   C) Cancel           — RECEPTION → CANCELLED (audit log verified)
  *   D) Quote self-delete — resident deletes own quote during RECEPTION
  *   E) Vote idempotency  — second vote from same apartment is rejected
+ *   F) Direct award      — sole quote is resolved and charged without voting
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
@@ -25,6 +26,7 @@ import { GetResults } from '@/modules/decisions/application/use-cases/GetResults
 import { GenerateCharge } from '@/modules/decisions/application/use-cases/GenerateCharge';
 import { CancelDecision } from '@/modules/decisions/application/use-cases/CancelDecision';
 import { ResolveTiebreak } from '@/modules/decisions/application/use-cases/ResolveTiebreak';
+import { AwardSoleQuote } from '@/modules/decisions/application/use-cases/AwardSoleQuote';
 
 // ── Fakes ─────────────────────────────────────────────────────────────────────
 import {
@@ -90,6 +92,7 @@ function buildContext() {
     generateCharge:    new GenerateCharge(decisionRepo, quoteRepo, auditRepo, invoiceGen, assessmentGen),
     cancelDecision:    new CancelDecision(decisionRepo, auditRepo),
     resolveTiebreak:   new ResolveTiebreak(decisionRepo, quoteRepo, auditRepo),
+    awardSoleQuote:    new AwardSoleQuote(decisionRepo, quoteRepo, auditRepo),
   };
 }
 
@@ -479,5 +482,64 @@ describe('Flow E — vote idempotency', () => {
         quote_id: q1Id, voter_user_id: 'u1',
       }),
     ).rejects.toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flow F — Sole provider: RECEPTION → RESOLVED → charge, without voting
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Flow F — direct award to a sole provider', () => {
+  const ctx = buildContext();
+  let decisionId: string;
+  let quoteId: string;
+
+  it('F1: creates a decision and uploads its only quote', async () => {
+    const decision = await ctx.createDecision.execute({
+      building_id: 'b1',
+      actor_user_id: 'admin-1',
+      title: 'Reparación urgente del transformador',
+      reception_deadline: future(60_000),
+      voting_deadline: future(120_000),
+    });
+    decisionId = decision.id;
+
+    const quote = await ctx.uploadQuote.execute({
+      decision_id: decisionId,
+      uploader_user_id: 'admin-1',
+      provider_name: 'Proveedor eléctrico autorizado',
+      amount: 9750,
+      file_url: '/transformador.pdf',
+    });
+    quoteId = quote.id;
+  });
+
+  it('F2: awards the sole quote without opening voting', async () => {
+    const decision = await ctx.awardSoleQuote.execute({
+      decision_id: decisionId,
+      actor_user_id: 'board-1',
+      reason: 'Es el único proveedor autorizado en la zona',
+    });
+
+    expect(decision.status).toBe(DecisionStatus.RESOLVED);
+    expect(decision.winner_quote_id).toBe(quoteId);
+    expect(decision.current_round).toBe(1);
+    expect(await ctx.voteRepo.listForDecision(decisionId)).toHaveLength(0);
+    expect(
+      (await ctx.auditRepo.listForDecision(decisionId))
+        .find((entry) => entry.event === AuditEvent.DIRECT_AWARD),
+    ).toBeDefined();
+  });
+
+  it('F3: generates the charge from the directly awarded quote', async () => {
+    const result = await ctx.generateCharge.execute({
+      decision_id: decisionId,
+      type: 'INVOICE',
+      actor_user_id: 'admin-1',
+    });
+
+    expect(result.resulting.type).toBe('INVOICE');
+    expect(ctx.invoiceGen.calls).toHaveLength(1);
+    expect(ctx.invoiceGen.calls[0].amount).toBe(9750);
   });
 });

@@ -23,6 +23,7 @@ import { CreateDecision } from '../application/use-cases/CreateDecision';
 import { GetDecision } from '../application/use-cases/GetDecision';
 import { ListDecisions } from '../application/use-cases/ListDecisions';
 import { FinalizeDecision } from '../application/use-cases/FinalizeDecision';
+import { AwardSoleQuote } from '../application/use-cases/AwardSoleQuote';
 import { ExtendDeadlines } from '../application/use-cases/ExtendDeadlines';
 import { CancelDecision } from '../application/use-cases/CancelDecision';
 import { ResolveTiebreak } from '../application/use-cases/ResolveTiebreak';
@@ -54,6 +55,7 @@ import {
   CastVoteBody,
   DeleteQuoteBody,
   FinalizeDecisionBody,
+  AwardSoleQuoteBody,
 } from './schemas';
 
 // ── Serializers ──────────────────────────────────────────────────────────────
@@ -93,6 +95,7 @@ const createDecision = new CreateDecision(decisionRepo, auditRepo);
 const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo, totalApartments);
 const listDecisions = new ListDecisions(decisionRepo);
 const finalizeDecision = new FinalizeDecision(decisionRepo, quoteRepo, voteRepo, auditRepo);
+const awardSoleQuote = new AwardSoleQuote(decisionRepo, quoteRepo, auditRepo);
 const extendDeadlines = new ExtendDeadlines(decisionRepo, auditRepo);
 const cancelDecision = new CancelDecision(decisionRepo, auditRepo);
 const resolveTiebreak = new ResolveTiebreak(decisionRepo, quoteRepo, auditRepo);
@@ -247,6 +250,26 @@ export function createDecisionRoutes(tag: string) {
         summary: 'Advance or resolve a decision',
         description:
           'Empty body runs the normal flow. Pass `{ force: true, reason: "..." }` to bypass the reception_deadline check for RECEPTION → VOTING (admin/board override — reason is captured in the audit log).',
+        security: [{ BearerAuth: [] }],
+      },
+    })
+
+    // ── POST /decisions/:id/award-sole-quote ─────────────────────────────────
+    .post('/decisions/:id/award-sole-quote', async ({ profile, params, body }) => {
+      const decision = await awardSoleQuote.execute({
+        decision_id: params.id,
+        actor_user_id: profile.id,
+        reason: body.reason,
+      });
+      return serializeDecision(decision, storageService);
+    }, {
+      body: AwardSoleQuoteBody,
+      response: DecisionSchema,
+      detail: {
+        tags: [tag],
+        summary: 'Award the only active quote without voting',
+        description:
+          'Resolves a decision directly from RECEPTION when exactly one active quote exists. The selected provider and reason are recorded in the audit log.',
         security: [{ BearerAuth: [] }],
       },
     })

@@ -142,6 +142,29 @@ export class Decision {
                 422,
             );
         }
+        this.completeResolution(winnerQuoteId);
+    }
+
+    /**
+     * Resolves a decision during quote reception when voting would add no
+     * value because there is a single provider. The application use case is
+     * responsible for verifying that exactly one active quote exists.
+     */
+    awardDirectly(winnerQuoteId: string): void {
+        if (!winnerQuoteId?.trim()) {
+            throw new DomainError('winnerQuoteId required', 'VALIDATION_ERROR', 400);
+        }
+        if (this.status !== DecisionStatus.RECEPTION) {
+            throw new DomainError(
+                'direct award is only allowed in RECEPTION',
+                'DECISION_WRONG_STATUS',
+                422,
+            );
+        }
+        this.completeResolution(winnerQuoteId);
+    }
+
+    private completeResolution(winnerQuoteId: string): void {
         this.props.status = DecisionStatus.RESOLVED;
         this.props.winner_quote_id = winnerQuoteId;
         this.props.finalized_at = new Date();
