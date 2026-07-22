@@ -86,7 +86,7 @@ export class ApproveUser {
                         temporaryPassword,
                         unitName: primaryUnit?.unit_name ?? '',
                         buildingName: primaryUnit?.building_name ?? '',
-                        loginUrl: Config.APP_WEB_URL,
+                        loginUrl: `${Config.DEEPLINK_BASE_URL}/open-app`,
                     })
                 );
                 const bn = primaryUnit?.building_name;

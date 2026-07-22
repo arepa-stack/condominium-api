@@ -13,6 +13,7 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             address: data.address,
             building_code: data.building_code,
             max_residents_per_unit: data.max_residents_per_unit ?? Config.DEFAULT_MAX_RESIDENTS_PER_UNIT,
+            default_rate_source: data.default_rate_source ?? 'dolar_oficial',
             created_at: new Date(data.created_at),
             updated_at: new Date(data.updated_at),
         };
@@ -26,6 +27,7 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             address: building.address,
             building_code: building.building_code,
             max_residents_per_unit: building.max_residents_per_unit,
+            default_rate_source: building.default_rate_source,
             updated_at: building.updated_at,
         };
     }

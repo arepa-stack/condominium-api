@@ -6,6 +6,8 @@ import { RegisterPettyCashIncome } from '../application/use-cases/RegisterPettyC
 import { RegisterPettyCashExpense } from '../application/use-cases/RegisterPettyCashExpense';
 import { SupabaseInvoiceRepository } from '@/modules/billing/infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
+import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseBuildingRepository';
+import { exchangeRateService } from '@/infrastructure/exchange-rate';
 import { StorageService } from '@/infrastructure/storage';
 import {
     UserRole,
@@ -23,11 +25,12 @@ const pettyCashRepo = new SupabasePettyCashRepository();
 const storageService = new StorageService();
 const invoiceRepo = new SupabaseInvoiceRepository();
 const unitRepo = new SupabaseUnitRepository();
+const buildingRepo = new SupabaseBuildingRepository();
 
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
-const registerIncome = new RegisterPettyCashIncome(pettyCashRepo);
-const registerExpense = new RegisterPettyCashExpense(pettyCashRepo);
+const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, exchangeRateService);
+const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
@@ -39,6 +42,11 @@ const PettyCashFundSchema = t.Object({
     id: t.String(),
     building_id: t.String(),
     current_balance: t.Number(),
+    // "En físico (USD) hay X, en bolívares hay Y" — net per currency held.
+    balances_by_currency: t.Optional(t.Array(t.Object({
+        currency: t.String(),
+        balance: t.Number(),
+    }))),
     updated_at: t.Any(),
 });
 
@@ -52,6 +60,11 @@ const PettyCashEntrySchema = t.Object({
         t.Literal(PettyCashEntryType.REVERSAL),
     ]),
     amount: t.Number(),
+    original_currency: t.Optional(t.String()),
+    original_amount: t.Optional(t.Nullable(t.Number())),
+    exchange_rate: t.Optional(t.Nullable(t.Number())),
+    rate_source: t.Optional(t.Nullable(t.String())),
+    rate_date: t.Optional(t.Nullable(t.String())),
     category: t.Optional(t.Nullable(t.String())),
     description: t.String(),
     evidence_url: t.Optional(t.Nullable(t.String())),
@@ -198,6 +211,7 @@ function createWriteRoutes() {
                 return await registerIncome.execute({
                     buildingId,
                     amount,
+                    currency: body.currency,
                     description: body.description,
                     userId: profile.id,
                 });
@@ -217,6 +231,7 @@ function createWriteRoutes() {
             return await registerExpense.execute({
                 buildingId,
                 amount,
+                currency: body.currency,
                 description: body.description,
                 category: (body.category ?? PettyCashCategory.OTHER) as PettyCashCategory,
                 userId: profile.id,
@@ -229,6 +244,10 @@ function createWriteRoutes() {
                     t.Literal(PettyCashEntryType.EXPENSE),
                 ]),
                 amount: t.Union([t.Number(), t.String()]),
+                currency: t.Optional(t.Union([t.Literal('USD'), t.Literal('VES')], {
+                    default: 'USD',
+                    description: "Currency the money moved in. 'VES' converts to the building's base unit at the day's rate; 'USD' (default) is physical dollars, taken as-is.",
+                })),
                 description: t.String(),
                 category: t.Optional(t.String()),
                 evidence_image: t.Optional(t.File()),

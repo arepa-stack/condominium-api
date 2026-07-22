@@ -36,6 +36,12 @@ export interface PettyCashRepository {
      */
     getBalance(fundId: string): Promise<number>;
 
+    /**
+     * Net balance split by the currency actually held (físico USD vs
+     * bolívares). Sums signed original_amount per currency bucket.
+     */
+    getBalanceByCurrency(fundId: string): Promise<{ currency: string; balance: number }[]>;
+
     // ── Entries (append-only ledger) ──────────────────────────────────────
     addEntry(entry: PettyCashEntry): Promise<PettyCashEntry>;
     findEntryById(entryId: string): Promise<PettyCashEntry | null>;

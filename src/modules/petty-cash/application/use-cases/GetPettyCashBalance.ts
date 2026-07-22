@@ -19,16 +19,22 @@ export class GetPettyCashBalance {
                 id: '',
                 building_id: buildingId,
                 current_balance: 0,
+                balances_by_currency: [],
                 updated_at: new Date(),
             };
         }
 
-        const balance = await this.pettyCashRepo.getBalance(fund.id);
+        const [balance, byCurrency] = await Promise.all([
+            this.pettyCashRepo.getBalance(fund.id),
+            this.pettyCashRepo.getBalanceByCurrency(fund.id),
+        ]);
 
         return {
             id: fund.id,
             building_id: fund.building_id,
             current_balance: balance,
+            // "En físico (USD) hay tanto, en bolívares hay tanto."
+            balances_by_currency: byCurrency,
             updated_at: fund.updated_at,
         };
     }

@@ -42,6 +42,7 @@ const BuildingSchema = t.Object({
     address: t.String(),
     building_code: t.Optional(t.String()),
     max_residents_per_unit: t.Optional(t.Number()),
+    default_rate_source: t.Optional(t.String()),
     created_at: t.Optional(t.Any()),
     updated_at: t.Optional(t.Any())
 });
@@ -222,12 +223,18 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
             id: params.id,
             updaterId: user.id,
             name: body.name,
-            address: body.address
+            address: body.address,
+            default_rate_source: body.default_rate_source
         });
     }, {
         body: t.Object({
             name: t.Optional(t.String({ minLength: 1 })),
             address: t.Optional(t.String({ minLength: 1 })),
+            default_rate_source: t.Optional(t.Union([
+                t.Literal('euro_oficial'),
+                t.Literal('dolar_oficial'),
+                t.Literal('dolar_paralelo'),
+            ])),
         }),
         response: BuildingSchema,
         detail: {
