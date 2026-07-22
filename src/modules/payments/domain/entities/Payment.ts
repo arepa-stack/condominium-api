@@ -1,10 +1,20 @@
 import { PaymentStatus, PaymentMethod } from '@/core/domain/enums';
+import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
+
+export type PaymentCurrency = 'USD' | 'VES';
 
 export interface PaymentProps {
     id: string;
     user_id: string;
     building_id?: string | null;
+    // Canonical amount in the building's base unit. Allocation/approval use this.
     amount: number;
+    // Currency the resident actually paid in, and the rate applied when VES.
+    original_currency?: PaymentCurrency;
+    original_amount?: number | null;
+    exchange_rate?: number | null;
+    rate_source?: RateSource | null;
+    rate_date?: string | null;
     payment_date: Date;
     method: PaymentMethod;
     reference?: string | null;
@@ -41,6 +51,11 @@ export class Payment {
     get user_id(): string { return this.props.user_id; }
     get building_id(): string | undefined | null { return this.props.building_id; }
     get amount(): number { return this.props.amount; }
+    get original_currency(): PaymentCurrency { return this.props.original_currency ?? 'USD'; }
+    get original_amount(): number | null | undefined { return this.props.original_amount; }
+    get exchange_rate(): number | null | undefined { return this.props.exchange_rate; }
+    get rate_source(): RateSource | null | undefined { return this.props.rate_source; }
+    get rate_date(): string | null | undefined { return this.props.rate_date; }
     get payment_date(): Date { return this.props.payment_date; }
     get method(): PaymentMethod { return this.props.method; }
     get reference(): string | undefined | null { return this.props.reference; }

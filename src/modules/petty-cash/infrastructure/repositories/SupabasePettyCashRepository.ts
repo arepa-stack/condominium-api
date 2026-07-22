@@ -32,6 +32,11 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             fund_id: data.fund_id,
             type: data.type as PettyCashEntryType,
             amount: Number(data.amount),
+            original_currency: data.original_currency ?? 'USD',
+            original_amount: data.original_amount != null ? Number(data.original_amount) : null,
+            exchange_rate: data.exchange_rate != null ? Number(data.exchange_rate) : null,
+            rate_source: data.rate_source ?? null,
+            rate_date: data.rate_date ?? null,
             category: (data.category as PettyCashCategory) ?? null,
             description: data.description,
             evidence_url: data.evidence_url ?? null,
@@ -118,6 +123,22 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
         return Number(data.balance);
     }
 
+    async getBalanceByCurrency(fundId: string): Promise<{ currency: string; balance: number }[]> {
+        const { data, error } = await supabase
+            .from('petty_cash_balance_by_currency')
+            .select('currency, balance')
+            .eq('fund_id', fundId);
+
+        if (error) {
+            throw new DomainError(
+                'Error reading petty cash balance by currency: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        return (data ?? []).map(r => ({ currency: r.currency as string, balance: Number(r.balance) }));
+    }
+
     // ── Entries ───────────────────────────────────────────────────────────
 
     async addEntry(entry: PettyCashEntry): Promise<PettyCashEntry> {
@@ -125,6 +146,11 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             fund_id: entry.fund_id,
             type: entry.type,
             amount: entry.amount,
+            original_currency: entry.original_currency,
+            original_amount: entry.original_amount ?? null,
+            exchange_rate: entry.exchange_rate ?? null,
+            rate_source: entry.rate_source ?? null,
+            rate_date: entry.rate_date ?? null,
             category: entry.category ?? null,
             description: entry.description,
             evidence_url: entry.evidence_url ?? null,

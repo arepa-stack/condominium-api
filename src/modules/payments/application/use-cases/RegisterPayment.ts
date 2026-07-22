@@ -12,28 +12,45 @@ import { DomainError } from '@/core/errors';
 import { IPaymentAllocationRepository as IBillingAllocationRepository } from '@/modules/billing/domain/repository';
 // And PaymentRepository from local module
 import { IPaymentRepository as ILocalPaymentRepository } from '../../domain/repository';
+import { IBuildingRepository } from '@/modules/buildings/domain/repository';
+import type { IExchangeRateService } from '@/core/domain/ports/IExchangeRateService';
+import type { PaymentCurrency } from '../../domain/entities/Payment';
 
 export interface RegisterPaymentDTO {
     userId: string;
     unitId: string;
     buildingId?: string;
+    // Amount in `currency` (the money the resident actually moved).
     amount: number;
+    currency?: PaymentCurrency; // defaults to 'USD'
     method: PaymentMethod;
     paymentDate: Date;
     reference?: string;
     bank?: string;
     proofUrl?: string;
     notes?: string;
+    // Allocation amounts are always in the CANONICAL base unit.
     allocations?: {
         invoiceId: string;
         amount: number;
     }[];
 }
 
+interface CanonicalConversion {
+    canonical: number;
+    original_currency: PaymentCurrency;
+    original_amount: number;
+    exchange_rate: number | null;
+    rate_source: string | null;
+    rate_date: string | null;
+}
+
 export class RegisterPayment {
     constructor(
         private paymentRepository: ILocalPaymentRepository,
-        private paymentAllocationRepository: IBillingAllocationRepository
+        private paymentAllocationRepository: IBillingAllocationRepository,
+        private buildingRepository?: IBuildingRepository,
+        private exchangeRateService?: IExchangeRateService
     ) { }
 
     async execute(dto: RegisterPaymentDTO): Promise<Payment> {
@@ -41,14 +58,61 @@ export class RegisterPayment {
         this.validatePaymentDate(dto.paymentDate);
         this.validateProof(dto.proofUrl);
         this.validateBankFields(dto);
-        this.validateAllocations(dto);
 
-        const payment = this.initializePayment(dto);
+        // Resolve the canonical (base-unit) amount before validating allocations,
+        // which are expressed in the base unit.
+        const conv = await this.resolveCanonical(dto);
+        this.validateAllocations(dto, conv.canonical);
+
+        const payment = this.initializePayment(dto, conv);
         const createdPayment = await this.paymentRepository.create(payment);
 
         await this.createAllocations(createdPayment.id, dto.allocations);
 
         return createdPayment;
+    }
+
+    private async resolveCanonical(dto: RegisterPaymentDTO): Promise<CanonicalConversion> {
+        const currency: PaymentCurrency = dto.currency ?? 'USD';
+
+        // Physical USD (or any USD-denominated payment): amount is already canonical.
+        if (currency === 'USD') {
+            return {
+                canonical: dto.amount,
+                original_currency: 'USD',
+                original_amount: dto.amount,
+                exchange_rate: null,
+                rate_source: null,
+                rate_date: null,
+            };
+        }
+
+        // VES: convert to the building's base unit using its default rate source.
+        if (!this.buildingRepository || !this.exchangeRateService) {
+            throw new DomainError('Currency conversion is not available', 'EXCHANGE_RATE_UNAVAILABLE', 500);
+        }
+        if (!dto.buildingId) {
+            throw new DomainError('buildingId is required to register a payment in Bolívares', 'VALIDATION_ERROR', 400);
+        }
+        const building = await this.buildingRepository.findById(dto.buildingId);
+        if (!building) {
+            throw new DomainError('Building not found', 'NOT_FOUND', 404);
+        }
+        const source = building.default_rate_source;
+        const rateDate = dto.paymentDate.toISOString().slice(0, 10);
+        const { base, rate } = await this.exchangeRateService.convert({
+            amountVes: dto.amount,
+            date: rateDate,
+            source,
+        });
+        return {
+            canonical: base,
+            original_currency: 'VES',
+            original_amount: dto.amount,
+            exchange_rate: rate,
+            rate_source: source,
+            rate_date: rateDate,
+        };
     }
 
     private validateAmount(amount: number): void {
@@ -90,7 +154,7 @@ export class RegisterPayment {
         }
     }
 
-    private validateAllocations(dto: RegisterPaymentDTO): void {
+    private validateAllocations(dto: RegisterPaymentDTO, canonicalAmount: number): void {
         if (!dto.allocations) return;
 
         let allocatedAmount = 0;
@@ -101,18 +165,24 @@ export class RegisterPayment {
             allocatedAmount += alloc.amount;
         }
 
-        if (allocatedAmount > dto.amount) {
+        // Allocations are in the canonical base unit; compare against the converted amount.
+        if (allocatedAmount > canonicalAmount + 0.001) {
             throw new DomainError('Allocated amount cannot exceed payment amount', 'VALIDATION_ERROR', 400);
         }
     }
 
-    private initializePayment(dto: RegisterPaymentDTO): Payment {
+    private initializePayment(dto: RegisterPaymentDTO, conv: CanonicalConversion): Payment {
         return new Payment({
             id: crypto.randomUUID(),
             user_id: dto.userId,
             unit_id: dto.unitId,
             building_id: dto.buildingId,
-            amount: dto.amount,
+            amount: conv.canonical,
+            original_currency: conv.original_currency,
+            original_amount: conv.original_amount,
+            exchange_rate: conv.exchange_rate,
+            rate_source: conv.rate_source as any,
+            rate_date: conv.rate_date,
             payment_date: dto.paymentDate,
             method: dto.method,
             reference: dto.reference,
