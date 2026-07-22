@@ -12,6 +12,7 @@
  *   D) Quote self-delete — resident deletes own quote during RECEPTION
  *   E) Vote idempotency  — second vote from same apartment is rejected
  *   F) Direct award      — sole quote is resolved and charged without voting
+ *   G) Direct creation   — one form creates quote + resolved decision + charge
  */
 
 import { describe, it, expect, beforeEach } from 'bun:test';
@@ -27,6 +28,7 @@ import { GenerateCharge } from '@/modules/decisions/application/use-cases/Genera
 import { CancelDecision } from '@/modules/decisions/application/use-cases/CancelDecision';
 import { ResolveTiebreak } from '@/modules/decisions/application/use-cases/ResolveTiebreak';
 import { AwardSoleQuote } from '@/modules/decisions/application/use-cases/AwardSoleQuote';
+import { CreateDirectDecision } from '@/modules/decisions/application/use-cases/CreateDirectDecision';
 
 // ── Fakes ─────────────────────────────────────────────────────────────────────
 import {
@@ -93,6 +95,7 @@ function buildContext() {
     cancelDecision:    new CancelDecision(decisionRepo, auditRepo),
     resolveTiebreak:   new ResolveTiebreak(decisionRepo, quoteRepo, auditRepo),
     awardSoleQuote:    new AwardSoleQuote(decisionRepo, quoteRepo, auditRepo),
+    createDirectDecision: new CreateDirectDecision(decisionRepo, quoteRepo, auditRepo),
   };
 }
 
@@ -516,8 +519,8 @@ describe('Flow F — direct award to a sole provider', () => {
 
   it('F2: awards the sole quote without opening voting', async () => {
     const decision = await ctx.awardSoleQuote.execute({
-      decision_id: decisionId,
-      actor_user_id: 'board-1',
+      decisionId,
+      actorUserId: 'board-1',
       reason: 'Es el único proveedor autorizado en la zona',
     });
 
@@ -541,5 +544,44 @@ describe('Flow F — direct award to a sole provider', () => {
     expect(result.resulting.type).toBe('INVOICE');
     expect(ctx.invoiceGen.calls).toHaveLength(1);
     expect(ctx.invoiceGen.calls[0].amount).toBe(9750);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flow G — Direct creation form: create + quote + resolve → charge
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Flow G — create an already awarded direct decision', () => {
+  const ctx = buildContext();
+
+  it('G1: creates the decision and sole quote already resolved', async () => {
+    const result = await ctx.createDirectDecision.execute({
+      decisionId: 'direct-d1',
+      quoteId: 'direct-q1',
+      buildingId: 'b1',
+      actorUserId: 'admin-1',
+      title: 'Servicio técnico especializado',
+      providerName: 'Proveedor exclusivo',
+      amount: 3300,
+      fileUrl: '/direct-quote.pdf',
+      reason: 'Es el único proveedor certificado',
+    });
+
+    expect(result.decision.status).toBe(DecisionStatus.RESOLVED);
+    expect(result.decision.process_type).toBe('DIRECT_AWARD');
+    expect(result.decision.winner_quote_id).toBe('direct-q1');
+    expect(await ctx.voteRepo.listForDecision('direct-d1')).toHaveLength(0);
+  });
+
+  it('G2: generates an invoice from the directly created decision', async () => {
+    const result = await ctx.generateCharge.execute({
+      decision_id: 'direct-d1',
+      type: 'INVOICE',
+      actor_user_id: 'admin-1',
+    });
+
+    expect(result.resulting.type).toBe('INVOICE');
+    expect(ctx.invoiceGen.calls).toHaveLength(1);
+    expect(ctx.invoiceGen.calls[0].amount).toBe(3300);
   });
 });

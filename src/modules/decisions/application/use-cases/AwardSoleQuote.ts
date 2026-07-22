@@ -8,8 +8,8 @@ import {
 } from '@/modules/decisions/domain/repository';
 
 export interface AwardSoleQuoteInput {
-  decision_id: string;
-  actor_user_id: string;
+  decisionId: string;
+  actorUserId: string;
   reason: string;
 }
 
@@ -35,8 +35,8 @@ export class AwardSoleQuote {
       );
     }
 
-    await this.decisions.acquireFinalizeLock(input.decision_id);
-    const decision = await this.decisions.findByIdLocked(input.decision_id);
+    await this.decisions.acquireFinalizeLock(input.decisionId);
+    const decision = await this.decisions.findByIdLocked(input.decisionId);
     if (!decision) {
       throw new DomainError('decision not found', 'DECISION_NOT_FOUND', 404);
     }
@@ -76,7 +76,7 @@ export class AwardSoleQuote {
     await this.audit.record({
       decision_id: decision.id,
       event: AuditEvent.DIRECT_AWARD,
-      actor_user_id: input.actor_user_id,
+      actor_user_id: input.actorUserId,
       payload: {
         winner_quote_id: winner.id,
         provider_name: winner.provider_name,

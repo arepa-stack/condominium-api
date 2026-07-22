@@ -9,6 +9,7 @@ import {
   Decision,
   DecisionProps,
   DecisionStatus,
+  DecisionProcessType,
   DecisionResultingType,
   ProfileRef,
 } from '@/modules/decisions/domain/entities/Decision';
@@ -30,6 +31,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       description: (row.description as string | null) ?? null,
       photo_url: (row.photo_url as string | null) ?? null,
       status: row.status as DecisionStatus,
+      process_type: (row.process_type as DecisionProcessType | undefined) ?? DecisionProcessType.VOTING,
       current_round: row.current_round as number,
       reception_deadline: new Date(row.reception_deadline as string),
       voting_deadline: new Date(row.voting_deadline as string),
@@ -57,6 +59,7 @@ export class SupabaseDecisionRepository implements DecisionRepository {
       description: d.description,
       photo_url: d.photo_url,
       status: d.status,
+      process_type: d.process_type,
       current_round: d.current_round,
       reception_deadline: d.reception_deadline.toISOString(),
       voting_deadline: d.voting_deadline.toISOString(),

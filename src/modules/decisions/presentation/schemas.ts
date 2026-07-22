@@ -27,6 +27,10 @@ export const DecisionSchema = t.Object({
     t.Literal('RESOLVED'),
     t.Literal('CANCELLED'),
   ]),
+  process_type: t.Union([
+    t.Literal('VOTING'),
+    t.Literal('DIRECT_AWARD'),
+  ]),
   current_round: t.Number(),
   reception_deadline: t.String(),
   voting_deadline: t.String(),
@@ -198,6 +202,17 @@ export const FinalizeDecisionBody = t.Optional(
 
 export const AwardSoleQuoteBody = t.Object({
   reason: t.String({ minLength: 5, maxLength: 500 }),
+});
+
+export const CreateDirectDecisionBody = t.Object({
+  building_id: t.String(),
+  title: t.String({ minLength: 5, maxLength: 200 }),
+  description: t.Optional(t.String()),
+  provider_name: t.String({ minLength: 2, maxLength: 200 }),
+  amount: t.Union([t.Number(), t.String()]),
+  notes: t.Optional(t.String()),
+  reason: t.String({ minLength: 5, maxLength: 500 }),
+  file: t.File(),
 });
 
 export const ResolveTiebreakBody = t.Object({
