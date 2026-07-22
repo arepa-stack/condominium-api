@@ -12,6 +12,7 @@ export interface GenerateAssessmentDTO {
     category?: PettyCashCategory;
     amount: number;                 // total to prorate across units
     userId: string;
+    unitIds?: string[];
 }
 
 export interface GenerateAssessmentsResult {
@@ -51,7 +52,7 @@ export class GenerateAssessments {
     ) {}
 
     async execute(dto: GenerateAssessmentDTO): Promise<GenerateAssessmentsResult> {
-        const { buildingId, description, category, amount, userId } = dto;
+        const { buildingId, description, category, amount, userId, unitIds } = dto;
 
         if (!description?.trim()) {
             throw new DomainError(
@@ -68,8 +69,6 @@ export class GenerateAssessments {
             );
         }
 
-        const fund = await this.pettyCashRepo.findOrCreateFund(buildingId);
-
         const units = await this.unitRepo.findByBuildingId(buildingId);
         if (units.length === 0) {
             throw new DomainError(
@@ -79,21 +78,50 @@ export class GenerateAssessments {
             );
         }
 
+        let targetUnits = units;
+        if (unitIds !== undefined) {
+            if (unitIds.length === 0) {
+                throw new DomainError(
+                    'Select at least one unit to generate the assessment.',
+                    'NO_UNITS_SELECTED',
+                    400
+                );
+            }
+
+            const selectedUnitIds = new Set(unitIds);
+            const availableUnitIds = new Set(units.map((unit) => unit.id));
+            const selectionHasDuplicates = selectedUnitIds.size !== unitIds.length;
+            const selectionHasUnknownUnits = unitIds.some(
+                (unitId) => !availableUnitIds.has(unitId)
+            );
+
+            if (selectionHasDuplicates || selectionHasUnknownUnits) {
+                throw new DomainError(
+                    'The unit selection contains duplicate or unknown unit IDs.',
+                    'INVALID_UNIT_SELECTION',
+                    400
+                );
+            }
+
+            targetUnits = units.filter((unit) => selectedUnitIds.has(unit.id));
+        }
+
         const amountCents = toCents(amount);
-        if (amountCents < units.length) {
+        if (amountCents < targetUnits.length) {
             throw new DomainError(
-                `Amount (${amount}) is too small to distribute across ${units.length} units. Needs at least 1 cent per unit.`,
+                `Amount (${amount}) is too small to distribute across ${targetUnits.length} units. Needs at least 1 cent per unit.`,
                 'AMOUNT_TOO_SMALL_TO_DISTRIBUTE',
                 400
             );
         }
 
         // Fair-to-the-cent distribution.
-        const base = Math.floor(amountCents / units.length);
-        const remainder = amountCents - base * units.length;
-        const unitCents = units.map((_, i) => base + (i < remainder ? 1 : 0));
+        const base = Math.floor(amountCents / targetUnits.length);
+        const remainder = amountCents - base * targetUnits.length;
+        const unitCents = targetUnits.map((_, i) => base + (i < remainder ? 1 : 0));
 
         const period = new Date().toISOString().substring(0, 7);
+        const fund = await this.pettyCashRepo.findOrCreateFund(buildingId);
 
         // 1. Create the batch (atomic row).
         const assessment = await this.pettyCashRepo.createAssessment(
@@ -110,7 +138,7 @@ export class GenerateAssessments {
         // 2. One invoice per unit, linked to the batch via
         //    assessment_id. Description copies the batch name so it
         //    appears verbatim on each resident's billing.
-        const invoices: Invoice[] = units.map((unit, i) => new Invoice({
+        const invoices: Invoice[] = targetUnits.map((unit, i) => new Invoice({
             id: crypto.randomUUID(),
             unit_id: unit.id,
             building_id: buildingId,
@@ -133,8 +161,8 @@ export class GenerateAssessments {
             total_assessed: amount,
             invoices_created: created.length,
             invoices: created.map((inv, i) => ({
-                unit_id: units[i].id,
-                unit_name: units[i].name,
+                unit_id: targetUnits[i].id,
+                unit_name: targetUnits[i].name,
                 amount: inv.amount,
                 invoice_id: inv.id,
             })),
