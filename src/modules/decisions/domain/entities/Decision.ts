@@ -8,6 +8,11 @@ export enum DecisionStatus {
     CANCELLED = 'CANCELLED',
 }
 
+export enum DecisionProcessType {
+    VOTING = 'VOTING',
+    DIRECT_AWARD = 'DIRECT_AWARD',
+}
+
 export type DecisionResultingType = 'INVOICE' | 'ASSESSMENT';
 
 export interface ProfileRef {
@@ -23,6 +28,7 @@ export interface DecisionProps {
     description?: string | null;
     photo_url?: string | null;
     status?: DecisionStatus;
+    process_type?: DecisionProcessType;
     current_round?: number;
     reception_deadline: Date;
     voting_deadline: Date;
@@ -67,6 +73,7 @@ export class Decision {
         }
 
         this.props.status ??= DecisionStatus.RECEPTION;
+        this.props.process_type ??= DecisionProcessType.VOTING;
         this.props.current_round ??= 1;
         this.props.tiebreak_duration_hours ??= 48;
         this.props.created_at ??= new Date();
@@ -81,6 +88,7 @@ export class Decision {
     get description(): string | null { return this.props.description ?? null; }
     get photo_url(): string | null { return this.props.photo_url ?? null; }
     get status(): DecisionStatus { return this.props.status!; }
+    get process_type(): DecisionProcessType { return this.props.process_type!; }
     get current_round(): number { return this.props.current_round!; }
     get reception_deadline(): Date { return this.props.reception_deadline; }
     get voting_deadline(): Date { return this.props.voting_deadline; }
@@ -142,6 +150,30 @@ export class Decision {
                 422,
             );
         }
+        this.completeResolution(winnerQuoteId);
+    }
+
+    /**
+     * Resolves a decision during quote reception when voting would add no
+     * value because there is a single provider. The application use case is
+     * responsible for verifying that exactly one active quote exists.
+     */
+    awardDirectly(winnerQuoteId: string): void {
+        if (!winnerQuoteId?.trim()) {
+            throw new DomainError('winnerQuoteId required', 'VALIDATION_ERROR', 400);
+        }
+        if (this.status !== DecisionStatus.RECEPTION) {
+            throw new DomainError(
+                'direct award is only allowed in RECEPTION',
+                'DECISION_WRONG_STATUS',
+                422,
+            );
+        }
+        this.props.process_type = DecisionProcessType.DIRECT_AWARD;
+        this.completeResolution(winnerQuoteId);
+    }
+
+    private completeResolution(winnerQuoteId: string): void {
         this.props.status = DecisionStatus.RESOLVED;
         this.props.winner_quote_id = winnerQuoteId;
         this.props.finalized_at = new Date();
@@ -232,6 +264,7 @@ export class Decision {
             description: this.description,
             photo_url: this.photo_url,
             status: this.status,
+            process_type: this.process_type,
             current_round: this.current_round,
             reception_deadline: this.reception_deadline.toISOString(),
             voting_deadline: this.voting_deadline.toISOString(),

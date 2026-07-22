@@ -69,10 +69,11 @@ describe('DecisionAuditLog', () => {
         expect(e.toJSON().actor).toBeNull();
     });
 
-    it('enum has exactly 9 values matching DB CHECK', () => {
+    it('enum has exactly 10 values matching DB CHECK', () => {
         expect(Object.values(AuditEvent).sort()).toEqual([
             'CANCELLED','CHARGE_GENERATED','CREATED','DEADLINE_EXTENDED',
-            'FINALIZED','PHASE_ADVANCED','QUOTE_DELETED','TIEBREAK_OPENED','WINNER_SET_MANUAL',
+            'DIRECT_AWARD','FINALIZED','PHASE_ADVANCED','QUOTE_DELETED',
+            'TIEBREAK_OPENED','WINNER_SET_MANUAL',
         ] as AuditEvent[]);
     });
 });

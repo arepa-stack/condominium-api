@@ -20,9 +20,11 @@ import { GenerateAssessments } from '@/modules/petty-cash/application/use-cases/
 
 // ── Use Cases ─────────────────────────────────────────────────────────────────
 import { CreateDecision } from '../application/use-cases/CreateDecision';
+import { CreateDirectDecision } from '../application/use-cases/CreateDirectDecision';
 import { GetDecision } from '../application/use-cases/GetDecision';
 import { ListDecisions } from '../application/use-cases/ListDecisions';
 import { FinalizeDecision } from '../application/use-cases/FinalizeDecision';
+import { AwardSoleQuote } from '../application/use-cases/AwardSoleQuote';
 import { ExtendDeadlines } from '../application/use-cases/ExtendDeadlines';
 import { CancelDecision } from '../application/use-cases/CancelDecision';
 import { ResolveTiebreak } from '../application/use-cases/ResolveTiebreak';
@@ -54,6 +56,8 @@ import {
   CastVoteBody,
   DeleteQuoteBody,
   FinalizeDecisionBody,
+  AwardSoleQuoteBody,
+  CreateDirectDecisionBody,
 } from './schemas';
 
 // ── Serializers ──────────────────────────────────────────────────────────────
@@ -90,9 +94,11 @@ const totalApartments = async (buildingId: string): Promise<number> => {
 };
 
 const createDecision = new CreateDecision(decisionRepo, auditRepo);
+const createDirectDecision = new CreateDirectDecision(decisionRepo, quoteRepo, auditRepo);
 const getDecision = new GetDecision(decisionRepo, quoteRepo, voteRepo, totalApartments);
 const listDecisions = new ListDecisions(decisionRepo);
 const finalizeDecision = new FinalizeDecision(decisionRepo, quoteRepo, voteRepo, auditRepo);
+const awardSoleQuote = new AwardSoleQuote(decisionRepo, quoteRepo, auditRepo);
 const extendDeadlines = new ExtendDeadlines(decisionRepo, auditRepo);
 const cancelDecision = new CancelDecision(decisionRepo, auditRepo);
 const resolveTiebreak = new ResolveTiebreak(decisionRepo, quoteRepo, auditRepo);
@@ -109,6 +115,53 @@ const getAuditLog = new GetAuditLog(auditRepo);
 export function createDecisionRoutes(tag: string) {
   return new Elysia()
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+
+    // ── POST /decisions/direct ───────────────────────────────────────────────
+    .post('/decisions/direct', async ({ profile, body }) => {
+      const quoteId = crypto.randomUUID();
+      const decisionId = crypto.randomUUID();
+      const file = body.file as File | undefined;
+      let filePath: string | undefined;
+      if (file) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const uploaded = await storageService.uploadQuoteFile(
+          decisionId,
+          quoteId,
+          { name: file.name, bytes, mime: file.type },
+        );
+        filePath = uploaded.file_path;
+      }
+
+      const result = await createDirectDecision.execute({
+        decisionId,
+        quoteId,
+        buildingId: body.building_id,
+        actorUserId: profile.id,
+        title: body.title,
+        description: typeof body.description === 'string' ? body.description : undefined,
+        providerName: body.provider_name,
+        amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
+        notes: typeof body.notes === 'string' ? body.notes : undefined,
+        fileUrl: filePath,
+        reason: body.reason,
+      });
+
+      return {
+        decision: await serializeDecision(result.decision, storageService),
+        quote: await serializeQuote(result.quote, storageService),
+      };
+    }, {
+      body: CreateDirectDecisionBody,
+      type: 'multipart/form-data',
+      response: t.Object({ decision: DecisionSchema, quote: QuoteSchema }),
+      detail: {
+        tags: [tag],
+        summary: 'Create a directly awarded decision with its sole quote',
+        description:
+          'Creates the decision, stores the sole provider quote, records the justification, and resolves it without reception or voting steps.',
+        security: [{ BearerAuth: [] }],
+      },
+    })
 
     // ── POST /decisions ──────────────────────────────────────────────────────
     .post('/decisions', async ({ profile, body }) => {
@@ -247,6 +300,26 @@ export function createDecisionRoutes(tag: string) {
         summary: 'Advance or resolve a decision',
         description:
           'Empty body runs the normal flow. Pass `{ force: true, reason: "..." }` to bypass the reception_deadline check for RECEPTION → VOTING (admin/board override — reason is captured in the audit log).',
+        security: [{ BearerAuth: [] }],
+      },
+    })
+
+    // ── POST /decisions/:id/award-sole-quote ─────────────────────────────────
+    .post('/decisions/:id/award-sole-quote', async ({ profile, params, body }) => {
+      const decision = await awardSoleQuote.execute({
+        decisionId: params.id,
+        actorUserId: profile.id,
+        reason: body.reason,
+      });
+      return serializeDecision(decision, storageService);
+    }, {
+      body: AwardSoleQuoteBody,
+      response: DecisionSchema,
+      detail: {
+        tags: [tag],
+        summary: 'Award the only active quote without voting',
+        description:
+          'Resolves a decision directly from RECEPTION when exactly one active quote exists. The selected provider and reason are recorded in the audit log.',
         security: [{ BearerAuth: [] }],
       },
     })

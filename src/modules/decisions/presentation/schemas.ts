@@ -27,6 +27,10 @@ export const DecisionSchema = t.Object({
     t.Literal('RESOLVED'),
     t.Literal('CANCELLED'),
   ]),
+  process_type: t.Union([
+    t.Literal('VOTING'),
+    t.Literal('DIRECT_AWARD'),
+  ]),
   current_round: t.Number(),
   reception_deadline: t.String(),
   voting_deadline: t.String(),
@@ -53,7 +57,7 @@ export const QuoteSchema = t.Object({
   provider_name: t.String(),
   amount: t.Number(),
   notes: NullableString,
-  file_url: t.String(),
+  file_url: NullableString,
   deleted_at: NullableString,
   deleted_by: NullableProfileRef,
   deletion_reason: NullableString,
@@ -87,6 +91,7 @@ export const AuditEntrySchema = t.Object({
     t.Literal('FINALIZED'),
     t.Literal('TIEBREAK_OPENED'),
     t.Literal('WINNER_SET_MANUAL'),
+    t.Literal('DIRECT_AWARD'),
     t.Literal('CHARGE_GENERATED'),
     t.Literal('PHASE_ADVANCED'),
   ]),
@@ -194,6 +199,21 @@ export const FinalizeDecisionBody = t.Optional(
     reason: t.Optional(t.String({ minLength: 1 })),
   }),
 );
+
+export const AwardSoleQuoteBody = t.Object({
+  reason: t.String({ minLength: 5, maxLength: 500 }),
+});
+
+export const CreateDirectDecisionBody = t.Object({
+  building_id: t.String(),
+  title: t.String({ minLength: 5, maxLength: 200 }),
+  description: t.Optional(t.String()),
+  provider_name: t.String({ minLength: 2, maxLength: 200 }),
+  amount: t.Union([t.Number(), t.String()]),
+  notes: t.Optional(t.String()),
+  reason: t.String({ minLength: 5, maxLength: 500 }),
+  file: t.Optional(t.File()),
+});
 
 export const ResolveTiebreakBody = t.Object({
   winner_quote_id: t.String(),
