@@ -315,6 +315,7 @@ function createAssessmentRoutes() {
                 category: body.category as PettyCashCategory | undefined,
                 amount,
                 userId: profile.id,
+                unitIds: Array.isArray(body.unit_ids) ? body.unit_ids : undefined,
             });
         }, {
             body: t.Object({
@@ -328,13 +329,18 @@ function createAssessmentRoutes() {
                 amount: t.Union([t.Number(), t.String()], {
                     description: 'Total amount to prorate across units in this batch.',
                 }),
+                unit_ids: t.Optional(t.Array(t.String({ minLength: 1 }), {
+                    minItems: 1,
+                    uniqueItems: true,
+                    description: 'Optional list of unit IDs that should receive invoices in this batch. Omit it to target every unit.',
+                })),
             }),
             response: AssessmentResultSchema,
             detail: {
                 tags: ['Admin - Petty Cash'],
                 summary: 'Generate a named assessment batch (PENDING invoices per unit)',
                 description:
-                    'Creates a petty_cash_assessment row + one PENDING invoice per unit with ' +
+                    'Creates a petty_cash_assessment row + one PENDING invoice per selected unit with ' +
                     'assessment_id linking back. Multiple batches per period are expected ' +
                     '(ascensor, agua, …) — each shows its own progress in transparency.',
             },

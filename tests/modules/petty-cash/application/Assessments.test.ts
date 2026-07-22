@@ -289,6 +289,93 @@ describe('GenerateAssessments', () => {
         expect(result.invoices[1].amount).toBe(100);
     });
 
+    test('creates invoices only for the selected units', async () => {
+        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B'), makeUnit('u3', '1C')];
+        const invoiceRepo = mockInvoiceRepo([]);
+        const unitRepo = mockUnitRepo(units);
+        const pcRepo = mockPettyCashRepo({ fund, balance: -100.01 });
+
+        const generate = new GenerateAssessments(invoiceRepo, unitRepo as any, pcRepo as any);
+        const result = await generate.execute({
+            buildingId: 'b1',
+            description: 'Mantenimiento',
+            amount: 100.01,
+            userId: 'u',
+            unitIds: ['u1', 'u3'],
+        });
+
+        expect(invoiceRepo.createBatch).toHaveBeenCalledTimes(1);
+        const invoicesArg: Invoice[] = invoiceRepo.createBatch.mock.calls[0][0];
+        expect(invoicesArg.map((inv) => inv.unit_id)).toEqual(['u1', 'u3']);
+        expect(result.invoices_created).toBe(2);
+        expect(result.invoices.map((inv) => inv.unit_id)).toEqual(['u1', 'u3']);
+        expect(result.invoices.map((inv) => inv.amount)).toEqual([50.01, 50]);
+    });
+
+    test('throws NO_UNITS_SELECTED for an explicit empty selection', async () => {
+        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
+        const invoiceRepo = mockInvoiceRepo([]);
+        const unitRepo = mockUnitRepo(units);
+        const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
+
+        const generate = new GenerateAssessments(invoiceRepo, unitRepo as any, pcRepo as any);
+        const action = generate.execute({
+            buildingId: 'b1',
+            description: 'Mantenimiento',
+            amount: 100,
+            userId: 'u',
+            unitIds: [],
+        });
+
+        await expect(action).rejects.toMatchObject({ code: 'NO_UNITS_SELECTED' });
+        expect(invoiceRepo.createBatch).not.toHaveBeenCalled();
+        expect(pcRepo.createAssessment).not.toHaveBeenCalled();
+    });
+
+    test('throws INVALID_UNIT_SELECTION when any selected unit is unknown', async () => {
+        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
+        const invoiceRepo = mockInvoiceRepo([]);
+        const unitRepo = mockUnitRepo(units);
+        const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
+
+        const generate = new GenerateAssessments(invoiceRepo, unitRepo as any, pcRepo as any);
+        const action = generate.execute({
+            buildingId: 'b1',
+            description: 'Mantenimiento',
+            amount: 100,
+            userId: 'u',
+            unitIds: ['u1', 'unknown'],
+        });
+
+        await expect(action).rejects.toMatchObject({ code: 'INVALID_UNIT_SELECTION' });
+        expect(invoiceRepo.createBatch).not.toHaveBeenCalled();
+        expect(pcRepo.createAssessment).not.toHaveBeenCalled();
+    });
+
+    test('throws INVALID_UNIT_SELECTION for duplicate unit IDs', async () => {
+        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
+        const invoiceRepo = mockInvoiceRepo([]);
+        const unitRepo = mockUnitRepo(units);
+        const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
+
+        const generate = new GenerateAssessments(invoiceRepo, unitRepo as any, pcRepo as any);
+        const action = generate.execute({
+            buildingId: 'b1',
+            description: 'Mantenimiento',
+            amount: 100,
+            userId: 'u',
+            unitIds: ['u1', 'u1'],
+        });
+
+        await expect(action).rejects.toMatchObject({ code: 'INVALID_UNIT_SELECTION' });
+        expect(invoiceRepo.createBatch).not.toHaveBeenCalled();
+        expect(pcRepo.createAssessment).not.toHaveBeenCalled();
+    });
+
     test('throws VALIDATION_ERROR when description is empty', async () => {
         const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
         const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
