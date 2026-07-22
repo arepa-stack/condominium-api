@@ -2,11 +2,13 @@ import { IBuildingRepository } from '../../domain/repository';
 import { Building } from '../../domain/entities/Building';
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { ForbiddenError, NotFoundError } from '@/core/errors';
+import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
 
 export interface UpdateBuildingDTO {
     id: string;
     name?: string;
     address?: string;
+    default_rate_source?: RateSource;
     updaterId: string;
 }
 
@@ -33,6 +35,7 @@ export class UpdateBuilding {
 
         if (dto.name) building.updateName(dto.name);
         if (dto.address) building.updateAddress(dto.address);
+        if (dto.default_rate_source) building.setDefaultRateSource(dto.default_rate_source);
 
         return await this.buildingRepo.update(building);
     }

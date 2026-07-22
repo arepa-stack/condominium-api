@@ -51,12 +51,20 @@ const getAllPayments = new GetAllPayments(paymentRepo, userRepo);
 
 // Updated Creation Use Case
 import { RegisterPayment } from '../application/use-cases/RegisterPayment';
-const registerPayment = new RegisterPayment(paymentRepo, allocationRepo);
+import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseBuildingRepository';
+import { exchangeRateService } from '@/infrastructure/exchange-rate';
+const buildingRepo = new SupabaseBuildingRepository();
+const registerPayment = new RegisterPayment(paymentRepo, allocationRepo, buildingRepo, exchangeRateService);
 
 const PaymentSchema = t.Object({
     id: t.String(),
     amount: t.Number(),
     currency: t.Optional(t.String()),
+    original_currency: t.Optional(t.String()),
+    original_amount: t.Optional(t.Union([t.Number(), t.Null()])),
+    exchange_rate: t.Optional(t.Union([t.Number(), t.Null()])),
+    rate_source: t.Optional(t.Union([t.String(), t.Null()])),
+    rate_date: t.Optional(t.Union([t.String(), t.Null()])),
     payment_date: t.Any(), // Date object or string
     status: t.String(),
     method: t.String(),
@@ -250,6 +258,7 @@ function createUserRoutes(tag: string) {
             unitId: body.unit_id || defaultUnitId || '',
             buildingId: targetBuildingId,
             amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
+            currency: body.currency,
             paymentDate: new Date(body.date),
             method: body.method as PaymentMethod,
             reference: body.reference,
@@ -266,6 +275,10 @@ function createUserRoutes(tag: string) {
     }, {
         body: t.Object({
             amount: t.Union([t.Number(), t.String()], { exclusiveMinimum: 0, examples: [50.00, '75.50', 100] }),
+            currency: t.Optional(t.Union([t.Literal('USD'), t.Literal('VES')], {
+                default: 'USD',
+                description: "Currency the resident paid in. 'VES' converts to the building's base unit using the day's rate; 'USD' (default) is taken as-is (e.g. physical dollars).",
+            })),
             date: t.String({
                 pattern: '^\\d{4}-\\d{2}-\\d{2}$',
                 examples: ['2026-01-15', '2026-01-29'],

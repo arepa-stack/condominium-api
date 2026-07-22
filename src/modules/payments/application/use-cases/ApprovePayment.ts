@@ -93,7 +93,7 @@ export class ApprovePayment {
                 await this.replenishPettyCashIfApplicable(
                     alloc.invoice_id,
                     result.appliedToInvoice,
-                    payment.id,
+                    payment,
                     approverId
                 );
             }
@@ -151,10 +151,11 @@ export class ApprovePayment {
     private async replenishPettyCashIfApplicable(
         invoiceId: string,
         appliedAmount: number,
-        paymentId: string,
+        payment: Payment,
         createdBy: string
     ): Promise<void> {
         if (appliedAmount <= 0) return;
+        const paymentId = payment.id;
 
         const invoice = await this.invoiceRepo.findById(invoiceId);
         if (!invoice) return;
@@ -179,11 +180,25 @@ export class ApprovePayment {
             return;
         }
 
+        // Mirror the currency the resident paid in. appliedAmount is canonical
+        // (base unit); when the payment was in VES, back-convert to Bs for the
+        // by-currency bucket using the payment's frozen rate.
+        // ponytail: on a partial allocation this back-conversion is an
+        // approximation (rounding on the Bs side); the canonical `amount` stays
+        // exact. Refine only if per-Bs auditing of partials is ever needed.
+        const isVes = payment.original_currency === 'VES' && payment.exchange_rate;
         const fund = await this.pettyCashRepo.findOrCreateFund(invoice.building_id);
         const entry = new PettyCashEntry({
             fund_id: fund.id,
             type: PettyCashEntryType.COLLECTION,
             amount: appliedAmount,
+            original_currency: payment.original_currency,
+            original_amount: isVes
+                ? Math.round(appliedAmount * payment.exchange_rate! * 100) / 100
+                : appliedAmount,
+            exchange_rate: payment.exchange_rate ?? null,
+            rate_source: payment.rate_source ?? null,
+            rate_date: payment.rate_date ?? null,
             description: `Cobro ${invoice.description || 'cuota caja chica'} — pago ${paymentId}`,
             reference_type: PettyCashEntryReferenceType.INVOICE_PAYMENT,
             reference_id: invoiceId,

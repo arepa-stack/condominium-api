@@ -4,12 +4,21 @@ import {
     PettyCashCategory,
 } from '@/core/domain/enums';
 import { DomainError } from '@/core/errors';
+import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
+
+export type PettyCashCurrency = 'USD' | 'VES';
 
 export interface PettyCashEntryProps {
     id?: string;
     fund_id: string;
     type: PettyCashEntryType;
-    amount: number;                               // signed. See conventions below.
+    amount: number;                               // signed CANONICAL (base unit). See conventions below.
+    // What actually moved. `original_amount` carries the SAME sign as `amount`.
+    original_currency?: PettyCashCurrency;
+    original_amount?: number | null;
+    exchange_rate?: number | null;
+    rate_source?: RateSource | null;
+    rate_date?: string | null;
     category?: PettyCashCategory | null;          // expense only
     description: string;
     evidence_url?: string | null;
@@ -97,6 +106,11 @@ export class PettyCashEntry {
     get fund_id(): string { return this.props.fund_id; }
     get type(): PettyCashEntryType { return this.props.type; }
     get amount(): number { return this.props.amount; }
+    get original_currency(): PettyCashCurrency { return this.props.original_currency ?? 'USD'; }
+    get original_amount(): number | null | undefined { return this.props.original_amount; }
+    get exchange_rate(): number | null | undefined { return this.props.exchange_rate; }
+    get rate_source(): RateSource | null | undefined { return this.props.rate_source; }
+    get rate_date(): string | null | undefined { return this.props.rate_date; }
     get category(): PettyCashCategory | null | undefined { return this.props.category; }
     get description(): string { return this.props.description; }
     get evidence_url(): string | null | undefined { return this.props.evidence_url; }
@@ -128,6 +142,12 @@ export class PettyCashEntry {
             fund_id: original.fund_id,
             type: PettyCashEntryType.REVERSAL,
             amount: -original.amount,
+            // Mirror the original's currency so the by-currency balance nets to zero.
+            original_currency: original.original_currency,
+            original_amount: original.original_amount != null ? -original.original_amount : null,
+            exchange_rate: original.exchange_rate,
+            rate_source: original.rate_source,
+            rate_date: original.rate_date,
             description: opts.description,
             reference_type: PettyCashEntryReferenceType.REVERSAL,
             reference_id: original.id,
@@ -141,6 +161,11 @@ export class PettyCashEntry {
             fund_id: this.props.fund_id,
             type: this.props.type,
             amount: this.props.amount,
+            original_currency: this.original_currency,
+            original_amount: this.props.original_amount ?? null,
+            exchange_rate: this.props.exchange_rate ?? null,
+            rate_source: this.props.rate_source ?? null,
+            rate_date: this.props.rate_date ?? null,
             category: this.props.category ?? null,
             description: this.props.description,
             evidence_url: this.props.evidence_url ?? null,

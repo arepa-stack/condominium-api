@@ -20,6 +20,7 @@ import { directoryAdminRoutes } from '@/modules/directory/presentation/routes';
 import { decisionRoutes } from '@/modules/decisions/presentation/routes';
 import { leadAdminRoutes } from '@/modules/leads/presentation/admin-routes';
 import { informationCenterAdminRoutes } from '@/modules/information-center/presentation/routes';
+import { exchangeRateAdminRoutes } from '@/modules/exchange-rates/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -32,4 +33,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(directoryAdminRoutes)    // building members directory
     .use(decisionRoutes)          // decisions, quotes, votes, tally, charge gen
     .use(leadAdminRoutes)         // landing leads management (solicitudes)
-    .use(informationCenterAdminRoutes); // announcements, rules, services
+    .use(informationCenterAdminRoutes) // announcements, rules, services
+    .use(exchangeRateAdminRoutes);      // exchange rate refresh + manual override
