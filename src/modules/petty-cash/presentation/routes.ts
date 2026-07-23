@@ -34,7 +34,7 @@ const cancelExpressAssessment = new CancelExpressAssessment(invoiceRepo, pettyCa
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, exchangeRateService);
-const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService);
+const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService, invoiceRepo, unitRepo);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
@@ -52,6 +52,12 @@ const PettyCashFundSchema = t.Object({
         balance: t.Number(),
     }))),
     updated_at: t.Any(),
+});
+
+const PettyCashCoverageSchema = t.Object({
+    pending_to_assess: t.Number(),
+    balance: t.Number(),
+    target_fund: t.Number(),
 });
 
 const PettyCashEntrySchema = t.Object({
@@ -82,6 +88,11 @@ const PettyCashEntrySchema = t.Object({
      * (income/expense POST, reverse POST) which return the raw entry.
      */
     is_reversed: t.Optional(t.Boolean()),
+    /**
+     * Slice B: optional coverage data included on EXPENSE responses
+     * when coverage deps are wired. Absent for INCOME entries.
+     */
+    coverage: t.Optional(PettyCashCoverageSchema),
 });
 
 const AssessmentUnitSchema = t.Object({
