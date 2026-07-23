@@ -17,6 +17,8 @@ describe('PettyCashFund entity', () => {
             id: 'fund-1',
             building_id: 'building-1',
             updated_at: new Date('2026-04-18'),
+            // Slice B added target_fund (default 0).
+            target_fund: 0,
         });
         // Phase 3 dropped these fields from the persistence layer and
         // the entity. Balance lives in petty_cash_balance (view);

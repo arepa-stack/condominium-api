@@ -63,8 +63,9 @@ export class PreviewAssessments {
 
         const balanceCents = toCents(balance);
 
-        // target_fund is 0 in Slice A — Slice B adds the DB column to PettyCashFund.
-        const targetFundCents = 0;
+        // Slice B: use the real target_fund from the fund entity.
+        // If no fund exists, fall back to 0 (same as Slice A behaviour).
+        const targetFundCents = toCents(fund?.target_fund ?? 0);
 
         // Unit-level PETTY_CASH invoices — what's already been assigned.
         // findAll returns paid_amount via Invoice.paid_amount getter.
@@ -101,7 +102,7 @@ export class PreviewAssessments {
             total_overage: fromCents(overageCents),
             already_assessed: fromCents(outstandingReceivablesCents),
             pending_to_assess: fromCents(pendingCents),
-            // Slice A: target_fund = 0. Slice B adds DB column and real value.
+            // Slice B: real target_fund from fund entity (0 when no fund).
             target_fund: fromCents(targetFundCents),
             units: units.map((u, i) => ({
                 id: u.id,

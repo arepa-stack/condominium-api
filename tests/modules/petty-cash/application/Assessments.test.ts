@@ -59,7 +59,7 @@ function mockPettyCashRepo(options: {
     const fund = options.fund ?? null;
     return {
         findFundByBuildingId: mock(() => Promise.resolve(fund)),
-        findOrCreateFund: mock(() => Promise.resolve(fund ?? new PettyCashFund('f1', 'b1', 0, 'USD', new Date()))),
+        findOrCreateFund: mock(() => Promise.resolve(fund ?? new PettyCashFund('f1', 'b1', new Date()))),
         getBalance: mock(() => Promise.resolve(options.balance ?? 0)),
         addEntry: mock((e: any) => Promise.resolve(e)),
         findEntriesByFundId: mock(() => Promise.resolve([])),
@@ -87,7 +87,7 @@ describe('PreviewAssessments', () => {
     test('calculates overage from a negative ledger balance', async () => {
         // Balance = -100 → overage = 100. No already_assessed → pending = 100.
         // Prorated across 2 units → 50 each.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
 
         const preview = new PreviewAssessments(
@@ -108,7 +108,7 @@ describe('PreviewAssessments', () => {
     test('subtracts already assessed unit invoices', async () => {
         // Balance = -200 → overage 200. Two unit invoices of 100 each
         // already cover the overage → pending = 0.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const unitInvoices = [makeUnitInvoice('u1', 100), makeUnitInvoice('u2', 100)];
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
 
@@ -127,7 +127,7 @@ describe('PreviewAssessments', () => {
     test('CANCELLED unit invoices are excluded from already_assessed', async () => {
         // Overage = 200. One PENDING invoice of 100 and one CANCELLED
         // invoice of 100. Only the PENDING one counts → already_assessed = 100.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const invoices = [
             makeUnitInvoice('u1', 100, InvoiceStatus.PENDING),
             makeUnitInvoice('u2', 100, InvoiceStatus.CANCELLED),
@@ -148,7 +148,7 @@ describe('PreviewAssessments', () => {
 
     test('no overage when balance is non-negative', async () => {
         // Positive balance → overage clamped to 0.
-        const fund = new PettyCashFund('f1', 'b1', 50, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A')];
 
         const preview = new PreviewAssessments(
@@ -182,7 +182,7 @@ describe('PreviewAssessments', () => {
     // Previously, summing 38 float-stored invoices produced noise.
     // With integer cents the sum is exact.
     test('no float drift when summing drifted invoice amounts (ticket #46)', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         // 38 legacy invoices of 210.52 each. Naive float-sum reduce
         // would drift; integer cents gives the exact 799976.
         const units = Array.from({ length: 38 }, (_, i) => makeUnit(`u${i + 1}`, `Apto ${i + 1}`));
@@ -208,7 +208,7 @@ describe('PreviewAssessments', () => {
     test('clamps sub-cent pending_to_assess to exactly 0', async () => {
         // Balance -100.001 rounds to -10000 cents overage → 10000.
         // Already assessed is 10000 cents. Pending = 0, clamp keeps it clean.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const unitInvoices = [makeUnitInvoice('u1', 100)];
         const units = [makeUnit('u1', '1A')];
 
@@ -226,7 +226,7 @@ describe('PreviewAssessments', () => {
     test('fair cent-level distribution: unit amounts sum exactly to pending_to_assess', async () => {
         // $100 across 3 units → 10000 cents / 3 = 3333 remainder 1.
         // Expected: [33.34, 33.33, 33.33] and sum = 100.00 exact.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B'), makeUnit('u3', '1C')];
 
         const preview = new PreviewAssessments(
@@ -251,7 +251,7 @@ describe('PreviewAssessments', () => {
 
 describe('GenerateAssessments', () => {
     test('creates the assessment batch and one invoice per unit (with assessment_id)', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
         const invoiceRepo = mockInvoiceRepo([]);
         const unitRepo = mockUnitRepo(units);
@@ -290,7 +290,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('creates invoices only for the selected units', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B'), makeUnit('u3', '1C')];
         const invoiceRepo = mockInvoiceRepo([]);
         const unitRepo = mockUnitRepo(units);
@@ -314,7 +314,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws NO_UNITS_SELECTED for an explicit empty selection', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
         const invoiceRepo = mockInvoiceRepo([]);
         const unitRepo = mockUnitRepo(units);
@@ -335,7 +335,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws INVALID_UNIT_SELECTION when any selected unit is unknown', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
         const invoiceRepo = mockInvoiceRepo([]);
         const unitRepo = mockUnitRepo(units);
@@ -356,7 +356,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws INVALID_UNIT_SELECTION for duplicate unit IDs', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
         const invoiceRepo = mockInvoiceRepo([]);
         const unitRepo = mockUnitRepo(units);
@@ -377,7 +377,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws VALIDATION_ERROR when description is empty', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
 
         const generate = new GenerateAssessments(
@@ -392,7 +392,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws VALIDATION_ERROR when amount is zero or negative', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
 
         const generate = new GenerateAssessments(
@@ -411,7 +411,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('throws NO_UNITS when no units in building', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
 
         const generate = new GenerateAssessments(
@@ -427,7 +427,7 @@ describe('GenerateAssessments', () => {
 
     test('throws AMOUNT_TOO_SMALL_TO_DISTRIBUTE when cents < unit count', async () => {
         // $0.08 (8 cents) across 38 units → 8 < 38, reject.
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const units = Array.from({ length: 38 }, (_, i) => makeUnit(`u${i + 1}`, `Apto ${i + 1}`));
         const pcRepo = mockPettyCashRepo({ fund, balance: -0.08 });
 
@@ -443,7 +443,7 @@ describe('GenerateAssessments', () => {
     });
 
     test('propagates category when provided', async () => {
-        const fund = new PettyCashFund('f1', 'b1', 0, 'USD', new Date());
+        const fund = new PettyCashFund('f1', 'b1', new Date());
         const pcRepo = mockPettyCashRepo({ fund, balance: -100 });
         const generate = new GenerateAssessments(
             mockInvoiceRepo([]),

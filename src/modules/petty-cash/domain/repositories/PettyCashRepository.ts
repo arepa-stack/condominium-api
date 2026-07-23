@@ -77,6 +77,12 @@ export interface PettyCashRepository {
      */
     findReversedOriginalIds(fundId: string): Promise<Set<string>>;
 
+    /**
+     * Update the target_fund amount for a given fund.
+     * Slice B: used by SetTargetFund use case.
+     */
+    updateFundTargetFund(fundId: string, targetFund: number): Promise<void>;
+
     // ── Assessment batches ────────────────────────────────────────────────
     createAssessment(assessment: PettyCashAssessment): Promise<PettyCashAssessment>;
     findAssessmentsByFundId(fundId: string): Promise<PettyCashAssessment[]>;
@@ -84,4 +90,9 @@ export interface PettyCashRepository {
         fundId: string,
         period: string
     ): Promise<PettyCashAssessment[]>;
+    /**
+     * Fetch a single assessment by its primary key.
+     * Slice B: used by CancelExpressAssessment.
+     */
+    findAssessmentById(assessmentId: string): Promise<PettyCashAssessment | null>;
 }

@@ -10,12 +10,17 @@
  * stable id reference when registering entries and assessments, and so
  * fund lifecycle can grow back metadata (name, timezone, …) without
  * reshaping the persistence layer.
+ *
+ * Slice B adds `target_fund`: the replenishment threshold the board wants
+ * to maintain. Zero means "just cover the overdraft" (Slice A behaviour).
  */
 export class PettyCashFund {
     constructor(
         public readonly id: string,
         public readonly building_id: string,
-        public readonly updated_at: Date
+        public readonly updated_at: Date,
+        /** Target replenishment fund amount. Default 0 (Slice A behaviour). */
+        public readonly target_fund: number = 0
     ) { }
 
     public toJSON() {
@@ -23,6 +28,7 @@ export class PettyCashFund {
             id: this.id,
             building_id: this.building_id,
             updated_at: this.updated_at,
+            target_fund: this.target_fund,
         };
     }
 }
