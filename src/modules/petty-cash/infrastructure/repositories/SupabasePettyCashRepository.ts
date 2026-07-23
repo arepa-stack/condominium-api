@@ -59,7 +59,7 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             total_amount: Number(data.total_amount),
             created_by: data.created_by,
             created_at: new Date(data.created_at),
-            kind: (data.kind as 'GENERAL' | 'EXPRESS') ?? 'GENERAL',
+            kind: (data.kind as 'GENERAL' | 'EXPRESS' | 'CONTRIBUTION') ?? 'GENERAL',
             source_entry_id: data.source_entry_id ?? null,
         });
     }

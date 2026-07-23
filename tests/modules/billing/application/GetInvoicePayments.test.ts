@@ -8,6 +8,7 @@ const makeRepo = (): IPaymentAllocationRepository => ({
     delete: mock(async () => { }),
     findByPaymentId: mock(async () => []),
     findByInvoiceId: mock(async () => []),
+    findByInvoiceIds: mock(async () => []),
     findPaymentsByInvoiceId: mock(async () => []),
     findInvoicesByPaymentId: mock(async () => []),
     findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),

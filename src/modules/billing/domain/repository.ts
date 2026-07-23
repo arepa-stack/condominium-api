@@ -87,6 +87,8 @@ export interface IPaymentAllocationRepository {
     delete(allocationId: string): Promise<void>;
     findByPaymentId(paymentId: string): Promise<PaymentAllocation[]>;
     findByInvoiceId(invoiceId: string): Promise<PaymentAllocation[]>;
+    /** Batched lookup: all allocations for the given invoice ids in one query. */
+    findByInvoiceIds(invoiceIds: string[]): Promise<PaymentAllocation[]>;
     findPaymentsByInvoiceId(invoiceId: string): Promise<PaymentAllocationResult[]>; // Returns Payment details joined
     findInvoicesByPaymentId(paymentId: string): Promise<any[]>; // Returns Invoice details joined
     findPaymentsByInvoiceIdPaginated(

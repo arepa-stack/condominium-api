@@ -16,8 +16,8 @@ import {
 import { PreviewAssessments } from '@/modules/petty-cash/application/use-cases/PreviewAssessments';
 import { PettyCashFund } from '@/modules/petty-cash/domain/entities/PettyCashFund';
 import { PettyCashEntry } from '@/modules/petty-cash/domain/entities/PettyCashEntry';
-import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
-import { InvoiceTag, PettyCashCategory } from '@/core/domain/enums';
+import { Invoice } from '@/modules/billing/domain/entities/Invoice';
+import { PettyCashCategory } from '@/core/domain/enums';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

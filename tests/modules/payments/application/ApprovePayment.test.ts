@@ -30,6 +30,7 @@ describe('ApprovePayment Use Case', () => {
             create: mock(),
             delete: mock(),
             findByInvoiceId: mock(),
+            findByInvoiceIds: mock(async () => []),
             findPaymentsByInvoiceId: mock(),
             findInvoicesByPaymentId: mock(),
             findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),

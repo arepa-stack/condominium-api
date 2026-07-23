@@ -58,4 +58,15 @@ describe('PettyCashAssessment — kind and source_entry_id', () => {
         expect(json.kind).toBe('GENERAL');
         expect(json.source_entry_id).toBeNull();
     });
+
+    it('accepts CONTRIBUTION kind', () => {
+        const a = new PettyCashAssessment(makeValidProps({ kind: 'CONTRIBUTION' }));
+        expect(a.kind).toBe('CONTRIBUTION');
+    });
+
+    it('toJSON includes kind=CONTRIBUTION', () => {
+        const a = new PettyCashAssessment(makeValidProps({ kind: 'CONTRIBUTION' }));
+        const json = a.toJSON();
+        expect(json.kind).toBe('CONTRIBUTION');
+    });
 });

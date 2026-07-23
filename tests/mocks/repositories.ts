@@ -34,6 +34,7 @@ export const createMockInvoiceRepository = (): IInvoiceRepository => ({
 export const createMockPaymentRepository = (): IPaymentRepository => ({
     create: mock(async (payment: Payment) => payment),
     findById: mock(async (id: string) => null),
+    findByIds: mock(async (ids: string[]) => []),
     findAll: mock(async () => []),
     findAllPaginated: mock(async () => ({ items: [], total: 0 })),
     update: mock(async (payment: Payment) => payment),
@@ -47,6 +48,7 @@ export const createMockAllocationRepository = (): IPaymentAllocationRepository =
     delete: mock(async (id: string) => { }),
     findByPaymentId: mock(async (id: string) => []),
     findByInvoiceId: mock(async (id: string) => []),
+    findByInvoiceIds: mock(async (ids: string[]) => []),
     findPaymentsByInvoiceId: mock(async (id: string) => []),
     findInvoicesByPaymentId: mock(async (id: string) => []),
     findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),

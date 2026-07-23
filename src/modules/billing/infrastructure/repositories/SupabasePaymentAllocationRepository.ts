@@ -67,6 +67,18 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
         return data.map(this.toDomain);
     }
 
+    async findByInvoiceIds(invoiceIds: string[]): Promise<PaymentAllocation[]> {
+        if (invoiceIds.length === 0) return [];
+
+        const { data, error } = await supabase
+            .from('payment_allocations')
+            .select('*')
+            .in('invoice_id', invoiceIds);
+
+        if (error) throw new DomainError('Error fetching allocations', 'DB_ERROR', 500);
+        return (data || []).map(this.toDomain);
+    }
+
     async findPaymentsByInvoiceId(invoiceId: string): Promise<PaymentAllocationResult[]> {
         const { data, error } = await supabase
             .from('payment_allocations')
