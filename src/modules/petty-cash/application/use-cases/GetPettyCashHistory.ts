@@ -17,6 +17,10 @@ export interface GetPettyCashHistoryFilters {
  * Read the ledger history for a building's petty cash fund.
  * Returns entries ordered by created_at desc (newest first).
  *
+ * Each entry includes `is_reversed: boolean` derived from a single query
+ * that finds which entry ids have a corresponding REVERSAL entry pointing
+ * at them. The frontend can use this directly without client-side set math.
+ *
  * If the fund doesn't exist yet, returns an empty paginated result
  * rather than 404 — semantically "this building has no activity yet" is
  * not an error condition.
@@ -36,17 +40,25 @@ export class GetPettyCashHistory {
         const fund = await this.pettyCashRepo.findFundByBuildingId(buildingId);
         if (!fund) return buildPaginatedResult<Record<string, unknown>>([], 0, pagination);
 
-        const { items, total } = await this.pettyCashRepo.findEntriesByFundIdPaginated(
-            fund.id,
-            {
-                type: filters.type,
-                category: filters.category,
-            },
-            pagination
-        );
+        // Fetch entries and reversed-ids in parallel — both queries target the same
+        // fund and are independent of each other.
+        const [{ items, total }, reversedIds] = await Promise.all([
+            this.pettyCashRepo.findEntriesByFundIdPaginated(
+                fund.id,
+                {
+                    type: filters.type,
+                    category: filters.category,
+                },
+                pagination
+            ),
+            this.pettyCashRepo.findReversedOriginalIds(fund.id),
+        ]);
 
         return buildPaginatedResult(
-            items.map(e => e.toJSON() as Record<string, unknown>),
+            items.map(e => ({
+                ...(e.toJSON() as Record<string, unknown>),
+                is_reversed: reversedIds.has(e.id!),
+            })),
             total,
             pagination
         );

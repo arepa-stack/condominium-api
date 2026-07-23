@@ -14,7 +14,7 @@ import { PettyCashCategory, PettyCashEntryType } from '@/core/domain/enums';
 // ---------------------------------------------------------------------
 
 function makeMockPettyCashRepo() {
-    const fund = new PettyCashFund('fund-1', 'b1', 0, 'USD', new Date());
+    const fund = new PettyCashFund('fund-1', 'b1', new Date());
     return {
         findFundByBuildingId: mock(async () => fund),
         findOrCreateFund: mock(async () => fund),

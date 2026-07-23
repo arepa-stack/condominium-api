@@ -165,6 +165,20 @@ export class Invoice {
         this.props.updated_at = new Date();
     }
 
+    /**
+     * Append text to the invoice description. Used by cancellation flows
+     * to record the reason in the invoice history without mutating the
+     * original description.
+     */
+    appendToDescription(text: string): void {
+        if (this.props.description) {
+            this.props.description = `${this.props.description} — ${text}`;
+        } else {
+            this.props.description = text;
+        }
+        this.props.updated_at = new Date();
+    }
+
     toJSON(): InvoiceProps {
         return { ...this.props };
     }

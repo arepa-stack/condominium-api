@@ -19,6 +19,8 @@ import { PreviewAssessments } from '../application/use-cases/PreviewAssessments'
 import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
 import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
 import { ReversePettyCashEntry } from '../application/use-cases/ReversePettyCashEntry';
+import { SetTargetFund } from '../application/use-cases/SetTargetFund';
+import { CancelExpressAssessment } from '../application/use-cases/CancelExpressAssessment';
 
 // ── DI ──────────────────────────────────────────────────────────────────────
 const pettyCashRepo = new SupabasePettyCashRepository();
@@ -27,10 +29,12 @@ const invoiceRepo = new SupabaseInvoiceRepository();
 const unitRepo = new SupabaseUnitRepository();
 const buildingRepo = new SupabaseBuildingRepository();
 
+const setTargetFund = new SetTargetFund(pettyCashRepo);
+const cancelExpressAssessment = new CancelExpressAssessment(invoiceRepo, pettyCashRepo);
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, exchangeRateService);
-const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService);
+const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService, invoiceRepo);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
@@ -48,6 +52,12 @@ const PettyCashFundSchema = t.Object({
         balance: t.Number(),
     }))),
     updated_at: t.Any(),
+});
+
+const PettyCashCoverageSchema = t.Object({
+    pending_to_assess: t.Number(),
+    balance: t.Number(),
+    target_fund: t.Number(),
 });
 
 const PettyCashEntrySchema = t.Object({
@@ -72,6 +82,17 @@ const PettyCashEntrySchema = t.Object({
     reference_id: t.Optional(t.Nullable(t.String())),
     created_by: t.String(),
     created_at: t.Optional(t.Nullable(t.Any())),
+    /**
+     * True when another REVERSAL entry points at this entry's id.
+     * Populated by GetPettyCashHistory; absent on single-entry responses
+     * (income/expense POST, reverse POST) which return the raw entry.
+     */
+    is_reversed: t.Optional(t.Boolean()),
+    /**
+     * Optional coverage data included on EXPENSE responses
+     * when coverage deps are wired. Absent for INCOME entries.
+     */
+    coverage: t.Optional(PettyCashCoverageSchema),
 });
 
 const AssessmentUnitSchema = t.Object({
@@ -86,6 +107,10 @@ const AssessmentPreviewSchema = t.Object({
     total_overage: t.Number(),
     already_assessed: t.Number(),
     pending_to_assess: t.Number(),
+    /**
+     * Target replenishment fund amount. Defaults to 0 when not configured.
+     */
+    target_fund: t.Optional(t.Number()),
     units: t.Array(AssessmentUnitSchema),
 });
 
@@ -102,6 +127,8 @@ const AssessmentResultSchema = t.Object({
     description: t.String(),
     total_assessed: t.Number(),
     invoices_created: t.Number(),
+    kind: t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')]),
+    source_entry_id: t.Nullable(t.String()),
     invoices: t.Array(AssessmentInvoiceSchema),
 });
 
@@ -125,6 +152,13 @@ const AssessmentTransparencySchema = t.Object({
     total_collected: t.Number(),
     collection_percentage: t.Number(),
     units: t.Array(TransparencyUnitSchema),
+    /**
+     * Assessment kind. Present only when a real assessment row exists.
+     * Absent for legacy/orphan batches.
+     */
+    kind: t.Optional(t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')])),
+    /** For EXPRESS assessments, the expense entry id. Absent for legacy. */
+    source_entry_id: t.Optional(t.Nullable(t.String())),
 });
 
 const TransparencySchema = t.Object({
@@ -193,6 +227,40 @@ function createReadRoutes(tag: string) {
                 description:
                     'Breaks collection progress down by assessment batch (ascensor, agua, ...). ' +
                     'CANCELLED invoices excluded. covered_amount capped per-invoice at expected.',
+            },
+        });
+}
+
+function createFundManagementRoutes() {
+    return new Elysia()
+        .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+        .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-fund-management'))
+        .put('/funds/:buildingId/target-fund', async ({ params, body }) => {
+            const targetFund = typeof body.target_fund === 'string'
+                ? parseFloat(body.target_fund)
+                : body.target_fund;
+            return await setTargetFund.execute({
+                buildingId: params.buildingId,
+                targetFund,
+            });
+        }, {
+            body: t.Object({
+                target_fund: t.Union([t.Number(), t.String()], {
+                    description: 'Target replenishment fund amount. Must be >= 0. Zero resets to overage-only mode.',
+                }),
+            }),
+            response: t.Object({
+                building_id: t.String(),
+                target_fund: t.Number(),
+            }),
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Set the target replenishment fund for a building',
+                description:
+                    'Sets the minimum fund balance the board wants to maintain. ' +
+                    'pending_to_assess in the preview will include top-up amounts needed ' +
+                    'to reach this target. Zero resets to cover-the-overdraft mode. ' +
+                    'Cold-start safe: creates the fund row if it does not exist.',
             },
         });
 }
@@ -305,6 +373,35 @@ function createAssessmentRoutes() {
                     'already_assessed excludes CANCELLED invoices.',
             },
         })
+        .post('/funds/:buildingId/assessments/:assessmentId/cancel', async ({ params, body }) => {
+            return await cancelExpressAssessment.execute({
+                assessmentId: params.assessmentId,
+                reason: body.reason,
+                buildingId: params.buildingId,
+            });
+        }, {
+            body: t.Object({
+                reason: t.String({
+                    minLength: 10,
+                    maxLength: 500,
+                    description: 'Reason for cancelling this EXPRESS assessment (min 10 chars). Appended to each cancelled invoice description.',
+                }),
+            }),
+            response: t.Object({
+                assessment_id: t.String(),
+                cancelled_invoices: t.Number(),
+                total_remainder_returned: t.Number(),
+            }),
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Cancel all active invoices of an EXPRESS assessment',
+                description:
+                    'Cancels all PENDING and PARTIAL invoices linked to an EXPRESS assessment ' +
+                    'and appends the reason to each invoice description. PAID invoices are not ' +
+                    'affected. Returns the count of cancelled invoices and total remainder returned. ' +
+                    'Security: buildingId in path is required so requireBuildingAccess applies.',
+            },
+        })
         .post('/funds/:buildingId/assessments', async ({ params, body, profile }) => {
             const amount = typeof body.amount === 'string'
                 ? parseFloat(body.amount)
@@ -316,6 +413,9 @@ function createAssessmentRoutes() {
                 amount,
                 userId: profile.id,
                 unitIds: Array.isArray(body.unit_ids) ? body.unit_ids : undefined,
+                kind: body.kind as 'GENERAL' | 'EXPRESS' | undefined,
+                source_entry_id: body.source_entry_id,
+                unit_amounts: body.unit_amounts as Record<string, number> | undefined,
             });
         }, {
             body: t.Object({
@@ -333,6 +433,15 @@ function createAssessmentRoutes() {
                     minItems: 1,
                     uniqueItems: true,
                     description: 'Optional list of unit IDs that should receive invoices in this batch. Omit it to target every unit.',
+                })),
+                kind: t.Optional(t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')], {
+                    description: "Assessment kind. 'GENERAL' (default) — normal proration. 'EXPRESS' — rapid one-shot linked to a specific expense entry.",
+                })),
+                source_entry_id: t.Optional(t.String({
+                    description: 'Required for EXPRESS: the petty_cash_entries.id of the expense that originated this assessment.',
+                })),
+                unit_amounts: t.Optional(t.Record(t.String(), t.Number(), {
+                    description: 'EXPRESS only: per-unit amount override. Keys = unit IDs, values > 0, sum must equal amount.',
                 })),
             }),
             response: AssessmentResultSchema,
@@ -354,5 +463,6 @@ export const pettyCashAppRoutes = new Elysia({ prefix: '/petty-cash' })
 
 export const pettyCashRoutes = new Elysia({ prefix: '/petty-cash' })
     .use(createReadRoutes('Admin - Petty Cash'))
+    .use(createFundManagementRoutes())
     .use(createWriteRoutes())
     .use(createAssessmentRoutes());
