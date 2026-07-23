@@ -113,7 +113,7 @@ export class CancelExpressAssessment {
             totalRemainderCents += remainderCents;
 
             invoice.cancel();
-            invoice.appendToDescription(`Cancelled: ${reason.trim()}`);
+            invoice.appendToDescription(`Cancelado: ${reason.trim()}`);
 
             await this.invoiceRepo.update(invoice);
         }

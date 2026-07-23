@@ -126,8 +126,8 @@ describe('CancelExpressAssessment', () => {
         expect(invoiceRepo.update).toHaveBeenCalledTimes(1);
         const updatedInvoice: Invoice = invoiceRepo.update.mock.calls[0][0];
         expect(updatedInvoice.status).toBe(InvoiceStatus.CANCELLED);
-        // reason appended to description
-        expect(updatedInvoice.description).toContain('Error en el monto original');
+        // reason appended to description with Spanish prefix (resident-facing convention)
+        expect(updatedInvoice.description).toContain('Cancelado: Error en el monto original');
     });
 
     it('PARTIAL invoice is cancelled, PAID invoice is not touched', async () => {

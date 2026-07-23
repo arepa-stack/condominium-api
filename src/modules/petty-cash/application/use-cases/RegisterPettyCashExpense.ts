@@ -10,7 +10,6 @@ import { DomainError } from '@/core/errors';
 import { resolvePettyCashCurrency } from './resolvePettyCashCurrency';
 import { IBuildingRepository } from '@/modules/buildings/domain/repository';
 import { IInvoiceRepository } from '@/modules/billing/domain/repository';
-import { IUnitRepository } from '@/modules/buildings/domain/repository';
 import { computeCoverage } from './computeCoverage';
 import type { IExchangeRateService } from '@/core/domain/ports/IExchangeRateService';
 
@@ -35,7 +34,7 @@ export interface ExpenseCoverage {
 }
 
 export type RegisterExpenseResult = ReturnType<PettyCashEntry['toJSON']> & {
-    /** Optional coverage data. Present only when invoiceRepo and unitRepo deps are wired. */
+    /** Optional coverage data. Present only when the invoiceRepo dep is wired. */
     coverage?: ExpenseCoverage;
 };
 
@@ -52,18 +51,17 @@ const fromCents = (c: number): number => c / 100;
  * units. No building-level PAID fantasma invoices are generated
  * anymore — the expense lives only in the ledger.
  *
- * Slice B: when `invoiceRepo` and `unitRepo` are provided, the response
- * includes an optional `coverage` object with pending_to_assess, balance,
- * and target_fund. This is backward compatible — callers that do not
- * inject these deps receive the raw entry as before.
+ * Slice B: when `invoiceRepo` is provided, the response includes an
+ * optional `coverage` object with pending_to_assess, balance, and
+ * target_fund. This is backward compatible — callers that do not
+ * inject this dep receive the raw entry as before.
  */
 export class RegisterPettyCashExpense {
     constructor(
         private pettyCashRepo: PettyCashRepository,
         private buildingRepo?: IBuildingRepository,
         private exchangeRateService?: IExchangeRateService,
-        private invoiceRepo?: IInvoiceRepository,
-        private unitRepo?: IUnitRepository
+        private invoiceRepo?: IInvoiceRepository
     ) { }
 
     async execute(dto: RegisterExpenseDTO): Promise<RegisterExpenseResult> {
@@ -108,7 +106,7 @@ export class RegisterPettyCashExpense {
 
         // ── Optional coverage computation (Slice B) ───────────────────────────
         // Compute coverage after the entry is persisted so the balance is accurate.
-        if (this.invoiceRepo && this.unitRepo) {
+        if (this.invoiceRepo) {
             const balance = await this.pettyCashRepo.getBalance(fund.id);
             const balanceCents = toCents(balance);
             const targetFundCents = toCents(fund.target_fund ?? 0);

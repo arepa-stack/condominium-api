@@ -98,15 +98,12 @@ describe('RegisterPettyCashExpense — coverage output (Slice B)', () => {
         const pcRepo = makePettyCashRepo({ fund, balance: -100 });
         // Post-save balance is -100 (no invoices outstanding)
         const invoiceRepo = makeInvoiceRepo([]);
-        const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
-        const unitRepo = makeUnitRepo(units);
 
         const useCase = new RegisterPettyCashExpense(
             pcRepo as any,
             undefined, // buildingRepo — not needed for USD
             undefined, // exchangeRateService
-            invoiceRepo as any,
-            unitRepo as any
+            invoiceRepo as any
         );
 
         const result = await useCase.execute(baseExpenseDTO({ amount: 100 }));
@@ -122,15 +119,12 @@ describe('RegisterPettyCashExpense — coverage output (Slice B)', () => {
         const fund = new PettyCashFund('f1', 'b1', new Date(), 50);
         const pcRepo = makePettyCashRepo({ fund, balance: 100 });
         const invoiceRepo = makeInvoiceRepo([]);
-        const units = [makeUnit('u1', '1A')];
-        const unitRepo = makeUnitRepo(units);
 
         const useCase = new RegisterPettyCashExpense(
             pcRepo as any,
             undefined,
             undefined,
-            invoiceRepo as any,
-            unitRepo as any
+            invoiceRepo as any
         );
 
         const result = await useCase.execute(baseExpenseDTO({ amount: 10 }));
@@ -166,8 +160,7 @@ describe('RegisterPettyCashExpense — coverage output (Slice B)', () => {
             pcRepo as any,
             undefined,
             undefined,
-            invoiceRepo as any,
-            unitRepo as any
+            invoiceRepo as any
         );
         const expenseResult = await expenseUseCase.execute(baseExpenseDTO({ amount: 50 }));
 
