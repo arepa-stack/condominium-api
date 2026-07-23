@@ -186,4 +186,52 @@ describe('RegisterPettyCashExpense — coverage output', () => {
         expect(result.description).toBe('Test expense');
         expect(result.fund_id).toBe('f1');
     });
+
+    it('coverage parity: target 500, balance 100, other outstanding 200 → pending 200; after contribution 50 (balance 150) → pending 150', async () => {
+        // State before contribution: target=500, balance=100, outstanding receivables=200.
+        // pending = max(0, 500 - (100 + 200)) = 200.
+        const fund = new PettyCashFund('f1', 'b1', new Date(), 500);
+
+        // Existing PETTY_CASH invoice: 200 outstanding
+        const existingInvoice = new Invoice({
+            id: 'inv-existing',
+            unit_id: 'u1',
+            building_id: 'b1',
+            amount: 200,
+            paid_amount: 0,
+            period: '2026-07',
+            issue_date: new Date(),
+            status: InvoiceStatus.PENDING,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description: 'Other assessment',
+        });
+
+        const pcRepoBeforeContrib = makePettyCashRepo({ fund, balance: 100 });
+        const invoiceRepoBeforeContrib = makeInvoiceRepo([existingInvoice]);
+
+        const { pendingCents: pendingBefore } = (await import('@/modules/petty-cash/application/use-cases/computeCoverage')).then
+            ? (0 as any) // unused path
+            : { pendingCents: 0 };
+
+        // Import computeCoverage directly to verify the formula
+        const { computeCoverage: compute } = await import('@/modules/petty-cash/application/use-cases/computeCoverage');
+
+        const before = compute({
+            balanceCents: 100 * 100,
+            targetFundCents: 500 * 100,
+            invoices: [existingInvoice],
+        });
+        // pending = 500 - (100 + 200) = 200
+        expect(before.pendingCents).toBe(200 * 100);
+
+        // After contribution of 50 (balance becomes 150):
+        const after = compute({
+            balanceCents: 150 * 100,
+            targetFundCents: 500 * 100,
+            invoices: [existingInvoice],
+        });
+        // pending = 500 - (150 + 200) = 150
+        expect(after.pendingCents).toBe(150 * 100);
+    });
 });
