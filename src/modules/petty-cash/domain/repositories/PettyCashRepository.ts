@@ -65,6 +65,18 @@ export interface PettyCashRepository {
         referenceId: string
     ): Promise<PettyCashEntry[]>;
 
+    /**
+     * Returns the set of original-entry IDs that have been reversed in
+     * the given fund. A reversal entry with type='reversal' and
+     * reference_type='reversal' points its reference_id at the original
+     * entry being counter-asiento'd; this query returns those reference_id
+     * values so callers can mark the originals as reversed.
+     *
+     * Used by GetPettyCashHistory to attach is_reversed to each entry
+     * without the frontend doing client-side set math.
+     */
+    findReversedOriginalIds(fundId: string): Promise<Set<string>>;
+
     // ── Assessment batches ────────────────────────────────────────────────
     createAssessment(assessment: PettyCashAssessment): Promise<PettyCashAssessment>;
     findAssessmentsByFundId(fundId: string): Promise<PettyCashAssessment[]>;

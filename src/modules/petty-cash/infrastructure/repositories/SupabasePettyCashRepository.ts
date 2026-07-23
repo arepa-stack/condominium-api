@@ -276,6 +276,33 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
         return (data ?? []).map(d => this.entryToDomain(d));
     }
 
+    async findReversedOriginalIds(fundId: string): Promise<Set<string>> {
+        // Select only the reference_id column to keep the payload small.
+        // Filters: type = 'reversal' AND reference_type = 'reversal'
+        // (PettyCashEntryType.REVERSAL = 'reversal', PettyCashEntryReferenceType.REVERSAL = 'reversal')
+        const { data, error } = await supabase
+            .from('petty_cash_entries')
+            .select('reference_id')
+            .eq('fund_id', fundId)
+            .eq('type', PettyCashEntryType.REVERSAL)
+            .eq('reference_type', PettyCashEntryReferenceType.REVERSAL)
+            .not('reference_id', 'is', null);
+
+        if (error) {
+            throw new DomainError(
+                'Error fetching reversed original ids: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+
+        const ids = new Set<string>();
+        for (const row of data ?? []) {
+            if (row.reference_id) ids.add(row.reference_id as string);
+        }
+        return ids;
+    }
+
     // ── Assessment ────────────────────────────────────────────────────────
 
     async createAssessment(

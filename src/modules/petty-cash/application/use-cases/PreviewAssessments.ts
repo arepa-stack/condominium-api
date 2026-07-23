@@ -2,14 +2,24 @@ import { IInvoiceRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { InvoiceTag } from '@/core/domain/enums';
-import { InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
+import { computeCoverage } from './computeCoverage';
 
 export interface AssessmentPreview {
     building_id: string;
     current_balance: number;            // live ledger balance (may be negative)
     total_overage: number;              // max(0, -current_balance)
-    already_assessed: number;           // sum of active unit-level PETTY_CASH invoice amounts
-    pending_to_assess: number;          // max(0, overage - already_assessed)
+    /**
+     * Outstanding receivables: Σ max(0, amount - paid_amount) over active unit-level
+     * PETTY_CASH invoices. Name kept for backward compatibility with the route schema.
+     * Previously held "full invoice amounts"; now holds the true uncollected remainder.
+     */
+    already_assessed: number;
+    pending_to_assess: number;          // amount still needed beyond outstanding receivables
+    /**
+     * Target replenishment fund amount.
+     * Always 0 in Slice A — no DB column yet. Slice B adds the column and populates this.
+     */
+    target_fund: number;
     units: { id: string; name: string; amount: number }[];
 }
 
@@ -21,15 +31,18 @@ const fromCents = (c: number): number => c / 100;
 /**
  * Preview how much to prorate across units for a given building.
  *
- * Phase 2 semantics:
+ * Phase 3 semantics (outstanding-receivables fix):
  *   current_balance   = petty_cash_balance view (SUM of signed entries)
- *   total_overage     = max(0, -current_balance)  — negative balance is
- *                       the live overdraft
- *   already_assessed  = Σ amounts of ACTIVE unit-level PETTY_CASH
- *                       invoices (PENDING + PARTIAL + PAID — NOT
- *                       CANCELLED). Fixes the pre-existing bug where
- *                       CANCELLED invoices still counted.
- *   pending_to_assess = max(0, overage - already_assessed)
+ *   total_overage     = max(0, -current_balance) — the live overdraft
+ *   already_assessed  = Σ max(0, amount - paid_amount) for ACTIVE unit-level
+ *                       PETTY_CASH invoices (PENDING + PARTIAL + PAID — NOT
+ *                       CANCELLED). This is the outstanding receivable, not
+ *                       the full invoice amount. PAID invoices contribute 0
+ *                       because their collected portion already lifted the
+ *                       ledger balance via COLLECTION entries.
+ *   pending_to_assess = max(0, target_fund - (balance + already_assessed))
+ *                       With target_fund=0 (Slice A): max(0, -(balance + receivables))
+ *   target_fund       = 0 in Slice A; Slice B adds the DB column.
  *
  * The per-unit amount is a fair-to-the-cent split; first `remainder`
  * units get one extra cent so the sum of unit amounts equals
@@ -49,29 +62,27 @@ export class PreviewAssessments {
             : 0;
 
         const balanceCents = toCents(balance);
-        const overageCents = Math.max(0, -balanceCents);
+
+        // target_fund is 0 in Slice A — Slice B adds the DB column to PettyCashFund.
+        const targetFundCents = 0;
 
         // Unit-level PETTY_CASH invoices — what's already been assigned.
-        // We count PENDING + PARTIAL + PAID. CANCELLED is excluded
-        // intentionally (a cancelled quota isn't part of what's owed).
+        // findAll returns paid_amount via Invoice.paid_amount getter.
         const allInvoices = await this.invoiceRepo.findAll({
             building_id: buildingId,
             tag: InvoiceTag.PETTY_CASH,
         });
 
-        let alreadyAssessedCents = 0;
-        for (const inv of allInvoices) {
-            if (!inv.unit_id) continue;
-            if (inv.status === InvoiceStatus.CANCELLED) continue;
-            alreadyAssessedCents += toCents(inv.amount);
-        }
-
-        let pendingCents = Math.max(0, overageCents - alreadyAssessedCents);
+        const { outstandingReceivablesCents, pendingCents: rawPendingCents } = computeCoverage({
+            balanceCents,
+            targetFundCents,
+            invoices: allInvoices,
+        });
 
         // Clamp sub-cent dust from legacy float-stored invoices.
-        if (pendingCents < 1) {
-            pendingCents = 0;
-        }
+        const pendingCents = rawPendingCents < 1 ? 0 : rawPendingCents;
+
+        const overageCents = Math.max(0, -balanceCents);
 
         const units = await this.unitRepo.findByBuildingId(buildingId);
 
@@ -88,8 +99,10 @@ export class PreviewAssessments {
             building_id: buildingId,
             current_balance: balance,
             total_overage: fromCents(overageCents),
-            already_assessed: fromCents(alreadyAssessedCents),
+            already_assessed: fromCents(outstandingReceivablesCents),
             pending_to_assess: fromCents(pendingCents),
+            // Slice A: target_fund = 0. Slice B adds DB column and real value.
+            target_fund: fromCents(targetFundCents),
             units: units.map((u, i) => ({
                 id: u.id,
                 name: u.name,

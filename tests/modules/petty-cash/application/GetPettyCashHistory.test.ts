@@ -3,10 +3,13 @@ import { GetPettyCashHistory } from '@/modules/petty-cash/application/use-cases/
 import { PettyCashFund } from '@/modules/petty-cash/domain/entities/PettyCashFund';
 
 function makeRepo(options: { fund?: PettyCashFund | null } = {}) {
-    const fund = options.fund ?? new PettyCashFund('fund-1', 'building-1', new Date());
+    // Explicit null check so null can be passed to test the "no fund" path.
+    const fund = options.fund !== undefined
+        ? options.fund
+        : new PettyCashFund('fund-1', 'building-1', new Date());
     return {
         findFundByBuildingId: mock(async () => fund),
-        findOrCreateFund: mock(async () => fund),
+        findOrCreateFund: mock(async () => fund ?? new PettyCashFund('fund-1', 'building-1', new Date())),
         getBalance: mock(async () => 0),
         addEntry: mock(async (e: any) => e),
         findEntryById: mock(async () => null),
@@ -16,6 +19,8 @@ function makeRepo(options: { fund?: PettyCashFund | null } = {}) {
         createAssessment: mock(async (a: any) => a),
         findAssessmentsByFundId: mock(async () => []),
         findAssessmentsByPeriod: mock(async () => []),
+        // Added in Slice A: findReversedOriginalIds returns empty set by default.
+        findReversedOriginalIds: mock(async () => new Set<string>()),
     };
 }
 

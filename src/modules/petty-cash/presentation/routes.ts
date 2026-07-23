@@ -72,6 +72,12 @@ const PettyCashEntrySchema = t.Object({
     reference_id: t.Optional(t.Nullable(t.String())),
     created_by: t.String(),
     created_at: t.Optional(t.Nullable(t.Any())),
+    /**
+     * True when another REVERSAL entry points at this entry's id.
+     * Populated by GetPettyCashHistory; absent on single-entry responses
+     * (income/expense POST, reverse POST) which return the raw entry.
+     */
+    is_reversed: t.Optional(t.Boolean()),
 });
 
 const AssessmentUnitSchema = t.Object({
@@ -86,6 +92,11 @@ const AssessmentPreviewSchema = t.Object({
     total_overage: t.Number(),
     already_assessed: t.Number(),
     pending_to_assess: t.Number(),
+    /**
+     * Target replenishment fund amount. Always 0 in Slice A.
+     * Slice B adds the DB column and populates the real value.
+     */
+    target_fund: t.Optional(t.Number()),
     units: t.Array(AssessmentUnitSchema),
 });
 
