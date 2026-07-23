@@ -20,6 +20,7 @@ import { GenerateAssessments } from '../application/use-cases/GenerateAssessment
 import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
 import { ReversePettyCashEntry } from '../application/use-cases/ReversePettyCashEntry';
 import { SetTargetFund } from '../application/use-cases/SetTargetFund';
+import { CancelExpressAssessment } from '../application/use-cases/CancelExpressAssessment';
 
 // ── DI ──────────────────────────────────────────────────────────────────────
 const pettyCashRepo = new SupabasePettyCashRepository();
@@ -29,6 +30,7 @@ const unitRepo = new SupabaseUnitRepository();
 const buildingRepo = new SupabaseBuildingRepository();
 
 const setTargetFund = new SetTargetFund(pettyCashRepo);
+const cancelExpressAssessment = new CancelExpressAssessment(invoiceRepo, pettyCashRepo);
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, exchangeRateService);
@@ -352,6 +354,35 @@ function createAssessmentRoutes() {
                 description:
                     'Does NOT create invoices. total_overage = max(0, -current_balance). ' +
                     'already_assessed excludes CANCELLED invoices.',
+            },
+        })
+        .post('/funds/:buildingId/assessments/:assessmentId/cancel', async ({ params, body }) => {
+            return await cancelExpressAssessment.execute({
+                assessmentId: params.assessmentId,
+                reason: body.reason,
+                buildingId: params.buildingId,
+            });
+        }, {
+            body: t.Object({
+                reason: t.String({
+                    minLength: 10,
+                    maxLength: 500,
+                    description: 'Reason for cancelling this EXPRESS assessment (min 10 chars). Appended to each cancelled invoice description.',
+                }),
+            }),
+            response: t.Object({
+                assessment_id: t.String(),
+                cancelled_invoices: t.Number(),
+                total_remainder_returned: t.Number(),
+            }),
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Cancel all active invoices of an EXPRESS assessment',
+                description:
+                    'Cancels all PENDING and PARTIAL invoices linked to an EXPRESS assessment ' +
+                    'and appends the reason to each invoice description. PAID invoices are not ' +
+                    'affected. Returns the count of cancelled invoices and total remainder returned. ' +
+                    'Security: buildingId in path is required so requireBuildingAccess applies.',
             },
         })
         .post('/funds/:buildingId/assessments', async ({ params, body, profile }) => {
