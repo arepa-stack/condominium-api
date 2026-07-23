@@ -426,4 +426,23 @@ describe('GenerateAssessments — EXPRESS kind', () => {
         expect(invoicesArg[0].amount).toBe(50);
         expect(invoicesArg[1].amount).toBe(50);
     });
+
+    it('rejects CONTRIBUTION kind with INVALID_ASSESSMENT_KIND (must use contribution endpoint)', async () => {
+        const pcRepo = mockPettyCashRepo({ fund });
+        const generate = new GenerateAssessments(
+            mockInvoiceRepo(),
+            mockUnitRepo(units) as any,
+            pcRepo as any
+        );
+
+        await expect(
+            generate.execute({
+                buildingId: 'b1',
+                description: 'Direct contribution attempt',
+                amount: 50,
+                userId: 'user-1',
+                kind: 'CONTRIBUTION' as any, // cast: the DTO type intentionally omits CONTRIBUTION
+            })
+        ).rejects.toMatchObject({ code: 'INVALID_ASSESSMENT_KIND', status: 400 });
+    });
 });

@@ -13,7 +13,7 @@ export interface GenerateAssessmentDTO {
     amount: number;                           // total to prorate across units
     userId: string;
     unitIds?: string[];
-    /** Assessment kind. Defaults to GENERAL. */
+    /** Assessment kind. Defaults to GENERAL. CONTRIBUTION is not allowed here. */
     kind?: 'GENERAL' | 'EXPRESS';
     /**
      * For EXPRESS assessments, the petty_cash_entries.id of the
@@ -34,7 +34,7 @@ export interface GenerateAssessmentsResult {
     description: string;
     total_assessed: number;
     invoices_created: number;
-    /** Assessment kind persisted. */
+    /** Assessment kind persisted. CONTRIBUTION is never returned here. */
     kind: 'GENERAL' | 'EXPRESS';
     /** Source entry id for EXPRESS assessments, null otherwise. */
     source_entry_id: string | null;
@@ -108,6 +108,16 @@ export class GenerateAssessments {
         }
 
         // ── Kind-level cross-field validation ────────────────────────────────
+
+        // CONTRIBUTION assessments are created exclusively through the direct
+        // contribution endpoint and must never reach this code path.
+        if ((kind as string) === 'CONTRIBUTION') {
+            throw new DomainError(
+                'CONTRIBUTION assessments cannot be created via the assessments endpoint. Use POST /funds/:buildingId/contributions instead.',
+                'INVALID_ASSESSMENT_KIND',
+                400
+            );
+        }
 
         if (kind === 'GENERAL') {
             if (source_entry_id) {
