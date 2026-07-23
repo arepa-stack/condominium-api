@@ -185,6 +185,15 @@ export class RegisterPettyCashContribution {
                 paymentId: createdPayment.id,
                 approverId: userId,
             });
+
+            // approve() persists the transition but returns void, leaving the
+            // in-memory entity PENDING. Re-read so the response mirrors the stored
+            // APPROVED state (processed_by/processed_at); fall back to the in-memory
+            // entity if the row cannot be fetched.
+            const approvedPayment = await this.paymentRepo.findById(createdPayment.id);
+            if (approvedPayment) {
+                createdPayment = approvedPayment;
+            }
         } catch (err) {
             await this.compensate(createdInvoice, createdPayment);
             throw err;

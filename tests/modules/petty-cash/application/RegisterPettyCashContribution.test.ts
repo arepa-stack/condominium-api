@@ -182,13 +182,20 @@ describe('RegisterPettyCashContribution', () => {
         const registerPayment = mockRegisterPayment(payment);
         const approvePayment = mockApprovePayment();
 
+        // After approval, the persisted payment is APPROVED with the acting user
+        // recorded as processor. The re-read must surface that fresh state.
+        const approvedPayment = makePayment('pay-1', 'u1');
+        approvedPayment.approve('user-admin');
+        const paymentRepo = mockPaymentRepo();
+        paymentRepo.findById = mock(() => Promise.resolve(approvedPayment)) as any;
+
         const useCase = new RegisterPettyCashContribution(
             pcRepo as any,
             invoiceRepo as any,
             unitRepo as any,
             registerPayment as any,
             approvePayment as any,
-            mockPaymentRepo() as any
+            paymentRepo as any
         );
 
         const result = await useCase.execute({
@@ -234,6 +241,11 @@ describe('RegisterPettyCashContribution', () => {
         // Result includes the created payment (contract: 201 {invoice, payment, ...})
         expect(result.payment).toBeDefined();
         expect(result.payment.id).toBe('pay-1');
+
+        // The returned payment reflects the post-approval persisted state, not the
+        // PENDING in-memory entity produced by RegisterPayment.
+        expect(result.payment.status).toBe(PaymentStatus.APPROVED);
+        expect(result.payment.processed_by).toBe('user-admin');
     });
 
     it('(b) amount <= 0 → validation error, nothing created', async () => {
@@ -608,5 +620,67 @@ describe('RegisterPettyCashContribution', () => {
         });
 
         expect(result.coverage.pending_to_assess).toBe(200);
+    });
+
+    it('(k) compensation with a PENDING invoice but an already-APPROVED payment cancels the invoice yet leaves the payment intact', async () => {
+        const pcRepo = mockPettyCashRepo({ fund, balance: 150 });
+
+        // The DB refetch reports the invoice still PENDING (no collection landed),
+        // so the invoice is safe to cancel.
+        const invoiceRepo = mockInvoiceRepo();
+        invoiceRepo.findById = mock(() =>
+            Promise.resolve(
+                new Invoice({
+                    id: 'inv-pending',
+                    unit_id: 'u1',
+                    building_id: 'b1',
+                    amount: 50,
+                    period: '2026-07',
+                    issue_date: new Date(),
+                    status: InvoiceStatus.PENDING,
+                    type: InvoiceType.EXPENSE,
+                    tag: InvoiceTag.PETTY_CASH,
+                    description: 'Aporte',
+                })
+            )
+        ) as any;
+
+        // The payment is already APPROVED in the store, so it must never be deleted
+        // even though the invoice is still cancellable.
+        const payment = makePayment('pay-approved-pending-inv', 'u1');
+        payment.approve('user-admin');
+        const paymentRepo = mockPaymentRepo();
+        paymentRepo.findById = mock(() => Promise.resolve(payment)) as any;
+
+        const approvePayment = {
+            approve: mock(() => Promise.reject(new Error('post-approve step failed'))),
+        };
+
+        const useCase = new RegisterPettyCashContribution(
+            pcRepo as any,
+            invoiceRepo as any,
+            mockUnitRepo(units) as any,
+            mockRegisterPayment(payment) as any,
+            approvePayment as any,
+            paymentRepo as any
+        );
+
+        await expect(
+            useCase.execute({
+                buildingId: 'b1',
+                unitId: 'u1',
+                amount: 50,
+                proofUrl: 'https://cdn.example.com/proof.jpg',
+                userId: 'user-admin',
+            })
+        ).rejects.toThrow('post-approve step failed');
+
+        // PENDING invoice is cancelled and persisted.
+        expect(invoiceRepo.update.mock.calls).toHaveLength(1);
+        const cancelled: Invoice = invoiceRepo.update.mock.calls[0][0];
+        expect(cancelled.status).toBe(InvoiceStatus.CANCELLED);
+
+        // APPROVED payment must NOT be deleted (guard: status !== APPROVED).
+        expect(paymentRepo.delete.mock.calls).toHaveLength(0);
     });
 });
