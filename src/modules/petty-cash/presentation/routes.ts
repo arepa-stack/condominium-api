@@ -115,6 +115,8 @@ const AssessmentResultSchema = t.Object({
     description: t.String(),
     total_assessed: t.Number(),
     invoices_created: t.Number(),
+    kind: t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')]),
+    source_entry_id: t.Nullable(t.String()),
     invoices: t.Array(AssessmentInvoiceSchema),
 });
 
@@ -363,6 +365,9 @@ function createAssessmentRoutes() {
                 amount,
                 userId: profile.id,
                 unitIds: Array.isArray(body.unit_ids) ? body.unit_ids : undefined,
+                kind: body.kind as 'GENERAL' | 'EXPRESS' | undefined,
+                source_entry_id: body.source_entry_id,
+                unit_amounts: body.unit_amounts as Record<string, number> | undefined,
             });
         }, {
             body: t.Object({
@@ -380,6 +385,15 @@ function createAssessmentRoutes() {
                     minItems: 1,
                     uniqueItems: true,
                     description: 'Optional list of unit IDs that should receive invoices in this batch. Omit it to target every unit.',
+                })),
+                kind: t.Optional(t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')], {
+                    description: "Assessment kind. 'GENERAL' (default) — normal proration. 'EXPRESS' — rapid one-shot linked to a specific expense entry.",
+                })),
+                source_entry_id: t.Optional(t.String({
+                    description: 'Required for EXPRESS: the petty_cash_entries.id of the expense that originated this assessment.',
+                })),
+                unit_amounts: t.Optional(t.Record(t.String(), t.Number(), {
+                    description: 'EXPRESS only: per-unit amount override. Keys = unit IDs, values > 0, sum must equal amount.',
                 })),
             }),
             response: AssessmentResultSchema,
