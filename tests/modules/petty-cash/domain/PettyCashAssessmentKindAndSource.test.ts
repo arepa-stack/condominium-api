@@ -1,7 +1,5 @@
 /**
- * TDD tests for PettyCashAssessment.kind and .source_entry_id fields (Slice B — B2).
- *
- * RED phase: tests written BEFORE the entity change.
+ * Tests for PettyCashAssessment.kind and .source_entry_id fields.
  */
 
 import { describe, it, expect } from 'bun:test';
@@ -18,7 +16,7 @@ function makeValidProps(overrides: Record<string, any> = {}) {
     };
 }
 
-describe('PettyCashAssessment — kind and source_entry_id (Slice B)', () => {
+describe('PettyCashAssessment — kind and source_entry_id', () => {
     it('defaults kind to GENERAL when not provided', () => {
         const a = new PettyCashAssessment(makeValidProps());
         expect(a.kind).toBe('GENERAL');

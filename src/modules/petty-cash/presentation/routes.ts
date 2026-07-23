@@ -89,7 +89,7 @@ const PettyCashEntrySchema = t.Object({
      */
     is_reversed: t.Optional(t.Boolean()),
     /**
-     * Slice B: optional coverage data included on EXPENSE responses
+     * Optional coverage data included on EXPENSE responses
      * when coverage deps are wired. Absent for INCOME entries.
      */
     coverage: t.Optional(PettyCashCoverageSchema),
@@ -108,8 +108,7 @@ const AssessmentPreviewSchema = t.Object({
     already_assessed: t.Number(),
     pending_to_assess: t.Number(),
     /**
-     * Target replenishment fund amount. Always 0 in Slice A.
-     * Slice B adds the DB column and populates the real value.
+     * Target replenishment fund amount. Defaults to 0 when not configured.
      */
     target_fund: t.Optional(t.Number()),
     units: t.Array(AssessmentUnitSchema),
@@ -154,11 +153,11 @@ const AssessmentTransparencySchema = t.Object({
     collection_percentage: t.Number(),
     units: t.Array(TransparencyUnitSchema),
     /**
-     * Slice B: assessment kind. Present only when a real assessment row exists.
+     * Assessment kind. Present only when a real assessment row exists.
      * Absent for legacy/orphan batches.
      */
     kind: t.Optional(t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')])),
-    /** Slice B: for EXPRESS assessments, the expense entry id. Absent for legacy. */
+    /** For EXPRESS assessments, the expense entry id. Absent for legacy. */
     source_entry_id: t.Optional(t.Nullable(t.String())),
 });
 
@@ -260,7 +259,7 @@ function createFundManagementRoutes() {
                 description:
                     'Sets the minimum fund balance the board wants to maintain. ' +
                     'pending_to_assess in the preview will include top-up amounts needed ' +
-                    'to reach this target. Zero resets to overage-only mode (Slice A). ' +
+                    'to reach this target. Zero resets to cover-the-overdraft mode. ' +
                     'Cold-start safe: creates the fund row if it does not exist.',
             },
         });

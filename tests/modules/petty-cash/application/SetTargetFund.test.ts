@@ -1,7 +1,5 @@
 /**
- * TDD tests for SetTargetFund use case (Slice B — B4).
- *
- * RED phase: tests written BEFORE the use case exists.
+ * Tests for SetTargetFund use case.
  *
  * Scenarios:
  *   - Cold start: building with no fund row → fund created, target set.

@@ -20,7 +20,7 @@ export interface SetTargetFundResult {
  * Validation:
  *   - targetFund must be a finite number >= 0. Negative values are rejected
  *     with VALIDATION_ERROR (400). Zero is valid — it resets to overage-only
- *     mode (Slice A behaviour).
+ *     mode (plain cover-the-overdraft mode).
  */
 export class SetTargetFund {
     constructor(private pettyCashRepo: PettyCashRepository) {}

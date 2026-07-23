@@ -11,15 +11,15 @@
  * fund lifecycle can grow back metadata (name, timezone, …) without
  * reshaping the persistence layer.
  *
- * Slice B adds `target_fund`: the replenishment threshold the board wants
- * to maintain. Zero means "just cover the overdraft" (Slice A behaviour).
+ * `target_fund` is the replenishment threshold the board wants
+ * to maintain. Zero means "just cover the overdraft" (cover-the-overdraft mode).
  */
 export class PettyCashFund {
     constructor(
         public readonly id: string,
         public readonly building_id: string,
         public readonly updated_at: Date,
-        /** Target replenishment fund amount. Default 0 (Slice A behaviour). */
+        /** Target replenishment fund amount. Default 0 (cover-the-overdraft mode). */
         public readonly target_fund: number = 0
     ) { }
 

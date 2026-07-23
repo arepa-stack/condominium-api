@@ -17,7 +17,7 @@ export interface AssessmentPreview {
     pending_to_assess: number;          // amount still needed beyond outstanding receivables
     /**
      * Target replenishment fund amount.
-     * Always 0 in Slice A — no DB column yet. Slice B adds the column and populates this.
+     * Defaults to 0 when the building has no configured target (plain cover-the-overdraft mode).
      */
     target_fund: number;
     units: { id: string; name: string; amount: number }[];
@@ -41,8 +41,8 @@ const fromCents = (c: number): number => c / 100;
  *                       because their collected portion already lifted the
  *                       ledger balance via COLLECTION entries.
  *   pending_to_assess = max(0, target_fund - (balance + already_assessed))
- *                       With target_fund=0 (Slice A): max(0, -(balance + receivables))
- *   target_fund       = 0 in Slice A; Slice B adds the DB column.
+ *                       With target_fund=0: max(0, -(balance + receivables))
+ *   target_fund       = amount the board wants to maintain; 0 means cover-the-overdraft only.
  *
  * The per-unit amount is a fair-to-the-cent split; first `remainder`
  * units get one extra cent so the sum of unit amounts equals
@@ -63,8 +63,8 @@ export class PreviewAssessments {
 
         const balanceCents = toCents(balance);
 
-        // Slice B: use the real target_fund from the fund entity.
-        // If no fund exists, fall back to 0 (same as Slice A behaviour).
+        // Use the real target_fund from the fund entity.
+        // If no fund exists, fall back to 0 (cover-the-overdraft mode).
         const targetFundCents = toCents(fund?.target_fund ?? 0);
 
         // Unit-level PETTY_CASH invoices — what's already been assigned.
@@ -102,7 +102,7 @@ export class PreviewAssessments {
             total_overage: fromCents(overageCents),
             already_assessed: fromCents(outstandingReceivablesCents),
             pending_to_assess: fromCents(pendingCents),
-            // Slice B: real target_fund from fund entity (0 when no fund).
+            // target_fund from fund entity; 0 when no fund is configured.
             target_fund: fromCents(targetFundCents),
             units: units.map((u, i) => ({
                 id: u.id,

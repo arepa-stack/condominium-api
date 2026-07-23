@@ -27,12 +27,12 @@ export interface AssessmentTransparencyDTO {
     collection_percentage: number;
     units: TransparencyUnitDTO[];
     /**
-     * Slice B: assessment kind. Present when there is a linked assessment row.
+     * Assessment kind. Present when there is a linked assessment row.
      * Absent for legacy/orphan batches that predate the assessment table.
      */
     kind?: 'GENERAL' | 'EXPRESS';
     /**
-     * Slice B: for EXPRESS assessments, the petty_cash_entries.id of the
+     * For EXPRESS assessments, the petty_cash_entries.id of the
      * expense that triggered this assessment. NULL for GENERAL. Absent for legacy.
      */
     source_entry_id?: string | null;

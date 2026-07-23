@@ -79,7 +79,7 @@ export interface PettyCashRepository {
 
     /**
      * Update the target_fund amount for a given fund.
-     * Slice B: used by SetTargetFund use case.
+     * Used by the SetTargetFund use case.
      */
     updateFundTargetFund(fundId: string, targetFund: number): Promise<void>;
 
@@ -92,7 +92,7 @@ export interface PettyCashRepository {
     ): Promise<PettyCashAssessment[]>;
     /**
      * Fetch a single assessment by its primary key.
-     * Slice B: used by CancelExpressAssessment.
+     * Used by the CancelExpressAssessment use case.
      */
     findAssessmentById(assessmentId: string): Promise<PettyCashAssessment | null>;
 }

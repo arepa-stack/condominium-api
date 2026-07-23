@@ -1,10 +1,8 @@
 /**
- * TDD tests for PreviewAssessments real target_fund wiring (Slice B — B3).
+ * Tests for PreviewAssessments — target_fund wiring.
  *
- * RED phase: tests written BEFORE changing PreviewAssessments to use
- * fund.target_fund instead of the hardcoded 0.
- *
- * Spec scenario: balance 20, receivables 0, target 100 → pending 80.
+ * Verifies that fund.target_fund drives pending_to_assess correctly.
+ * Core scenario: balance 20, receivables 0, target 100 → pending 80.
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -69,7 +67,7 @@ function mockPettyCashRepo(options: {
     };
 }
 
-describe('PreviewAssessments — real target_fund from fund entity (Slice B)', () => {
+describe('PreviewAssessments — target_fund from fund entity', () => {
     /**
      * Core B3 scenario from spec:
      * balance 20, receivables 0, target 100 → pending 80

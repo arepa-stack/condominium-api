@@ -13,17 +13,17 @@ export interface GenerateAssessmentDTO {
     amount: number;                           // total to prorate across units
     userId: string;
     unitIds?: string[];
-    /** Slice B: assessment kind. Defaults to GENERAL. */
+    /** Assessment kind. Defaults to GENERAL. */
     kind?: 'GENERAL' | 'EXPRESS';
     /**
-     * Slice B: for EXPRESS assessments, the petty_cash_entries.id of the
+     * For EXPRESS assessments, the petty_cash_entries.id of the
      * expense entry that originated this assessment. Required when kind=EXPRESS.
      */
     source_entry_id?: string;
     /**
-     * Slice B: per-unit amount override. When present (EXPRESS only), keys
+     * Per-unit amount override. When present (EXPRESS only), keys
      * must exactly match unitIds, all values > 0, and the sum in cents must
-     * equal toCents(amount). Absent → fair-cent equal split (existing behaviour).
+     * equal toCents(amount). Absent → fair-cent equal split.
      */
     unit_amounts?: Record<string, number>;
 }
@@ -34,9 +34,9 @@ export interface GenerateAssessmentsResult {
     description: string;
     total_assessed: number;
     invoices_created: number;
-    /** Slice B: assessment kind persisted. */
+    /** Assessment kind persisted. */
     kind: 'GENERAL' | 'EXPRESS';
-    /** Slice B: source entry id for EXPRESS assessments, null otherwise. */
+    /** Source entry id for EXPRESS assessments, null otherwise. */
     source_entry_id: string | null;
     invoices: {
         unit_id: string;
@@ -53,7 +53,7 @@ const fromCents = (c: number): number => c / 100;
  * Create a named assessment BATCH and one PENDING invoice per unit
  * linking back to the batch.
  *
- * Slice B adds:
+ * Supports two kinds:
  *   - `kind`: GENERAL (default) or EXPRESS.
  *   - `source_entry_id`: required for EXPRESS, forbidden for GENERAL.
  *   - `unit_amounts`: per-unit override (EXPRESS only). Absent → fair-cent split.

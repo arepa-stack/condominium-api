@@ -1,5 +1,5 @@
 /**
- * TDD tests for is_reversed flag in GetPettyCashHistory (Slice A task A3).
+ * Tests for is_reversed flag in GetPettyCashHistory.
  *
  * is_reversed: true when the entry's id appears in the set of reference_id
  * values from REVERSAL entries in the same fund. This allows the admin frontend

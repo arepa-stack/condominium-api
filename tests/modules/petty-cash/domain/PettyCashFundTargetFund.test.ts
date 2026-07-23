@@ -1,15 +1,11 @@
 /**
- * TDD tests for PettyCashFund.target_fund field (Slice B — B2).
- *
- * RED phase: tests written BEFORE the entity change. These will fail
- * until PettyCashFund gains the target_fund constructor parameter and
- * exposes it in toJSON().
+ * Tests for PettyCashFund.target_fund field.
  */
 
 import { describe, it, expect } from 'bun:test';
 import { PettyCashFund } from '@/modules/petty-cash/domain/entities/PettyCashFund';
 
-describe('PettyCashFund — target_fund (Slice B)', () => {
+describe('PettyCashFund — target_fund', () => {
     it('defaults target_fund to 0 when not provided', () => {
         const fund = new PettyCashFund('f1', 'b1', new Date());
         expect(fund.target_fund).toBe(0);

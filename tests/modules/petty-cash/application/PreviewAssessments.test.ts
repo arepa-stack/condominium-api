@@ -1,5 +1,5 @@
 /**
- * TDD tests for PreviewAssessments outstanding-receivables fix (Slice A).
+ * Tests for PreviewAssessments — outstanding-receivables semantics.
  *
  * Bug: alreadyAssessedCents was summing the FULL amount of every non-CANCELLED
  * PETTY_CASH invoice. For PAID invoices, that portion was already collected via
@@ -223,7 +223,7 @@ describe('PreviewAssessments — outstanding-receivables fix', () => {
         expect(result.current_balance).toBe(0);
         expect(result.total_overage).toBe(0);
         expect(result.pending_to_assess).toBe(0);
-        // target_fund is 0 in Slice A (no DB column yet — Slice B adds it)
+        // target_fund defaults to 0 when no target has been configured
         expect(result.target_fund).toBe(0);
     });
 

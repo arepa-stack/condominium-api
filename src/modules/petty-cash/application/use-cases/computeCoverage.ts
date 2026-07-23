@@ -11,9 +11,9 @@ export interface ComputeCoverageInput {
     balanceCents: number;
     /**
      * Target replenishment fund in integer cents.
-     * When 0 (Slice A default), this operates in "overage mode":
+     * When 0 (cover-the-overdraft mode):
      *   pending = max(0, -balance - outstanding_receivables)
-     * Slice B adds the DB column and passes the real target.
+     * Pass fund.target_fund * 100 to use the board-configured target.
      */
     targetFundCents: number;
     /**
@@ -42,8 +42,8 @@ export interface ComputeCoverageResult {
  * target fund balance, accounting for the outstanding portions of existing
  * PETTY_CASH unit invoices.
  *
- * This function is side-effect free and stable. Slice B reuses it from
- * RegisterPettyCashExpense without modification.
+ * This function is side-effect free and is shared between
+ * PreviewAssessments and RegisterPettyCashExpense.
  *
  * Coverage equation:
  *   outstanding_receivables = Σ max(0, amount - paid_amount)

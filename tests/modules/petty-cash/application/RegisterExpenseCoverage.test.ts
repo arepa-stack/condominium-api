@@ -1,7 +1,5 @@
 /**
- * TDD tests for RegisterPettyCashExpense coverage output (Slice B — B10/B11).
- *
- * RED phase: tests written BEFORE implementation.
+ * Tests for RegisterPettyCashExpense — coverage output.
  *
  * Scenarios:
  *   1. Coverage present with correct math when invoiceRepo + unitRepo provided.
@@ -89,7 +87,7 @@ function baseExpenseDTO(overrides: Partial<RegisterExpenseDTO> = {}): RegisterEx
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('RegisterPettyCashExpense — coverage output (Slice B)', () => {
+describe('RegisterPettyCashExpense — coverage output', () => {
     it('returns coverage with correct math when invoiceRepo + unitRepo provided', async () => {
         // Fund with target_fund = 200. After expense of 100, balance = -100
         // (mocked getBalance returns post-save balance).

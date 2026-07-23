@@ -11,13 +11,13 @@ export interface PettyCashAssessmentProps {
     created_by: string;
     created_at?: Date;
     /**
-     * Slice B: assessment kind.
+     * Assessment kind.
      *   GENERAL — normal proration across units (default).
      *   EXPRESS — rapid one-shot linked to a specific expense entry.
      */
     kind?: 'GENERAL' | 'EXPRESS';
     /**
-     * Slice B: for EXPRESS assessments, the petty_cash_entries.id of the
+     * For EXPRESS assessments, the petty_cash_entries.id of the
      * expense that triggered this assessment. NULL for GENERAL.
      */
     source_entry_id?: string | null;

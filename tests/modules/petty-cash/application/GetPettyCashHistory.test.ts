@@ -19,7 +19,7 @@ function makeRepo(options: { fund?: PettyCashFund | null } = {}) {
         createAssessment: mock(async (a: any) => a),
         findAssessmentsByFundId: mock(async () => []),
         findAssessmentsByPeriod: mock(async () => []),
-        // Added in Slice A: findReversedOriginalIds returns empty set by default.
+        // findReversedOriginalIds returns empty set by default.
         findReversedOriginalIds: mock(async () => new Set<string>()),
     };
 }

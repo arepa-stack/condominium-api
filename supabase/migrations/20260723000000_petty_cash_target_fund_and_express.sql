@@ -1,4 +1,4 @@
--- Slice B: petty-cash recovery model — additive columns for target fund,
+-- Petty-cash recovery model: additive columns for target fund,
 -- assessment kind, and source entry linking.
 
 ALTER TABLE public.petty_cash_fund

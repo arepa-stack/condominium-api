@@ -51,10 +51,10 @@ const fromCents = (c: number): number => c / 100;
  * units. No building-level PAID fantasma invoices are generated
  * anymore — the expense lives only in the ledger.
  *
- * Slice B: when `invoiceRepo` is provided, the response includes an
- * optional `coverage` object with pending_to_assess, balance, and
- * target_fund. This is backward compatible — callers that do not
- * inject this dep receive the raw entry as before.
+ * When `invoiceRepo` is provided, the response includes an optional
+ * `coverage` object with pending_to_assess, balance, and target_fund.
+ * Backward compatible — callers that do not inject this dep receive
+ * the raw entry as before.
  */
 export class RegisterPettyCashExpense {
     constructor(
@@ -104,7 +104,7 @@ export class RegisterPettyCashExpense {
 
         const saved = await this.pettyCashRepo.addEntry(entry);
 
-        // ── Optional coverage computation (Slice B) ───────────────────────────
+        // ── Optional coverage computation ─────────────────────────────────────
         // Compute coverage after the entry is persisted so the balance is accurate.
         if (this.invoiceRepo) {
             const balance = await this.pettyCashRepo.getBalance(fund.id);

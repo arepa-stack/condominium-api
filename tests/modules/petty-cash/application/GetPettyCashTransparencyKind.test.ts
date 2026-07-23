@@ -1,8 +1,6 @@
 /**
- * TDD tests for GetPettyCashTransparency — assessing kind and source_entry_id
- * fields in the per-batch DTO (Slice B, API touch-up #1).
- *
- * RED phase: tests written BEFORE the implementation change.
+ * Tests for GetPettyCashTransparency — kind and source_entry_id fields
+ * in the per-batch DTO.
  *
  * Scenarios:
  *   1. GENERAL assessment → kind: 'GENERAL', source_entry_id: null.

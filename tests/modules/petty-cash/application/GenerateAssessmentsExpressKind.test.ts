@@ -1,8 +1,6 @@
 /**
- * TDD tests for GenerateAssessments EXPRESS kind, source_entry_id, and
- * unit_amounts override (Slice B — B6/B7).
- *
- * RED phase: tests written BEFORE the implementation changes.
+ * Tests for GenerateAssessments — EXPRESS kind, source_entry_id, and
+ * unit_amounts override.
  */
 
 import { describe, it, expect, mock } from 'bun:test';
@@ -96,7 +94,7 @@ function mockPettyCashRepo(options: {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('GenerateAssessments — EXPRESS kind (Slice B)', () => {
+describe('GenerateAssessments — EXPRESS kind', () => {
     const units = [makeUnit('u1', '1A'), makeUnit('u2', '1B')];
     const fund = new PettyCashFund('f1', 'b1', new Date(), 0);
 

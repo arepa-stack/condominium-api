@@ -1,9 +1,7 @@
 /**
- * TDD tests for CancelExpressAssessment use case (Slice B — B8).
+ * Tests for CancelExpressAssessment use case.
  *
- * RED phase: tests written BEFORE the implementation exists.
- *
- * Scenarios (≥10 per spec):
+ * Scenarios:
  *   1. PENDING invoice cancelled + reason appended to description.
  *   2. PARTIAL invoice cancelled, PAID untouched.
  *   3. All-PAID → 409 NOT_CANCELLABLE.
