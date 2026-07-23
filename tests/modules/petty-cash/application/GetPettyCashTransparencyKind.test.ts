@@ -343,3 +343,135 @@ describe('GetPettyCashTransparency — CONTRIBUTION kind aggregation', () => {
         expect(result.assessments.filter(b => b.kind === 'CONTRIBUTION')).toHaveLength(0);
     });
 });
+
+// ── CONTRIBUTION proof_url resolution ─────────────────────────────────────────
+
+describe('GetPettyCashTransparency — CONTRIBUTION proof_url per unit', () => {
+    const buildingId = 'b1';
+    const fund = new PettyCashFund('f1', buildingId, new Date(), 0);
+    const units = [makeUnit('u1', 'Apto 1'), makeUnit('u2', 'Apto 2')];
+
+    function makeContributionAssessment(id: string, fundId: string): PettyCashAssessment {
+        return new PettyCashAssessment({
+            id,
+            fund_id: fundId,
+            period: '2026-07',
+            description: `Aporte caja chica — 2026-07`,
+            total_amount: 50,
+            created_by: 'user-1',
+            kind: 'CONTRIBUTION',
+        });
+    }
+
+    // Allocation repo stub: maps invoice ids → payment ids (one allocation each).
+    function mockAllocationRepo(invoiceToPayment: Record<string, string>) {
+        return {
+            create: mock((a: any) => Promise.resolve(a)),
+            delete: mock(() => Promise.resolve()),
+            findByPaymentId: mock(() => Promise.resolve([])),
+            findByInvoiceId: mock((invoiceId: string) =>
+                Promise.resolve(
+                    invoiceToPayment[invoiceId]
+                        ? [{ id: `alloc-${invoiceId}`, payment_id: invoiceToPayment[invoiceId], invoice_id: invoiceId, amount: 50 }]
+                        : []
+                )
+            ),
+            findPaymentsByInvoiceId: mock(() => Promise.resolve([])),
+            findInvoicesByPaymentId: mock(() => Promise.resolve([])),
+            findPaymentsByInvoiceIdPaginated: mock(() => Promise.resolve({ items: [], total: 0 })),
+            findInvoicesByPaymentIdPaginated: mock(() => Promise.resolve({ items: [], total: 0 })),
+            findByInvoiceIds: mock((invoiceIds: string[]) =>
+                Promise.resolve(
+                    invoiceIds
+                        .filter(id => invoiceToPayment[id])
+                        .map(id => ({ id: `alloc-${id}`, payment_id: invoiceToPayment[id], invoice_id: id, amount: 50 }))
+                )
+            ),
+        };
+    }
+
+    // Payment repo stub: maps payment ids → proof url.
+    function mockPaymentRepo(paymentToProof: Record<string, string>) {
+        return {
+            create: mock((p: any) => Promise.resolve(p)),
+            findById: mock((id: string) =>
+                Promise.resolve(paymentToProof[id] ? { id, proof_url: paymentToProof[id] } : null)
+            ),
+            findByUserId: mock(() => Promise.resolve([])),
+            findByUnit: mock(() => Promise.resolve([])),
+            update: mock((p: any) => Promise.resolve(p)),
+            findAll: mock(() => Promise.resolve([])),
+            findAllPaginated: mock(() => Promise.resolve({ items: [], total: 0 })),
+            delete: mock(() => Promise.resolve()),
+            findByIds: mock((ids: string[]) =>
+                Promise.resolve(
+                    ids
+                        .filter(id => paymentToProof[id])
+                        .map(id => ({ id, proof_url: paymentToProof[id] }))
+                )
+            ),
+        };
+    }
+
+    it('resolves proof_url on CONTRIBUTION unit rows via invoice→allocation→payment', async () => {
+        const a1 = makeContributionAssessment('contrib-1', 'f1');
+        const inv1 = makeInvoice('inv-c1', 'u1', 'contrib-1', 50, 50, InvoiceStatus.PAID);
+
+        const allocationRepo = mockAllocationRepo({ 'inv-c1': 'pay-1' });
+        const paymentRepo = mockPaymentRepo({ 'pay-1': 'https://cdn.example.com/proof-1.jpg' });
+
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([inv1]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, [a1]) as any,
+            allocationRepo as any,
+            paymentRepo as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        const contribBucket = result.assessments.find(b => b.kind === 'CONTRIBUTION');
+        const u1Row = contribBucket?.units.find(u => u.unit_id === 'u1');
+        expect(u1Row?.proof_url).toBe('https://cdn.example.com/proof-1.jpg');
+    });
+
+    it('GENERAL unit rows have no proof_url even when proof deps are wired', async () => {
+        const generalAssessment = makeAssessment('a-gen', 'f1', 'GENERAL', null);
+        const genInv = makeInvoice('inv-gen', 'u1', 'a-gen', 100, 0);
+
+        const allocationRepo = mockAllocationRepo({ 'inv-gen': 'pay-gen' });
+        const paymentRepo = mockPaymentRepo({ 'pay-gen': 'https://cdn.example.com/should-not-appear.jpg' });
+
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([genInv]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, [generalAssessment]) as any,
+            allocationRepo as any,
+            paymentRepo as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        const genBucket = result.assessments.find(b => b.id === 'a-gen');
+        const u1Row = genBucket?.units.find(u => u.unit_id === 'u1');
+        expect(u1Row?.proof_url).toBeUndefined();
+    });
+
+    it('proof_url resolution is a no-op when allocation/payment deps are not wired (back-compat)', async () => {
+        const a1 = makeContributionAssessment('contrib-1', 'f1');
+        const inv1 = makeInvoice('inv-c1', 'u1', 'contrib-1', 50, 50, InvoiceStatus.PAID);
+
+        // No allocation/payment repos passed — legacy 3-arg construction.
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([inv1]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, [a1]) as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        const contribBucket = result.assessments.find(b => b.kind === 'CONTRIBUTION');
+        const u1Row = contribBucket?.units.find(u => u.unit_id === 'u1');
+        expect(u1Row?.proof_url).toBeUndefined();
+    });
+});

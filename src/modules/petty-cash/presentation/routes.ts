@@ -61,7 +61,7 @@ const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, 
 const registerExpense = new RegisterPettyCashExpense(pettyCashRepo, buildingRepo, exchangeRateService, invoiceRepo);
 const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
-const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo);
+const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo, allocationRepo, paymentRepo);
 const reverseEntry = new ReversePettyCashEntry(pettyCashRepo);
 const registerContribution = new RegisterPettyCashContribution(
     pettyCashRepo,
@@ -69,7 +69,9 @@ const registerContribution = new RegisterPettyCashContribution(
     unitRepo,
     registerPaymentUseCase,
     approvePaymentUseCase,
-    paymentRepo
+    paymentRepo,
+    buildingRepo,
+    exchangeRateService
 );
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
@@ -174,6 +176,8 @@ const TransparencyUnitSchema = t.Object({
         t.Literal('PARTIAL'),
         t.Literal('PAID'),
     ]),
+    /** Payment proof URL. Present only on CONTRIBUTION bucket rows. */
+    proof_url: t.Optional(t.String()),
 });
 
 const AssessmentTransparencySchema = t.Object({
@@ -227,8 +231,33 @@ const ContributionCoverageSchema = t.Object({
     target_fund: t.Number(),
 });
 
+const ContributionPaymentSchema = t.Object({
+    id: t.String(),
+    user_id: t.String(),
+    building_id: t.Optional(t.Nullable(t.String())),
+    amount: t.Number(),
+    original_currency: t.Optional(t.String()),
+    original_amount: t.Optional(t.Nullable(t.Number())),
+    exchange_rate: t.Optional(t.Nullable(t.Number())),
+    rate_source: t.Optional(t.Nullable(t.String())),
+    rate_date: t.Optional(t.Nullable(t.String())),
+    payment_date: t.Any(),
+    method: t.String(),
+    reference: t.Optional(t.Nullable(t.String())),
+    bank: t.Optional(t.Nullable(t.String())),
+    proof_url: t.Optional(t.Nullable(t.String())),
+    status: t.String(),
+    unit_id: t.String(),
+    notes: t.Optional(t.Nullable(t.String())),
+    processed_by: t.Optional(t.Nullable(t.String())),
+    processed_at: t.Optional(t.Nullable(t.Any())),
+    created_at: t.Optional(t.Any()),
+    updated_at: t.Optional(t.Any()),
+});
+
 const ContributionResultSchema = t.Object({
     invoice: ContributionInvoiceSchema,
+    payment: ContributionPaymentSchema,
     fund_balance: t.Number(),
     coverage: ContributionCoverageSchema,
 });

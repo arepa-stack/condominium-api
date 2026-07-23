@@ -102,6 +102,18 @@ export class SupabasePaymentRepository implements IPaymentRepository {
         return this.toDomain(data);
     }
 
+    async findByIds(ids: string[]): Promise<Payment[]> {
+        if (ids.length === 0) return [];
+
+        const { data, error } = await supabase
+            .from('payments')
+            .select(SELECT_QUERY)
+            .in('id', ids);
+
+        if (error) throw new DomainError('Error fetching payments', 'DB_ERROR', 500);
+        return (data || []).map(this.toDomain);
+    }
+
     async findByUserId(userId: string, year?: number): Promise<Payment[]> {
         let query = supabase
             .from('payments')

@@ -16,6 +16,8 @@ export interface FindAllPaymentsFilters {
 export interface IPaymentRepository {
     create(payment: Payment): Promise<Payment>;
     findById(id: string): Promise<Payment | null>;
+    /** Batched lookup: all payments for the given ids in one query. */
+    findByIds(ids: string[]): Promise<Payment[]>;
     findByUserId(userId: string, year?: number): Promise<Payment[]>;
     findByUnit(unitId: string, year?: number): Promise<Payment[]>;
     update(payment: Payment): Promise<Payment>;

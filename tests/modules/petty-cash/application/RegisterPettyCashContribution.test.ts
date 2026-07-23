@@ -125,6 +125,31 @@ function mockRegisterPayment(payment: Payment) {
     return { execute: mock(() => Promise.resolve(payment)) };
 }
 
+function mockBuildingRepo(rateSource: string = 'dolar_oficial') {
+    return {
+        findById: mock(() =>
+            Promise.resolve({ id: 'b1', name: 'Edificio 1', default_rate_source: rateSource })
+        ),
+    };
+}
+
+function mockExchangeRateService(rate: number) {
+    return {
+        getRatesForDate: mock(() => Promise.resolve({} as any)),
+        getLatest: mock(() => Promise.resolve({} as any)),
+        convert: mock((input: { amountVes: number; date: string; source: string }) =>
+            Promise.resolve({
+                base: Math.round((input.amountVes / rate) * 100) / 100,
+                rate,
+                source: input.source,
+                rate_date: input.date,
+            })
+        ),
+        refresh: mock(() => Promise.resolve({} as any)),
+        setManualRate: mock(() => Promise.resolve()),
+    };
+}
+
 function mockApprovePayment() {
     return { approve: mock(() => Promise.resolve()) };
 }
@@ -205,6 +230,10 @@ describe('RegisterPettyCashContribution', () => {
         expect(result.fund_balance).toBeDefined();
         expect(typeof result.fund_balance).toBe('number');
         expect(result.coverage).toBeDefined();
+
+        // Result includes the created payment (contract: 201 {invoice, payment, ...})
+        expect(result.payment).toBeDefined();
+        expect(result.payment.id).toBe('pay-1');
     });
 
     it('(b) amount <= 0 → validation error, nothing created', async () => {
@@ -438,5 +467,146 @@ describe('RegisterPettyCashContribution', () => {
         ).rejects.toMatchObject({ status: 400 });
 
         expect(pcRepo.createAssessment.mock.calls).toHaveLength(0);
+    });
+
+    it('(h) VES contribution: invoice, assessment, and allocation use the canonical converted amount', async () => {
+        // 3600 Bs at a rate of 36 Bs/USD converts to 100 canonical (USD) units.
+        const rate = 36;
+        const bsAmount = 3600;
+        const canonical = 100;
+
+        const pcRepo = mockPettyCashRepo({ fund, balance: canonical });
+        const invoiceRepo = mockInvoiceRepo({ existing: [] });
+        const unitRepo = mockUnitRepo(units);
+        const payment = makePayment('pay-ves', 'u1');
+        const registerPayment = mockRegisterPayment(payment);
+        const approvePayment = mockApprovePayment();
+
+        const useCase = new RegisterPettyCashContribution(
+            pcRepo as any,
+            invoiceRepo as any,
+            unitRepo as any,
+            registerPayment as any,
+            approvePayment as any,
+            mockPaymentRepo() as any,
+            mockBuildingRepo() as any,
+            mockExchangeRateService(rate) as any
+        );
+
+        const result = await useCase.execute({
+            buildingId: 'b1',
+            unitId: 'u1',
+            amount: bsAmount,
+            currency: 'VES',
+            proofUrl: 'https://cdn.example.com/proof.jpg',
+            userId: 'user-admin',
+        });
+
+        // Assessment total is the canonical converted value, not the raw Bs figure.
+        const assessmentArg: PettyCashAssessment = pcRepo.createAssessment.mock.calls[0][0];
+        expect(assessmentArg.total_amount).toBe(canonical);
+
+        // Invoice amount is canonical.
+        const invoiceArg: Invoice = invoiceRepo.create.mock.calls[0][0];
+        expect(invoiceArg.amount).toBe(canonical);
+
+        // Allocation passed to RegisterPayment is canonical (base unit),
+        // so validateAllocations does not throw. Original VES amount/currency
+        // is forwarded so the payment keeps its Bs provenance.
+        const regDto = registerPayment.execute.mock.calls[0][0];
+        expect(regDto.currency).toBe('VES');
+        expect(regDto.amount).toBe(bsAmount);
+        expect(regDto.allocations[0].amount).toBe(canonical);
+
+        // Coverage drop equals the canonical value.
+        expect(result.coverage.balance).toBe(canonical);
+    });
+
+    it('(i) safe compensation: a post-approve failure on an already-PAID invoice does NOT cancel it and does NOT delete an approved payment', async () => {
+        const pcRepo = mockPettyCashRepo({ fund, balance: 150 });
+
+        // Invoice starts PENDING when created, but the DB refetch reports PAID
+        // (COLLECTION was already written and the invoice settled).
+        const paidInvoice = new Invoice({
+            id: 'inv-paid',
+            unit_id: 'u1',
+            building_id: 'b1',
+            amount: 50,
+            paid_amount: 50,
+            period: '2026-07',
+            issue_date: new Date(),
+            status: InvoiceStatus.PAID,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description: 'Aporte',
+        });
+
+        const invoiceRepo = mockInvoiceRepo();
+        // findById returns the settled (PAID) invoice on the compensation refetch.
+        invoiceRepo.findById = mock(() => Promise.resolve(paidInvoice)) as any;
+
+        const payment = makePayment('pay-approved', 'u1');
+        payment.approve('user-admin'); // payment is APPROVED in the store
+
+        const paymentRepo = mockPaymentRepo();
+        paymentRepo.findById = mock(() => Promise.resolve(payment)) as any;
+
+        // approve() succeeds (COLLECTION emitted), but a later step throws.
+        const approvePayment = {
+            approve: mock(() => Promise.reject(new Error('post-collection step failed'))),
+        };
+
+        const useCase = new RegisterPettyCashContribution(
+            pcRepo as any,
+            invoiceRepo as any,
+            mockUnitRepo(units) as any,
+            mockRegisterPayment(payment) as any,
+            approvePayment as any,
+            paymentRepo as any
+        );
+
+        await expect(
+            useCase.execute({
+                buildingId: 'b1',
+                unitId: 'u1',
+                amount: 50,
+                proofUrl: 'https://cdn.example.com/proof.jpg',
+                userId: 'user-admin',
+            })
+        ).rejects.toThrow();
+
+        // PAID invoice must NOT be cancelled/mutated.
+        expect(invoiceRepo.update.mock.calls).toHaveLength(0);
+        // APPROVED payment must NOT be deleted.
+        expect(paymentRepo.delete.mock.calls).toHaveLength(0);
+    });
+
+    it('(j) coverage.pending_to_assess reflects the post-collection balance (dropped by the contributed canonical amount)', async () => {
+        // target 500, post-collection balance 300, no outstanding receivables:
+        // pending = max(0, 500 - 300) = 200.
+        const targetedFund = new PettyCashFund('f1', 'b1', new Date(), 500);
+        const pcRepo = mockPettyCashRepo({ fund: targetedFund, balance: 300 });
+        const invoiceRepo = mockInvoiceRepo({ existing: [] });
+        const unitRepo = mockUnitRepo(units);
+        const payment = makePayment('pay-cov', 'u1');
+
+        const useCase = new RegisterPettyCashContribution(
+            pcRepo as any,
+            invoiceRepo as any,
+            unitRepo as any,
+            mockRegisterPayment(payment) as any,
+            mockApprovePayment() as any,
+            mockPaymentRepo() as any
+        );
+
+        const result = await useCase.execute({
+            buildingId: 'b1',
+            unitId: 'u1',
+            amount: 50,
+            proofUrl: 'https://cdn.example.com/proof.jpg',
+            userId: 'user-admin',
+        });
+
+        expect(result.coverage.pending_to_assess).toBe(200);
     });
 });

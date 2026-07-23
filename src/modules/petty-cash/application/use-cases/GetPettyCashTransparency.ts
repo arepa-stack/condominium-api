@@ -1,5 +1,6 @@
-import { IInvoiceRepository } from '@/modules/billing/domain/repository';
+import { IInvoiceRepository, IPaymentAllocationRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
+import { IPaymentRepository } from '@/modules/payments/domain/repository';
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { Invoice, InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
@@ -16,6 +17,11 @@ export interface TransparencyUnitDTO {
     expected_amount: number;
     covered_amount: number;
     status: TransparencyUnitStatus;
+    /**
+     * Payment proof URL, resolved invoice→allocation→payment. Present only on
+     * CONTRIBUTION bucket rows; absent for GENERAL/EXPRESS/legacy rows.
+     */
+    proof_url?: string;
 }
 
 export interface AssessmentTransparencyDTO {
@@ -67,7 +73,9 @@ export class GetPettyCashTransparency {
     constructor(
         private invoiceRepo: IInvoiceRepository,
         private unitRepo: IUnitRepository,
-        private pettyCashRepo: PettyCashRepository
+        private pettyCashRepo: PettyCashRepository,
+        private allocationRepo?: IPaymentAllocationRepository,
+        private paymentRepo?: IPaymentRepository
     ) { }
 
     async execute(buildingId: string, period: string): Promise<PettyCashTransparencyDTO> {
@@ -118,6 +126,16 @@ export class GetPettyCashTransparency {
         const contributionAssessmentIds = new Set(
             assessments.filter(a => a.kind === 'CONTRIBUTION').map(a => a.id!)
         );
+
+        // Resolve payment proof URLs for CONTRIBUTION invoices only, scoped to
+        // this fund's invoices (no cross-building leakage). Batched to avoid N+1:
+        // one query for allocations by invoice ids, one for payments by ids.
+        const contributionInvoiceIds: string[] = [];
+        for (const contribId of contributionAssessmentIds) {
+            const invs = byAssessment.get(contribId);
+            if (invs) for (const inv of invs) contributionInvoiceIds.push(inv.id);
+        }
+        const proofUrlByInvoiceId = await this.resolveContributionProofUrls(contributionInvoiceIds);
 
         const assessmentDTOs: AssessmentTransparencyDTO[] = [];
         let grandTotalExpected = 0;
@@ -187,13 +205,27 @@ export class GetPettyCashTransparency {
                 else if (covered <= 0) status = InvoiceStatus.PENDING;
                 else status = InvoiceStatus.PARTIAL;
 
-                unitsDTO.push({
+                const unitDTO: TransparencyUnitDTO = {
                     unit_id: unit.id,
                     unit_name: unit.name,
                     expected_amount: expected,
                     covered_amount: covered,
                     status,
-                });
+                };
+
+                // Proof link only on CONTRIBUTION rows. A unit has one invoice per
+                // contribution; use the first resolved proof for its invoices.
+                if (key === CONTRIBUTION_KEY) {
+                    for (const inv of unitInvoices) {
+                        const proof = proofUrlByInvoiceId.get(inv.id);
+                        if (proof) {
+                            unitDTO.proof_url = proof;
+                            break;
+                        }
+                    }
+                }
+
+                unitsDTO.push(unitDTO);
 
                 batchExpected += expected;
                 batchCovered += covered;
@@ -251,5 +283,41 @@ export class GetPettyCashTransparency {
             total_collected: grandTotalCovered,
             collection_percentage: globalPct,
         };
+    }
+
+    /**
+     * Batch-resolve invoice→proof_url for the given (contribution) invoice ids.
+     * No-op when the allocation/payment repositories are not wired.
+     *
+     * Two queries total (avoids N+1): allocations by invoice ids, then payments
+     * by the resolved payment ids. Returns a Map keyed by invoice id.
+     */
+    private async resolveContributionProofUrls(
+        invoiceIds: string[]
+    ): Promise<Map<string, string>> {
+        const map = new Map<string, string>();
+        if (!this.allocationRepo || !this.paymentRepo || invoiceIds.length === 0) {
+            return map;
+        }
+
+        const allocations = await this.allocationRepo.findByInvoiceIds(invoiceIds);
+        if (allocations.length === 0) return map;
+
+        const paymentIds = [...new Set(allocations.map(a => a.payment_id))];
+        const payments = await this.paymentRepo.findByIds(paymentIds);
+
+        const proofByPaymentId = new Map<string, string>();
+        for (const p of payments) {
+            if (p.proof_url) proofByPaymentId.set(p.id, p.proof_url);
+        }
+
+        for (const alloc of allocations) {
+            const proof = proofByPaymentId.get(alloc.payment_id);
+            if (proof && !map.has(alloc.invoice_id)) {
+                map.set(alloc.invoice_id, proof);
+            }
+        }
+
+        return map;
     }
 }

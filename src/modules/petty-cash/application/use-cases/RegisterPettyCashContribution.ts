@@ -1,15 +1,18 @@
 import { PettyCashRepository } from '../../domain/repositories/PettyCashRepository';
 import { PettyCashAssessment } from '../../domain/entities/PettyCashAssessment';
 import { IInvoiceRepository } from '@/modules/billing/domain/repository';
-import { IUnitRepository } from '@/modules/buildings/domain/repository';
+import { IUnitRepository, IBuildingRepository } from '@/modules/buildings/domain/repository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
 import { DomainError, ForbiddenError } from '@/core/errors';
 import { RegisterPayment } from '@/modules/payments/application/use-cases/RegisterPayment';
 import { ApprovePayment } from '@/modules/payments/application/use-cases/ApprovePayment';
 import { IPaymentRepository } from '@/modules/payments/domain/repository';
-import { PaymentMethod } from '@/core/domain/enums';
+import { Payment } from '@/modules/payments/domain/entities/Payment';
+import { PaymentMethod, PaymentStatus } from '@/core/domain/enums';
+import type { IExchangeRateService } from '@/core/domain/ports/IExchangeRateService';
 import { computeCoverage } from './computeCoverage';
+import { resolvePettyCashCurrency } from './resolvePettyCashCurrency';
 
 export interface RegisterContributionDTO {
     buildingId: string;
@@ -27,6 +30,7 @@ export interface RegisterContributionDTO {
 
 export interface RegisterContributionResult {
     invoice: ReturnType<Invoice['toJSON']>;
+    payment: ReturnType<Payment['toJSON']>;
     fund_balance: number;
     coverage: {
         pending_to_assess: number;
@@ -60,7 +64,9 @@ export class RegisterPettyCashContribution {
         private unitRepo: IUnitRepository,
         private registerPayment: RegisterPayment,
         private approvePayment: ApprovePayment,
-        private paymentRepo: IPaymentRepository
+        private paymentRepo: IPaymentRepository,
+        private buildingRepo?: IBuildingRepository,
+        private exchangeRateService?: IExchangeRateService
     ) {}
 
     async execute(dto: RegisterContributionDTO): Promise<RegisterContributionResult> {
@@ -110,6 +116,22 @@ export class RegisterPettyCashContribution {
             );
         }
 
+        // ── Canonical amount resolution ───────────────────────────────────────
+        // The payment is registered in `currency` (USD physical or VES), but the
+        // assessment total, invoice amount, and allocation must be expressed in the
+        // canonical base unit. RegisterPayment converts the payment amount the same
+        // way and validates allocations against the canonical value — so a raw VES
+        // figure here would overflow the converted allocation ceiling and be rejected.
+        const conv = await resolvePettyCashCurrency({
+            buildingId,
+            amount,
+            currency,
+            sign: 1,
+            buildingRepo: this.buildingRepo,
+            exchangeRateService: this.exchangeRateService,
+        });
+        const canonicalAmount = conv.canonical;
+
         // ── Fund resolution ───────────────────────────────────────────────────
         const fund = await this.pettyCashRepo.findOrCreateFund(buildingId);
 
@@ -119,7 +141,7 @@ export class RegisterPettyCashContribution {
                 fund_id: fund.id,
                 period,
                 description,
-                total_amount: amount,
+                total_amount: canonicalAmount,
                 created_by: userId,
                 kind: 'CONTRIBUTION',
             })
@@ -130,7 +152,7 @@ export class RegisterPettyCashContribution {
             id: crypto.randomUUID(),
             unit_id: unitId,
             building_id: buildingId,
-            amount,
+            amount: canonicalAmount,
             period,
             issue_date: new Date(),
             status: InvoiceStatus.PENDING,
@@ -143,9 +165,11 @@ export class RegisterPettyCashContribution {
         const createdInvoice = await this.invoiceRepo.create(invoice);
 
         // ── RegisterPayment + ApprovePayment with compensation on failure ─────
-        let paymentId: string | null = null;
+        let createdPayment: Payment | null = null;
         try {
-            const payment = await this.registerPayment.execute({
+            // The payment keeps its original currency/amount (VES provenance),
+            // while the allocation is in canonical base units.
+            createdPayment = await this.registerPayment.execute({
                 userId,
                 unitId,
                 buildingId,
@@ -154,33 +178,15 @@ export class RegisterPettyCashContribution {
                 method: PaymentMethod.CASH,
                 paymentDate: new Date(),
                 proofUrl: proofUrl.trim(),
-                allocations: [{ invoiceId: createdInvoice.id, amount }],
+                allocations: [{ invoiceId: createdInvoice.id, amount: canonicalAmount }],
             });
 
-            paymentId = payment.id;
-
             await this.approvePayment.approve({
-                paymentId: payment.id,
+                paymentId: createdPayment.id,
                 approverId: userId,
             });
         } catch (err) {
-            // Compensation: cancel the invoice and persist the cancellation.
-            createdInvoice.cancel();
-            await this.invoiceRepo.update(createdInvoice);
-
-            // Best-effort payment delete. If it fails, log and continue
-            // so the original error is what propagates.
-            if (paymentId) {
-                try {
-                    await this.paymentRepo.delete(paymentId);
-                } catch (deleteErr) {
-                    console.warn(
-                        `[RegisterPettyCashContribution] Could not delete orphaned payment ${paymentId}:`,
-                        deleteErr
-                    );
-                }
-            }
-
+            await this.compensate(createdInvoice, createdPayment);
             throw err;
         }
 
@@ -194,16 +200,15 @@ export class RegisterPettyCashContribution {
             tag: InvoiceTag.PETTY_CASH,
         });
 
-        const { pendingCents: rawPendingCents } = computeCoverage({
+        const { pendingCents } = computeCoverage({
             balanceCents,
             targetFundCents,
             invoices: allInvoices,
         });
 
-        const pendingCents = rawPendingCents < 1 ? 0 : rawPendingCents;
-
         return {
             invoice: createdInvoice.toJSON(),
+            payment: createdPayment.toJSON(),
             fund_balance: balance,
             coverage: {
                 pending_to_assess: fromCents(pendingCents),
@@ -211,5 +216,58 @@ export class RegisterPettyCashContribution {
                 target_fund: fromCents(targetFundCents),
             },
         };
+    }
+
+    /**
+     * Best-effort compensation after a failure in the payment/approve step.
+     *
+     * The failure may have occurred before or after the COLLECTION was written.
+     * Blindly cancelling the in-memory invoice and force-updating the DB could
+     * clobber an already-settled (PAID) invoice or reverse a valid collection.
+     * So we re-read authoritative state first:
+     *   - Only cancel+persist the invoice if the DB still reports it PENDING.
+     *   - Only delete the payment if it is not already APPROVED.
+     *   - If the invoice is already PAID (collection landed), do NOT mutate —
+     *     rethrow with a reconciliation-flavored message for manual review.
+     */
+    private async compensate(createdInvoice: Invoice, payment: Payment | null): Promise<void> {
+        // Re-read authoritative invoice state; fall back to the freshly created
+        // in-memory entity when the row cannot be fetched.
+        const dbInvoice = await this.invoiceRepo.findById(createdInvoice.id);
+        const invoice = dbInvoice ?? createdInvoice;
+
+        // Invoice settled — a COLLECTION was written. Do not touch anything.
+        if (invoice.status === InvoiceStatus.PAID) {
+            throw new DomainError(
+                `Contribution failed after the fund collection was recorded for invoice ${invoice.id}. ` +
+                `The invoice is already PAID and was left intact; manual reconciliation is required.`,
+                'RECONCILIATION_REQUIRED',
+                500
+            );
+        }
+
+        // Invoice still PENDING — safe to cancel and persist.
+        if (invoice.status === InvoiceStatus.PENDING) {
+            invoice.cancel();
+            await this.invoiceRepo.update(invoice);
+        }
+
+        // Best-effort payment delete, but never delete an APPROVED payment.
+        // Re-read the authoritative status; fall back to the in-memory entity
+        // when the row cannot be fetched.
+        if (payment) {
+            const dbPayment = await this.paymentRepo.findById(payment.id);
+            const status = dbPayment?.status ?? payment.status;
+            if (status !== PaymentStatus.APPROVED) {
+                try {
+                    await this.paymentRepo.delete(payment.id);
+                } catch (deleteErr) {
+                    console.warn(
+                        `[RegisterPettyCashContribution] Could not delete orphaned payment ${payment.id}:`,
+                        deleteErr
+                    );
+                }
+            }
+        }
     }
 }
