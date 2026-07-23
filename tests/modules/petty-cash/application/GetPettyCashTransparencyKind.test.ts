@@ -233,3 +233,113 @@ describe('GetPettyCashTransparency — kind and source_entry_id in DTO', () => {
         expect(batch.source_entry_id).toBeNull();
     });
 });
+
+// ── CONTRIBUTION kind transparency ────────────────────────────────────────────
+
+describe('GetPettyCashTransparency — CONTRIBUTION kind aggregation', () => {
+    const buildingId = 'b1';
+    const fund = new PettyCashFund('f1', buildingId, new Date(), 0);
+    const units = [makeUnit('u1', 'Apto 1'), makeUnit('u2', 'Apto 2')];
+
+    function makeContributionAssessment(id: string, fundId: string): PettyCashAssessment {
+        return new PettyCashAssessment({
+            id,
+            fund_id: fundId,
+            period: '2026-07',
+            description: `Aporte caja chica — 2026-07`,
+            total_amount: 50,
+            created_by: 'user-1',
+            kind: 'CONTRIBUTION',
+        });
+    }
+
+    it('multiple CONTRIBUTION assessments collapse into ONE synthetic bucket with stable id and description "Aportes directos"', async () => {
+        const a1 = makeContributionAssessment('contrib-1', 'f1');
+        const a2 = makeContributionAssessment('contrib-2', 'f1');
+        const inv1 = makeInvoice('inv-c1', 'u1', 'contrib-1', 50, 50, InvoiceStatus.PAID);
+        const inv2 = makeInvoice('inv-c2', 'u2', 'contrib-2', 50, 0, InvoiceStatus.PENDING);
+
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([inv1, inv2]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, [a1, a2]) as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        // Only one CONTRIBUTION bucket in the assessments list
+        const contributionBuckets = result.assessments.filter(b => b.kind === 'CONTRIBUTION');
+        expect(contributionBuckets).toHaveLength(1);
+
+        const bucket = contributionBuckets[0];
+        expect(bucket.id).toBe('direct-contributions');
+        expect(bucket.description).toBe('Aportes directos');
+        expect(bucket.kind).toBe('CONTRIBUTION');
+
+        // Both unit rows present: u1 paid, u2 pending
+        expect(bucket.units).toHaveLength(2);
+        const u1Row = bucket.units.find(u => u.unit_id === 'u1');
+        const u2Row = bucket.units.find(u => u.unit_id === 'u2');
+        expect(u1Row?.status).toBe('PAID');
+        expect(u2Row?.status).toBe('PENDING');
+
+        // Totals aggregate across both
+        expect(bucket.total_to_collect).toBe(100);
+        expect(bucket.total_collected).toBe(50);
+    });
+
+    it('GENERAL and EXPRESS buckets are unchanged when CONTRIBUTION bucket is present', async () => {
+        const generalAssessment = makeAssessment('a-gen', 'f1', 'GENERAL', null);
+        const contribAssessment = makeContributionAssessment('contrib-1', 'f1');
+        const genInv = makeInvoice('inv-gen', 'u1', 'a-gen', 100, 0);
+        const contribInv = makeInvoice('inv-c', 'u2', 'contrib-1', 50, 50, InvoiceStatus.PAID);
+
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([genInv, contribInv]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, [generalAssessment, contribAssessment]) as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        // Should have exactly 2 buckets: GENERAL + CONTRIBUTION
+        expect(result.assessments).toHaveLength(2);
+
+        const genBucket = result.assessments.find(b => b.id === 'a-gen');
+        expect(genBucket?.kind).toBe('GENERAL');
+        expect(genBucket?.description).toBe('Assessment a-gen');
+
+        const contribBucket = result.assessments.find(b => b.kind === 'CONTRIBUTION');
+        expect(contribBucket?.id).toBe('direct-contributions');
+    });
+
+    it('legacy orphan batch is unaffected by CONTRIBUTION logic', async () => {
+        const orphanInvoice = new Invoice({
+            id: 'inv-orphan',
+            unit_id: 'u1',
+            building_id: buildingId,
+            amount: 50,
+            paid_amount: 0,
+            period: '2026-07',
+            issue_date: new Date(),
+            status: InvoiceStatus.PENDING,
+            type: InvoiceType.EXPENSE,
+            tag: InvoiceTag.PETTY_CASH,
+            description: 'Legacy cuota',
+            assessment_id: undefined,
+        });
+
+        const useCase = new GetPettyCashTransparency(
+            mockInvoiceRepo([orphanInvoice]) as any,
+            mockUnitRepo(units) as any,
+            mockPettyCashRepo(fund, []) as any
+        );
+
+        const result = await useCase.execute(buildingId, '2026-07');
+
+        expect(result.assessments).toHaveLength(1);
+        expect(result.assessments[0].id).toBe('__legacy__');
+        // No CONTRIBUTION bucket
+        expect(result.assessments.filter(b => b.kind === 'CONTRIBUTION')).toHaveLength(0);
+    });
+});

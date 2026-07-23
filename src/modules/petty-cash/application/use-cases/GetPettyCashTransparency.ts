@@ -30,7 +30,7 @@ export interface AssessmentTransparencyDTO {
      * Assessment kind. Present when there is a linked assessment row.
      * Absent for legacy/orphan batches that predate the assessment table.
      */
-    kind?: 'GENERAL' | 'EXPRESS';
+    kind?: 'GENERAL' | 'EXPRESS' | 'CONTRIBUTION';
     /**
      * For EXPRESS assessments, the petty_cash_entries.id of the
      * expense that triggered this assessment. NULL for GENERAL. Absent for legacy.
@@ -109,20 +109,56 @@ export class GetPettyCashTransparency {
             else byAssessment.set(key, [inv]);
         }
 
+        // Stable synthetic key for the merged CONTRIBUTION bucket.
+        const CONTRIBUTION_KEY = 'direct-contributions';
+
+        // All CONTRIBUTION assessment ids for this period. Their invoices
+        // will be merged into one synthetic bucket instead of appearing
+        // as separate rows — direct contributions are displayed together.
+        const contributionAssessmentIds = new Set(
+            assessments.filter(a => a.kind === 'CONTRIBUTION').map(a => a.id!)
+        );
+
         const assessmentDTOs: AssessmentTransparencyDTO[] = [];
         let grandTotalExpected = 0;
         let grandTotalCovered = 0;
 
         // Preserve display order: use the assessments[] order from the
         // repo (newest first), then append legacy at the end.
-        const orderedKeys: string[] = [
-            ...assessments.map(a => a.id!).filter(id => byAssessment.has(id)),
-            ...(byAssessment.has(LEGACY_KEY) ? [LEGACY_KEY] : []),
-        ];
+        // CONTRIBUTION assessments all map to the same synthetic key.
+        const seenKeys = new Set<string>();
+        const orderedKeys: string[] = [];
+        for (const a of assessments) {
+            const key = contributionAssessmentIds.has(a.id!) ? CONTRIBUTION_KEY : a.id!;
+            if (seenKeys.has(key)) continue;
+            if (!byAssessment.has(a.id!) && key !== CONTRIBUTION_KEY) continue;
+            // For CONTRIBUTION, check if any contribution assessment has invoices
+            if (key === CONTRIBUTION_KEY) {
+                const hasInvoices = [...contributionAssessmentIds].some(id => byAssessment.has(id));
+                if (!hasInvoices) continue;
+            }
+            seenKeys.add(key);
+            orderedKeys.push(key);
+        }
+        if (byAssessment.has(LEGACY_KEY)) orderedKeys.push(LEGACY_KEY);
 
         for (const key of orderedKeys) {
-            const bucketInvoices = byAssessment.get(key)!;
-            const batch = key === LEGACY_KEY ? null : assessmentById.get(key);
+            // Collect all invoices for this key.
+            // CONTRIBUTION_KEY aggregates across all contribution assessment ids.
+            let bucketInvoices: Invoice[];
+            if (key === CONTRIBUTION_KEY) {
+                bucketInvoices = [];
+                for (const contribId of contributionAssessmentIds) {
+                    const invs = byAssessment.get(contribId);
+                    if (invs) bucketInvoices.push(...invs);
+                }
+            } else {
+                bucketInvoices = byAssessment.get(key)!;
+            }
+
+            const batch = key === LEGACY_KEY || key === CONTRIBUTION_KEY
+                ? null
+                : assessmentById.get(key);
 
             const byUnitId = new Map<string, Invoice[]>();
             for (const inv of bucketInvoices) {
@@ -167,21 +203,34 @@ export class GetPettyCashTransparency {
                 ? Math.round((batchCovered / batchExpected) * 10000) / 100
                 : 0;
 
-            const batchDTO: AssessmentTransparencyDTO = {
-                id: batch?.id ?? LEGACY_KEY,
-                description: batch?.description ?? 'Sin categorizar (legacy)',
-                category: batch?.category ?? null,
-                total_to_collect: batchExpected,
-                total_collected: batchCovered,
-                collection_percentage: percentage,
-                units: unitsDTO,
-            };
-
-            // Expose kind and source_entry_id only when a real assessment row exists.
-            // Legacy/orphan batches have no assessment row → fields are absent.
-            if (batch) {
-                batchDTO.kind = batch.kind;
-                batchDTO.source_entry_id = batch.source_entry_id;
+            let batchDTO: AssessmentTransparencyDTO;
+            if (key === CONTRIBUTION_KEY) {
+                batchDTO = {
+                    id: CONTRIBUTION_KEY,
+                    description: 'Aportes directos',
+                    category: null,
+                    total_to_collect: batchExpected,
+                    total_collected: batchCovered,
+                    collection_percentage: percentage,
+                    units: unitsDTO,
+                    kind: 'CONTRIBUTION',
+                };
+            } else {
+                batchDTO = {
+                    id: batch?.id ?? LEGACY_KEY,
+                    description: batch?.description ?? 'Sin categorizar (legacy)',
+                    category: batch?.category ?? null,
+                    total_to_collect: batchExpected,
+                    total_collected: batchCovered,
+                    collection_percentage: percentage,
+                    units: unitsDTO,
+                };
+                // Expose kind and source_entry_id only when a real assessment row exists.
+                // Legacy/orphan batches have no assessment row → fields are absent.
+                if (batch) {
+                    batchDTO.kind = batch.kind;
+                    batchDTO.source_entry_id = batch.source_entry_id;
+                }
             }
 
             assessmentDTOs.push(batchDTO);
