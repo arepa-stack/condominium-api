@@ -19,6 +19,7 @@ import { PreviewAssessments } from '../application/use-cases/PreviewAssessments'
 import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
 import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
 import { ReversePettyCashEntry } from '../application/use-cases/ReversePettyCashEntry';
+import { SetTargetFund } from '../application/use-cases/SetTargetFund';
 
 // ── DI ──────────────────────────────────────────────────────────────────────
 const pettyCashRepo = new SupabasePettyCashRepository();
@@ -27,6 +28,7 @@ const invoiceRepo = new SupabaseInvoiceRepository();
 const unitRepo = new SupabaseUnitRepository();
 const buildingRepo = new SupabaseBuildingRepository();
 
+const setTargetFund = new SetTargetFund(pettyCashRepo);
 const getBalance = new GetPettyCashBalance(pettyCashRepo);
 const getHistory = new GetPettyCashHistory(pettyCashRepo);
 const registerIncome = new RegisterPettyCashIncome(pettyCashRepo, buildingRepo, exchangeRateService);
@@ -208,6 +210,40 @@ function createReadRoutes(tag: string) {
         });
 }
 
+function createFundManagementRoutes() {
+    return new Elysia()
+        .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
+        .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'petty-cash-fund-management'))
+        .put('/funds/:buildingId/target-fund', async ({ params, body }) => {
+            const targetFund = typeof body.target_fund === 'string'
+                ? parseFloat(body.target_fund)
+                : body.target_fund;
+            return await setTargetFund.execute({
+                buildingId: params.buildingId,
+                targetFund,
+            });
+        }, {
+            body: t.Object({
+                target_fund: t.Union([t.Number(), t.String()], {
+                    description: 'Target replenishment fund amount. Must be >= 0. Zero resets to overage-only mode.',
+                }),
+            }),
+            response: t.Object({
+                building_id: t.String(),
+                target_fund: t.Number(),
+            }),
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Set the target replenishment fund for a building',
+                description:
+                    'Sets the minimum fund balance the board wants to maintain. ' +
+                    'pending_to_assess in the preview will include top-up amounts needed ' +
+                    'to reach this target. Zero resets to overage-only mode (Slice A). ' +
+                    'Cold-start safe: creates the fund row if it does not exist.',
+            },
+        });
+}
+
 function createWriteRoutes() {
     return new Elysia()
         .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -365,5 +401,6 @@ export const pettyCashAppRoutes = new Elysia({ prefix: '/petty-cash' })
 
 export const pettyCashRoutes = new Elysia({ prefix: '/petty-cash' })
     .use(createReadRoutes('Admin - Petty Cash'))
+    .use(createFundManagementRoutes())
     .use(createWriteRoutes())
     .use(createAssessmentRoutes());
