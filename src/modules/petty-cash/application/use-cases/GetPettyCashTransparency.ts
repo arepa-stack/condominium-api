@@ -26,6 +26,16 @@ export interface AssessmentTransparencyDTO {
     total_collected: number;
     collection_percentage: number;
     units: TransparencyUnitDTO[];
+    /**
+     * Slice B: assessment kind. Present when there is a linked assessment row.
+     * Absent for legacy/orphan batches that predate the assessment table.
+     */
+    kind?: 'GENERAL' | 'EXPRESS';
+    /**
+     * Slice B: for EXPRESS assessments, the petty_cash_entries.id of the
+     * expense that triggered this assessment. NULL for GENERAL. Absent for legacy.
+     */
+    source_entry_id?: string | null;
 }
 
 export interface PettyCashTransparencyDTO {
@@ -157,7 +167,7 @@ export class GetPettyCashTransparency {
                 ? Math.round((batchCovered / batchExpected) * 10000) / 100
                 : 0;
 
-            assessmentDTOs.push({
+            const batchDTO: AssessmentTransparencyDTO = {
                 id: batch?.id ?? LEGACY_KEY,
                 description: batch?.description ?? 'Sin categorizar (legacy)',
                 category: batch?.category ?? null,
@@ -165,7 +175,16 @@ export class GetPettyCashTransparency {
                 total_collected: batchCovered,
                 collection_percentage: percentage,
                 units: unitsDTO,
-            });
+            };
+
+            // Expose kind and source_entry_id only when a real assessment row exists.
+            // Legacy/orphan batches have no assessment row → fields are absent.
+            if (batch) {
+                batchDTO.kind = batch.kind;
+                batchDTO.source_entry_id = batch.source_entry_id;
+            }
+
+            assessmentDTOs.push(batchDTO);
 
             grandTotalExpected += batchExpected;
             grandTotalCovered += batchCovered;

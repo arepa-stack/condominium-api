@@ -153,6 +153,13 @@ const AssessmentTransparencySchema = t.Object({
     total_collected: t.Number(),
     collection_percentage: t.Number(),
     units: t.Array(TransparencyUnitSchema),
+    /**
+     * Slice B: assessment kind. Present only when a real assessment row exists.
+     * Absent for legacy/orphan batches.
+     */
+    kind: t.Optional(t.Union([t.Literal('GENERAL'), t.Literal('EXPRESS')])),
+    /** Slice B: for EXPRESS assessments, the expense entry id. Absent for legacy. */
+    source_entry_id: t.Optional(t.Nullable(t.String())),
 });
 
 const TransparencySchema = t.Object({
