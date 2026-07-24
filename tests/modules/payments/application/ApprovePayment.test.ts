@@ -30,6 +30,7 @@ describe('ApprovePayment Use Case', () => {
             create: mock(),
             delete: mock(),
             findByInvoiceId: mock(),
+            findByInvoiceIds: mock(async () => []),
             findPaymentsByInvoiceId: mock(),
             findInvoicesByPaymentId: mock(),
             findPaymentsByInvoiceIdPaginated: mock(async () => ({ items: [], total: 0 })),
@@ -753,7 +754,8 @@ describe('ApprovePayment Use Case', () => {
                 payment_date: new Date(),
                 method: PaymentMethod.TRANSFER,
                 status: PaymentStatus.PENDING,
-                unit_id: 'unit-1'
+                unit_id: 'unit-1',
+                proof_url: 'https://storage/proof-pc.jpg'
             });
             await paymentRepo.create(payment);
 
@@ -791,6 +793,7 @@ describe('ApprovePayment Use Case', () => {
             expect(entry.reference_type).toBe(PettyCashEntryReferenceType.INVOICE_PAYMENT);
             expect(entry.reference_id).toBe('invoice-pc');
             expect(entry.description).toContain('payment-pc');
+            expect(entry.evidence_url).toBe('https://storage/proof-pc.jpg');
         });
 
         it('does not record a petty cash entry when invoice is NOT PETTY_CASH', async () => {

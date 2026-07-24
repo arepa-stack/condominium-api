@@ -10,6 +10,18 @@ export interface PettyCashAssessmentProps {
     total_amount: number;                   // > 0
     created_by: string;
     created_at?: Date;
+    /**
+     * Assessment kind.
+     *   GENERAL      — normal proration across units (default).
+     *   EXPRESS      — rapid one-shot linked to a specific expense entry.
+     *   CONTRIBUTION — direct payment-first contribution to the fund from a single unit.
+     */
+    kind?: 'GENERAL' | 'EXPRESS' | 'CONTRIBUTION';
+    /**
+     * For EXPRESS assessments, the petty_cash_entries.id of the
+     * expense that triggered this assessment. NULL for GENERAL.
+     */
+    source_entry_id?: string | null;
 }
 
 /**
@@ -64,6 +76,8 @@ export class PettyCashAssessment {
     get total_amount(): number { return this.props.total_amount; }
     get created_by(): string { return this.props.created_by; }
     get created_at(): Date { return this.props.created_at!; }
+    get kind(): 'GENERAL' | 'EXPRESS' | 'CONTRIBUTION' { return this.props.kind ?? 'GENERAL'; }
+    get source_entry_id(): string | null { return this.props.source_entry_id ?? null; }
 
     toJSON() {
         return {
@@ -75,6 +89,8 @@ export class PettyCashAssessment {
             total_amount: this.props.total_amount,
             created_by: this.props.created_by,
             created_at: this.props.created_at,
+            kind: this.kind,
+            source_entry_id: this.source_entry_id,
         };
     }
 }

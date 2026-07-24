@@ -22,7 +22,8 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
         return new PettyCashFund(
             data.id,
             data.building_id,
-            new Date(data.updated_at)
+            new Date(data.updated_at),
+            data.target_fund != null ? Number(data.target_fund) : 0
         );
     }
 
@@ -58,6 +59,8 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             total_amount: Number(data.total_amount),
             created_by: data.created_by,
             created_at: new Date(data.created_at),
+            kind: (data.kind as 'GENERAL' | 'EXPRESS' | 'CONTRIBUTION') ?? 'GENERAL',
+            source_entry_id: data.source_entry_id ?? null,
         });
     }
 
@@ -66,7 +69,7 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
     async findFundByBuildingId(buildingId: string): Promise<PettyCashFund | null> {
         const { data, error } = await supabase
             .from('petty_cash_fund')
-            .select('id, building_id, updated_at')
+            .select('id, building_id, updated_at, target_fund')
             .eq('building_id', buildingId)
             .maybeSingle();
 
@@ -92,7 +95,7 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
                 { building_id: buildingId },
                 { onConflict: 'building_id', ignoreDuplicates: false }
             )
-            .select('id, building_id, updated_at')
+            .select('id, building_id, updated_at, target_fund')
             .single();
 
         if (error) {
@@ -137,6 +140,21 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             );
         }
         return (data ?? []).map(r => ({ currency: r.currency as string, balance: Number(r.balance) }));
+    }
+
+    async updateFundTargetFund(fundId: string, targetFund: number): Promise<void> {
+        const { error } = await supabase
+            .from('petty_cash_fund')
+            .update({ target_fund: targetFund })
+            .eq('id', fundId);
+
+        if (error) {
+            throw new DomainError(
+                'Error updating petty cash fund target: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
     }
 
     // ── Entries ───────────────────────────────────────────────────────────
@@ -276,6 +294,33 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
         return (data ?? []).map(d => this.entryToDomain(d));
     }
 
+    async findReversedOriginalIds(fundId: string): Promise<Set<string>> {
+        // Select only the reference_id column to keep the payload small.
+        // Filters: type = 'reversal' AND reference_type = 'reversal'
+        // (PettyCashEntryType.REVERSAL = 'reversal', PettyCashEntryReferenceType.REVERSAL = 'reversal')
+        const { data, error } = await supabase
+            .from('petty_cash_entries')
+            .select('reference_id')
+            .eq('fund_id', fundId)
+            .eq('type', PettyCashEntryType.REVERSAL)
+            .eq('reference_type', PettyCashEntryReferenceType.REVERSAL)
+            .not('reference_id', 'is', null);
+
+        if (error) {
+            throw new DomainError(
+                'Error fetching reversed original ids: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+
+        const ids = new Set<string>();
+        for (const row of data ?? []) {
+            if (row.reference_id) ids.add(row.reference_id as string);
+        }
+        return ids;
+    }
+
     // ── Assessment ────────────────────────────────────────────────────────
 
     async createAssessment(
@@ -288,6 +333,8 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
             category: assessment.category ?? null,
             total_amount: assessment.total_amount,
             created_by: assessment.created_by,
+            kind: assessment.kind,
+            source_entry_id: assessment.source_entry_id ?? null,
         };
 
         const { data, error } = await supabase
@@ -303,6 +350,24 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
                 500
             );
         }
+        return this.assessmentToDomain(data);
+    }
+
+    async findAssessmentById(assessmentId: string): Promise<PettyCashAssessment | null> {
+        const { data, error } = await supabase
+            .from('petty_cash_assessment')
+            .select('*')
+            .eq('id', assessmentId)
+            .maybeSingle();
+
+        if (error) {
+            throw new DomainError(
+                'Error fetching petty cash assessment: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        if (!data) return null;
         return this.assessmentToDomain(data);
     }
 

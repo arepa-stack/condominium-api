@@ -120,7 +120,8 @@ const InvoicePaymentSchema = t.Object({
     status: t.String(),
     payment_date: t.String(),
     method: t.String(),
-    reference: t.Optional(t.String()),
+    // Nullable: cash payments carry no bank reference.
+    reference: t.Optional(t.Union([t.String(), t.Null()])),
     allocated_amount: t.Number(),
     allocation_id: t.String(),
     allocated_at: t.Any(),

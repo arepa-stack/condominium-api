@@ -203,6 +203,8 @@ export class ApprovePayment {
             reference_type: PettyCashEntryReferenceType.INVOICE_PAYMENT,
             reference_id: invoiceId,
             created_by: createdBy,
+            // The payment proof doubles as the ledger evidence for the collection.
+            evidence_url: payment.proof_url ?? null,
         });
         await this.pettyCashRepo.addEntry(entry);
     }

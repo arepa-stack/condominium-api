@@ -14,6 +14,10 @@ export class MockPaymentRepository implements IPaymentRepository {
         return this.payments.find(p => p.id === id) || null;
     }
 
+    async findByIds(ids: string[]): Promise<Payment[]> {
+        return this.payments.filter(p => ids.includes(p.id));
+    }
+
     async findByUserId(userId: string, year?: number): Promise<Payment[]> {
         let filtered = this.payments.filter(p => p.user_id === userId);
 
