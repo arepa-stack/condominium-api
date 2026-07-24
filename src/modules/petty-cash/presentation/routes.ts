@@ -23,6 +23,7 @@ import { DomainError } from '@/core/errors';
 import { PreviewAssessments } from '../application/use-cases/PreviewAssessments';
 import { GenerateAssessments } from '../application/use-cases/GenerateAssessments';
 import { GetPettyCashTransparency } from '../application/use-cases/GetPettyCashTransparency';
+import { GetPettyCashPaymentsReport } from '../application/use-cases/GetPettyCashPaymentsReport';
 import { ReversePettyCashEntry } from '../application/use-cases/ReversePettyCashEntry';
 import { SetTargetFund } from '../application/use-cases/SetTargetFund';
 import { CancelExpressAssessment } from '../application/use-cases/CancelExpressAssessment';
@@ -63,6 +64,7 @@ const previewAssessments = new PreviewAssessments(invoiceRepo, unitRepo, pettyCa
 const generateAssessments = new GenerateAssessments(invoiceRepo, unitRepo, pettyCashRepo);
 const getTransparency = new GetPettyCashTransparency(invoiceRepo, unitRepo, pettyCashRepo, allocationRepo, paymentRepo);
 const reverseEntry = new ReversePettyCashEntry(pettyCashRepo);
+const getPaymentsReport = new GetPettyCashPaymentsReport(pettyCashRepo, invoiceRepo, unitRepo);
 const registerContribution = new RegisterPettyCashContribution(
     pettyCashRepo,
     invoiceRepo,
@@ -86,6 +88,26 @@ const PettyCashFundSchema = t.Object({
         balance: t.Number(),
     }))),
     updated_at: t.Any(),
+});
+
+const PettyCashPaymentReportItemSchema = t.Object({
+    id: t.String(),
+    date: t.String(),
+    unit_id: t.Nullable(t.String()),
+    unit_name: t.Nullable(t.String()),
+    owner_name: t.Nullable(t.String()),
+    receipt_number: t.Nullable(t.String()),
+    assessment_description: t.Nullable(t.String()),
+    amount: t.Number(),
+    original_currency: t.String(),
+    original_amount: t.Nullable(t.Number()),
+    exchange_rate: t.Nullable(t.Number()),
+    payment_method: t.Nullable(t.String()),
+    payment_reference: t.Nullable(t.String()),
+    bank: t.Nullable(t.String()),
+    type: t.String(),
+    description: t.String(),
+    proof_url: t.Nullable(t.String()),
 });
 
 const PettyCashCoverageSchema = t.Object({
@@ -305,6 +327,47 @@ function createReadRoutes(tag: string) {
             }),
             response: PaginatedPettyCashEntrySchema,
             detail: { tags: [tag], summary: 'List ledger entries for a building fund' },
+        })
+        .get('/funds/:buildingId/payments-report', async ({ params, query }) => {
+            const report = await getPaymentsReport.execute(params.buildingId, {
+                unitId: query.unit_id,
+                startDate: query.start_date,
+                endDate: query.end_date,
+                search: query.search,
+                receiptNumber: query.receipt_number,
+            });
+            return report.map(item => ({
+                id: item.id,
+                date: item.date.toISOString(),
+                unit_id: item.unitId,
+                unit_name: item.unitName,
+                owner_name: item.ownerName,
+                receipt_number: item.receiptNumber,
+                assessment_description: item.assessmentDescription,
+                amount: item.amount,
+                original_currency: item.originalCurrency,
+                original_amount: item.originalAmount,
+                exchange_rate: item.exchangeRate,
+                payment_method: item.paymentMethod,
+                payment_reference: item.paymentReference,
+                bank: item.bank,
+                type: item.type,
+                description: item.description,
+                proof_url: item.proofUrl,
+            }));
+        }, {
+            query: t.Object({
+                unit_id: t.Optional(t.String()),
+                start_date: t.Optional(t.String()),
+                end_date: t.Optional(t.String()),
+                search: t.Optional(t.String()),
+                receipt_number: t.Optional(t.String()),
+            }),
+            response: t.Array(PettyCashPaymentReportItemSchema),
+            detail: {
+                tags: [tag],
+                summary: 'Get petty cash payments report with unit, date, and receipt filters',
+            },
         })
         .get('/funds/:buildingId/transparency', async ({ params, query }) => {
             return await getTransparency.execute(params.buildingId, query.period);
