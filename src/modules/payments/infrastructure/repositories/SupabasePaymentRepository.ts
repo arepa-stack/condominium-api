@@ -164,17 +164,18 @@ export class SupabasePaymentRepository implements IPaymentRepository {
     async findAll(filters?: FindAllPaymentsFilters): Promise<Payment[]> {
         let query = supabase
             .from('payments')
-            .select(SELECT_QUERY)
-            .order('created_at', { ascending: false });
+            .select(SELECT_QUERY);
 
         if (filters) {
             query = this.applyFilters(query, filters);
         }
 
+        query = query.order('created_at', { ascending: false });
+
         const { data, error } = await query;
         if (error) throw new DomainError('Error fetching payments', 'DB_ERROR', 500);
 
-        return data.map(this.toDomain);
+        return (data || []).map(d => this.toDomain(d));
     }
 
     async findAllPaginated(
@@ -182,12 +183,49 @@ export class SupabasePaymentRepository implements IPaymentRepository {
         pagination: PaginationFilters
     ): Promise<{ items: Payment[]; total: number }> {
         const { from, to } = toRange(pagination);
+
+        let unitFilterConditions: string[] = [];
+        if (filters?.unit_id) {
+            unitFilterConditions.push(`unit_id.eq.${filters.unit_id}`);
+
+            const { data: userUnits } = await supabase
+                .from('profile_units')
+                .select('user_id')
+                .eq('unit_id', filters.unit_id);
+            const userIds = (userUnits || []).map((uu: any) => uu.user_id).filter(Boolean);
+            if (userIds.length > 0) {
+                unitFilterConditions.push(`user_id.in.(${userIds.join(',')})`);
+            }
+
+            const { data: unitInvoices } = await supabase
+                .from('invoices')
+                .select('id')
+                .eq('unit_id', filters.unit_id);
+            const invoiceIds = (unitInvoices || []).map((i: any) => i.id).filter(Boolean);
+
+            if (invoiceIds.length > 0) {
+                const { data: allocs } = await supabase
+                    .from('payment_allocations')
+                    .select('payment_id')
+                    .in('invoice_id', invoiceIds);
+                const paymentIdsFromAllocations = (allocs || []).map((a: any) => a.payment_id).filter(Boolean);
+                if (paymentIdsFromAllocations.length > 0) {
+                    unitFilterConditions.push(`id.in.(${paymentIdsFromAllocations.join(',')})`);
+                }
+            }
+        }
+
         let query = supabase
             .from('payments')
             .select(SELECT_QUERY, { count: 'exact' });
 
-        if (filters) {
-            query = await this.applyFiltersAsync(query, filters);
+        if (filters?.building_id) query = query.eq('building_id', filters.building_id);
+        if (filters?.status) query = query.eq('status', filters.status);
+        if (filters?.user_id) query = query.eq('user_id', filters.user_id);
+        if (filters?.year) query = this.applyYearFilter(query, filters.year);
+
+        if (unitFilterConditions.length > 0) {
+            query = query.or(unitFilterConditions.join(','));
         }
 
         query = query.order('created_at', { ascending: false });
@@ -199,50 +237,6 @@ export class SupabasePaymentRepository implements IPaymentRepository {
             items: (data || []).map(d => this.toDomain(d)),
             total: count || 0,
         };
-    }
-
-    private async applyFiltersAsync(query: any, filters: FindAllPaymentsFilters): Promise<any> {
-        if (filters.building_id) query = query.eq('building_id', filters.building_id);
-        if (filters.status) query = query.eq('status', filters.status);
-        if (filters.user_id) query = query.eq('user_id', filters.user_id);
-        if (filters.year) query = this.applyYearFilter(query, filters.year);
-
-        if (filters.unit_id) {
-            // Find user_ids for unit_id
-            const { data: userUnits } = await supabase
-                .from('profile_units')
-                .select('user_id')
-                .eq('unit_id', filters.unit_id);
-            const userIds = (userUnits || []).map((uu: any) => uu.user_id).filter(Boolean);
-
-            // Find invoice_ids for unit_id
-            const { data: unitInvoices } = await supabase
-                .from('invoices')
-                .select('id')
-                .eq('unit_id', filters.unit_id);
-            const invoiceIds = (unitInvoices || []).map((i: any) => i.id).filter(Boolean);
-
-            let paymentIdsFromAllocations: string[] = [];
-            if (invoiceIds.length > 0) {
-                const { data: allocs } = await supabase
-                    .from('payment_allocations')
-                    .select('payment_id')
-                    .in('invoice_id', invoiceIds);
-                paymentIdsFromAllocations = (allocs || []).map((a: any) => a.payment_id).filter(Boolean);
-            }
-
-            const conditions: string[] = [`unit_id.eq.${filters.unit_id}`];
-            if (userIds.length > 0) {
-                conditions.push(`user_id.in.(${userIds.join(',')})`);
-            }
-            if (paymentIdsFromAllocations.length > 0) {
-                conditions.push(`id.in.(${paymentIdsFromAllocations.join(',')})`);
-            }
-
-            query = query.or(conditions.join(','));
-        }
-
-        return query;
     }
 
     private applyFilters(query: any, filters: FindAllPaymentsFilters): any {
