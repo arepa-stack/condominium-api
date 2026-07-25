@@ -51,14 +51,25 @@ export class GetPettyCashPaymentsReport {
         }
 
         // Fetch all ledger entries and reversed original IDs in parallel
-        const [entries, reversedIds] = await Promise.all([
+        const [entries, queriedReversedIds] = await Promise.all([
             this.pettyCashRepo.findEntriesByFundId(fund.id, {}),
             this.pettyCashRepo.findReversedOriginalIds(fund.id),
         ]);
 
-        // Filter out reversed entries and reversals if requested
+        const reversedIds = new Set<string>(queriedReversedIds);
+
+        // Also add reference_id of ANY reversal entry found in memory for 100% safety
+        for (const e of entries) {
+            if (e.type === PettyCashEntryType.REVERSAL && e.reference_id) {
+                reversedIds.add(e.reference_id);
+            }
+        }
+
+        // Filter out reversed entries and reversals if requested (default to true unless explicitly false)
+        const shouldExcludeReversed = filters.excludeReversed !== false;
+
         let filteredEntries = entries;
-        if (filters.excludeReversed) {
+        if (shouldExcludeReversed) {
             filteredEntries = entries.filter(
                 e => e.type !== PettyCashEntryType.REVERSAL && !reversedIds.has(e.id)
             );
@@ -155,6 +166,39 @@ export class GetPettyCashPaymentsReport {
                         unit_name: unitData?.name ?? null,
                         owner_name: ownerName,
                     });
+                }
+            }
+
+            // Direct backup lookup for unit owners if owner_name is still null
+            const missingUnitIds = Array.from(
+                new Set(
+                    Array.from(invoiceMap.values())
+                        .filter(inv => inv.unit_id && !inv.owner_name)
+                        .map(inv => inv.unit_id!)
+                )
+            );
+
+            if (missingUnitIds.length > 0) {
+                const { data: backupProfileUnits } = await supabase
+                    .from('profile_units')
+                    .select('unit_id, is_primary, profiles(id, name)')
+                    .in('unit_id', missingUnitIds);
+
+                if (backupProfileUnits) {
+                    const unitOwnerMap = new Map<string, string>();
+                    for (const pu of backupProfileUnits) {
+                        const profName = (pu.profiles as any)?.name;
+                        if (profName) {
+                            if (pu.is_primary || !unitOwnerMap.has(pu.unit_id)) {
+                                unitOwnerMap.set(pu.unit_id, profName);
+                            }
+                        }
+                    }
+                    for (const inv of invoiceMap.values()) {
+                        if (!inv.owner_name && inv.unit_id && unitOwnerMap.has(inv.unit_id)) {
+                            inv.owner_name = unitOwnerMap.get(inv.unit_id)!;
+                        }
+                    }
                 }
             }
 

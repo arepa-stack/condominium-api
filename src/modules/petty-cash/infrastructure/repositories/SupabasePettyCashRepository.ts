@@ -296,14 +296,12 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
 
     async findReversedOriginalIds(fundId: string): Promise<Set<string>> {
         // Select only the reference_id column to keep the payload small.
-        // Filters: type = 'reversal' AND reference_type = 'reversal'
-        // (PettyCashEntryType.REVERSAL = 'reversal', PettyCashEntryReferenceType.REVERSAL = 'reversal')
+        // Any entry of type 'reversal' with a non-null reference_id points to an original entry being reversed.
         const { data, error } = await supabase
             .from('petty_cash_entries')
             .select('reference_id')
             .eq('fund_id', fundId)
             .eq('type', PettyCashEntryType.REVERSAL)
-            .eq('reference_type', PettyCashEntryReferenceType.REVERSAL)
             .not('reference_id', 'is', null);
 
         if (error) {

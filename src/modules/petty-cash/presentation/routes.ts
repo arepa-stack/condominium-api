@@ -336,7 +336,9 @@ function createReadRoutes(tag: string) {
                 endDate: query.end_date,
                 search: query.search,
                 receiptNumber: query.receipt_number,
-                excludeReversed: query.exclude_reversed === 'true' || query.exclude_reversed === true,
+                excludeReversed: query.exclude_reversed === undefined
+                    ? true
+                    : (query.exclude_reversed === 'true' || query.exclude_reversed === true),
             });
             return report.map(item => ({
                 id: item.id,
