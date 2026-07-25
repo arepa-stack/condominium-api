@@ -6,6 +6,8 @@ import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 
 export interface GetPettyCashPaymentsReportFilters {
     unitId?: string;
+    type?: string;
+    category?: string;
     startDate?: string;
     endDate?: string;
     search?: string;
@@ -73,6 +75,16 @@ export class GetPettyCashPaymentsReport {
             filteredEntries = entries.filter(
                 e => e.type !== PettyCashEntryType.REVERSAL && !reversedIds.has(e.id)
             );
+        }
+
+        // Filter by type if provided and not 'all'
+        if (filters.type && filters.type !== 'all') {
+            filteredEntries = filteredEntries.filter(e => e.type === filters.type);
+        }
+
+        // Filter by category if provided and not 'all'
+        if (filters.category && filters.category !== 'all') {
+            filteredEntries = filteredEntries.filter(e => e.category === filters.category);
         }
 
         // Date range filtering

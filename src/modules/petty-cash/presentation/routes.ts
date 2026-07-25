@@ -332,6 +332,8 @@ function createReadRoutes(tag: string) {
         .get('/funds/:buildingId/payments-report', async ({ params, query }) => {
             const report = await getPaymentsReport.execute(params.buildingId, {
                 unitId: query.unit_id,
+                type: query.type,
+                category: query.category,
                 startDate: query.start_date,
                 endDate: query.end_date,
                 search: query.search,
@@ -363,6 +365,8 @@ function createReadRoutes(tag: string) {
         }, {
             query: t.Object({
                 unit_id: t.Optional(t.String()),
+                type: t.Optional(t.String()),
+                category: t.Optional(t.String()),
                 start_date: t.Optional(t.String()),
                 end_date: t.Optional(t.String()),
                 search: t.Optional(t.String()),
