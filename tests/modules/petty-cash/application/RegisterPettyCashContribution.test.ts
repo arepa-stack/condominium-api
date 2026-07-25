@@ -280,12 +280,15 @@ describe('RegisterPettyCashContribution', () => {
         expect(registerPayment.execute.mock.calls).toHaveLength(0);
     });
 
-    it('(c) missing proof → error, nothing created', async () => {
-        const pcRepo = mockPettyCashRepo({ fund });
-        const invoiceRepo = mockInvoiceRepo();
+    it('(c) missing proof → succeeds without error (proof is optional)', async () => {
+        const pcRepo = mockPettyCashRepo({ fund, balance: 150 });
+        const invoiceRepo = mockInvoiceRepo({ existing: [] });
         const unitRepo = mockUnitRepo(units);
-        const registerPayment = mockRegisterPayment(makePayment('p', 'u1'));
+        const payment = makePayment('p', 'u1');
+        const registerPayment = mockRegisterPayment(payment);
         const approvePayment = mockApprovePayment();
+        const paymentRepo = mockPaymentRepo();
+        paymentRepo.findById = mock(() => Promise.resolve(payment)) as any;
 
         const useCase = new RegisterPettyCashContribution(
             pcRepo as any,
@@ -293,21 +296,20 @@ describe('RegisterPettyCashContribution', () => {
             unitRepo as any,
             registerPayment as any,
             approvePayment as any,
-            mockPaymentRepo() as any
+            paymentRepo as any
         );
 
-        await expect(
-            useCase.execute({
-                buildingId: 'b1',
-                unitId: 'u1',
-                amount: 50,
-                proofUrl: '',
-                userId: 'user-admin',
-            })
-        ).rejects.toMatchObject({ status: 400 });
+        const result = await useCase.execute({
+            buildingId: 'b1',
+            unitId: 'u1',
+            amount: 50,
+            proofUrl: undefined,
+            userId: 'user-admin',
+        });
 
-        expect(pcRepo.createAssessment.mock.calls).toHaveLength(0);
-        expect(invoiceRepo.create.mock.calls).toHaveLength(0);
+        expect(result.payment).toBeDefined();
+        expect(registerPayment.execute.mock.calls).toHaveLength(1);
+        expect(registerPayment.execute.mock.calls[0][0].proofUrl).toBeUndefined();
     });
 
     it('(d) unit not in building → Forbidden, nothing created', async () => {

@@ -18,8 +18,8 @@ export interface RegisterContributionDTO {
     buildingId: string;
     unitId: string;
     amount: number;
-    /** Proof URL already uploaded by the caller before invoking this use case. */
-    proofUrl: string;
+    /** Optional proof URL uploaded by the caller. */
+    proofUrl?: string;
     /** Overrides the default description. Must be non-empty when provided. */
     description?: string;
     /** Defaults to USD. */
@@ -46,12 +46,12 @@ const fromCents = (c: number): number => c / 100;
  * Payment-first direct contribution to petty cash from a single unit.
  *
  * Flow:
- *   1. Validate amount, proof, unit membership.
+ *   1. Validate amount, unit membership.
  *   2. Resolve description default.
  *   3. findOrCreateFund.
  *   4. Create assessment (kind=CONTRIBUTION).
  *   5. Create invoice (PETTY_CASH tag, unit, amount, assessment_id).
- *   6. RegisterPayment.execute with allocation to the invoice + proof.
+ *   6. RegisterPayment.execute with allocation to the invoice + proof (if provided).
  *   7. ApprovePayment.approve (auto-approve → triggers fund COLLECTION).
  *   8. On failure after step 5: compensate (invoice.cancel + invoiceRepo.update,
  *      best-effort payment delete).
@@ -78,14 +78,6 @@ export class RegisterPettyCashContribution {
             throw new DomainError(
                 'Contribution amount must be greater than zero',
                 'VALIDATION_ERROR',
-                400
-            );
-        }
-
-        if (!proofUrl?.trim()) {
-            throw new DomainError(
-                'Proof is required for a direct contribution',
-                'MISSING_PROOF',
                 400
             );
         }
@@ -177,7 +169,7 @@ export class RegisterPettyCashContribution {
                 currency,
                 method: PaymentMethod.CASH,
                 paymentDate: new Date(),
-                proofUrl: proofUrl.trim(),
+                proofUrl: proofUrl?.trim() || undefined,
                 allocations: [{ invoiceId: createdInvoice.id, amount: canonicalAmount }],
             });
 

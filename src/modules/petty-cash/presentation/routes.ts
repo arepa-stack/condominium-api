@@ -503,11 +503,11 @@ function createWriteRoutes() {
                 ? parseFloat(body.amount)
                 : body.amount;
 
-            // Upload proof before creating any domain objects.
-            if (!body.proof_image) {
-                throw new DomainError('proof_image is required for direct contributions', 'MISSING_PROOF', 400);
+            // Upload proof if provided.
+            let proofUrl: string | undefined;
+            if (body.proof_image) {
+                proofUrl = await storageService.uploadPaymentProof(body.proof_image, profile.id);
             }
-            const proofUrl = await storageService.uploadPaymentProof(body.proof_image, profile.id);
 
             return await registerContribution.execute({
                 buildingId,
@@ -531,7 +531,7 @@ function createWriteRoutes() {
                 description: t.Optional(t.String({
                     description: 'Override the default description. Defaults to "Aporte caja chica — YYYY-MM". Empty string rejected.',
                 })),
-                proof_image: t.File({ description: 'Required proof image for the contribution payment.' }),
+                proof_image: t.Optional(t.File({ description: 'Optional proof image for the contribution payment.' })),
             }),
             type: 'multipart/form-data',
             response: ContributionResultSchema,

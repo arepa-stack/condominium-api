@@ -131,9 +131,7 @@ export class RegisterPayment {
     }
 
     private validateProof(proofUrl?: string): void {
-        if (!proofUrl || proofUrl.trim().length === 0) {
-            throw new DomainError('Payment proof is required', 'MISSING_PROOF', 400);
-        }
+        // Payment proof is optional (e.g. cash payments or direct petty cash contributions)
     }
 
     private validateBankFields(dto: RegisterPaymentDTO): void {
