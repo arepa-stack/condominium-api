@@ -10,6 +10,7 @@ export interface GetPettyCashPaymentsReportFilters {
     endDate?: string;
     search?: string;
     receiptNumber?: string;
+    excludeReversed?: boolean;
 }
 
 export interface PettyCashPaymentReportItemDTO {
@@ -30,6 +31,7 @@ export interface PettyCashPaymentReportItemDTO {
     type: string;
     description: string;
     proofUrl: string | null;
+    isReversed?: boolean;
 }
 
 export class GetPettyCashPaymentsReport {
@@ -48,13 +50,19 @@ export class GetPettyCashPaymentsReport {
             return [];
         }
 
-        // Fetch ledger entries for collections and direct incomes
-        const [collections, incomes] = await Promise.all([
-            this.pettyCashRepo.findEntriesByFundId(fund.id, { type: PettyCashEntryType.COLLECTION }),
-            this.pettyCashRepo.findEntriesByFundId(fund.id, { type: PettyCashEntryType.INCOME }),
+        // Fetch all ledger entries and reversed original IDs in parallel
+        const [entries, reversedIds] = await Promise.all([
+            this.pettyCashRepo.findEntriesByFundId(fund.id, {}),
+            this.pettyCashRepo.findReversedOriginalIds(fund.id),
         ]);
 
-        const entries = [...collections, ...incomes];
+        // Filter out reversed entries and reversals if requested
+        let filteredEntries = entries;
+        if (filters.excludeReversed) {
+            filteredEntries = entries.filter(
+                e => e.type !== PettyCashEntryType.REVERSAL && !reversedIds.has(e.id)
+            );
+        }
 
         // Date range filtering
         let startBound: Date | null = null;
@@ -67,7 +75,7 @@ export class GetPettyCashPaymentsReport {
             endBound = new Date(`${filters.endDate}T23:59:59.999`);
         }
 
-        const filteredEntries = entries.filter(e => {
+        filteredEntries = filteredEntries.filter(e => {
             const date = new Date(e.created_at);
             if (startBound && date < startBound) return false;
             if (endBound && date > endBound) return false;
@@ -103,6 +111,7 @@ export class GetPettyCashPaymentsReport {
             reference: string | null;
             bank: string | null;
             proof_url: string | null;
+            payer_name: string | null;
         }>();
 
         if (invoiceIds.length > 0) {
@@ -158,7 +167,9 @@ export class GetPettyCashPaymentsReport {
                         method,
                         reference,
                         bank,
-                        proof_url
+                        proof_url,
+                        user_id,
+                        profiles ( id, name )
                     )
                 `)
                 .in('invoice_id', invoiceIds);
@@ -167,12 +178,14 @@ export class GetPettyCashPaymentsReport {
                 for (const alloc of rawAllocations) {
                     const p = alloc.payments as any;
                     if (p && !paymentMap.has(alloc.invoice_id)) {
+                        const payerProfile = p.profiles as any;
                         paymentMap.set(alloc.invoice_id, {
                             payment_date: p.payment_date ? new Date(p.payment_date) : null,
                             method: p.method ?? null,
                             reference: p.reference ?? null,
                             bank: p.bank ?? null,
                             proof_url: p.proof_url ?? null,
+                            payer_name: payerProfile?.name ?? null,
                         });
                     }
                 }
@@ -183,25 +196,30 @@ export class GetPettyCashPaymentsReport {
             const isCollection = entry.type === PettyCashEntryType.COLLECTION;
             const inv = isCollection && entry.reference_id ? invoiceMap.get(entry.reference_id) : null;
             const pm = isCollection && entry.reference_id ? paymentMap.get(entry.reference_id) : null;
+            const isReversed = reversedIds.has(entry.id);
+
+            // Best effort for owner_name: unit owner > payment payer > null
+            const ownerName = inv?.owner_name || pm?.payer_name || null;
 
             return {
                 id: entry.id || '',
                 date: pm?.payment_date || new Date(entry.created_at),
                 unitId: inv?.unit_id || null,
                 unitName: inv?.unit_name || null,
-                ownerName: inv?.owner_name || null,
+                ownerName,
                 receiptNumber: inv?.receipt_number || null,
                 assessmentDescription: inv?.description || entry.description,
                 amount: entry.amount,
                 originalCurrency: entry.original_currency || 'USD',
                 originalAmount: entry.original_amount ?? null,
                 exchangeRate: entry.exchange_rate ?? null,
-                paymentMethod: pm?.method || (isCollection ? null : 'DIRECT_INCOME'),
+                paymentMethod: pm?.method || (isCollection ? null : entry.type.toUpperCase()),
                 paymentReference: pm?.reference || null,
                 bank: pm?.bank || null,
                 type: entry.type,
                 description: entry.description,
                 proofUrl: pm?.proof_url || entry.evidence_url || null,
+                isReversed,
             };
         });
 

@@ -108,6 +108,7 @@ const PettyCashPaymentReportItemSchema = t.Object({
     type: t.String(),
     description: t.String(),
     proof_url: t.Nullable(t.String()),
+    is_reversed: t.Optional(t.Boolean()),
 });
 
 const PettyCashCoverageSchema = t.Object({
@@ -335,6 +336,7 @@ function createReadRoutes(tag: string) {
                 endDate: query.end_date,
                 search: query.search,
                 receiptNumber: query.receipt_number,
+                excludeReversed: query.exclude_reversed === 'true' || query.exclude_reversed === true,
             });
             return report.map(item => ({
                 id: item.id,
@@ -354,6 +356,7 @@ function createReadRoutes(tag: string) {
                 type: item.type,
                 description: item.description,
                 proof_url: item.proofUrl,
+                is_reversed: item.isReversed,
             }));
         }, {
             query: t.Object({
@@ -362,11 +365,12 @@ function createReadRoutes(tag: string) {
                 end_date: t.Optional(t.String()),
                 search: t.Optional(t.String()),
                 receipt_number: t.Optional(t.String()),
+                exclude_reversed: t.Optional(t.Union([t.Boolean(), t.String()])),
             }),
             response: t.Array(PettyCashPaymentReportItemSchema),
             detail: {
                 tags: [tag],
-                summary: 'Get petty cash payments report with unit, date, and receipt filters',
+                summary: 'Get petty cash payments report with unit, date, receipt, and exclude_reversed filters',
             },
         })
         .get('/funds/:buildingId/transparency', async ({ params, query }) => {
