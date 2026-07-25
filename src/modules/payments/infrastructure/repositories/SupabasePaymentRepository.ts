@@ -184,12 +184,13 @@ export class SupabasePaymentRepository implements IPaymentRepository {
         const { from, to } = toRange(pagination);
         let query = supabase
             .from('payments')
-            .select(SELECT_QUERY, { count: 'exact' })
-            .order('created_at', { ascending: false });
+            .select(SELECT_QUERY, { count: 'exact' });
 
         if (filters) {
             query = await this.applyFiltersAsync(query, filters);
         }
+
+        query = query.order('created_at', { ascending: false });
 
         const { data, count, error } = await query.range(from, to);
         if (error) throw new DomainError('Error fetching payments: ' + error.message, 'DB_ERROR', 500);
