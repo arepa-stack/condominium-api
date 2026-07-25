@@ -257,20 +257,39 @@ export class GetPettyCashPaymentsReport {
             // Best effort for owner_name: unit owner > payment payer > null
             const ownerName = inv?.owner_name || pm?.payer_name || null;
 
+            let receiptNumber = inv?.receipt_number || null;
+            let paymentReference = pm?.reference || null;
+
+            if (!receiptNumber && !paymentReference) {
+                if (entry.description) {
+                    const match = entry.description.match(/pago\s+([a-zA-Z0-9-]+)/i);
+                    if (match && match[1]) {
+                        const clean = match[1].split('-')[0].toUpperCase();
+                        paymentReference = `REC-${clean}`;
+                    }
+                }
+                if (!paymentReference) {
+                    const fallbackId = entry.reference_id || entry.id;
+                    if (fallbackId) {
+                        receiptNumber = `REC-${fallbackId.split('-')[0].toUpperCase()}`;
+                    }
+                }
+            }
+
             return {
                 id: entry.id || '',
                 date: pm?.payment_date || new Date(entry.created_at),
                 unitId: inv?.unit_id || null,
                 unitName: inv?.unit_name || null,
                 ownerName,
-                receiptNumber: inv?.receipt_number || null,
+                receiptNumber,
                 assessmentDescription: inv?.description || entry.description,
                 amount: entry.amount,
                 originalCurrency: entry.original_currency || 'USD',
                 originalAmount: entry.original_amount ?? null,
                 exchangeRate: entry.exchange_rate ?? null,
                 paymentMethod: pm?.method || (isCollection ? null : entry.type.toUpperCase()),
-                paymentReference: pm?.reference || null,
+                paymentReference,
                 bank: pm?.bank || null,
                 type: entry.type,
                 description: entry.description,
