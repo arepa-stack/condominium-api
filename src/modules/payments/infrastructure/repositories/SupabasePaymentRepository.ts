@@ -188,7 +188,7 @@ export class SupabasePaymentRepository implements IPaymentRepository {
             .order('created_at', { ascending: false });
 
         if (filters) {
-            query = this.applyFilters(query, filters);
+            query = await this.applyFiltersAsync(query, filters);
         }
 
         const { data, count, error } = await query.range(from, to);
@@ -198,6 +198,50 @@ export class SupabasePaymentRepository implements IPaymentRepository {
             items: (data || []).map(d => this.toDomain(d)),
             total: count || 0,
         };
+    }
+
+    private async applyFiltersAsync(query: any, filters: FindAllPaymentsFilters): Promise<any> {
+        if (filters.building_id) query = query.eq('building_id', filters.building_id);
+        if (filters.status) query = query.eq('status', filters.status);
+        if (filters.user_id) query = query.eq('user_id', filters.user_id);
+        if (filters.year) query = this.applyYearFilter(query, filters.year);
+
+        if (filters.unit_id) {
+            // Find user_ids for unit_id
+            const { data: userUnits } = await supabase
+                .from('profile_units')
+                .select('user_id')
+                .eq('unit_id', filters.unit_id);
+            const userIds = (userUnits || []).map((uu: any) => uu.user_id).filter(Boolean);
+
+            // Find invoice_ids for unit_id
+            const { data: unitInvoices } = await supabase
+                .from('invoices')
+                .select('id')
+                .eq('unit_id', filters.unit_id);
+            const invoiceIds = (unitInvoices || []).map((i: any) => i.id).filter(Boolean);
+
+            let paymentIdsFromAllocations: string[] = [];
+            if (invoiceIds.length > 0) {
+                const { data: allocs } = await supabase
+                    .from('payment_allocations')
+                    .select('payment_id')
+                    .in('invoice_id', invoiceIds);
+                paymentIdsFromAllocations = (allocs || []).map((a: any) => a.payment_id).filter(Boolean);
+            }
+
+            const conditions: string[] = [`unit_id.eq.${filters.unit_id}`];
+            if (userIds.length > 0) {
+                conditions.push(`user_id.in.(${userIds.join(',')})`);
+            }
+            if (paymentIdsFromAllocations.length > 0) {
+                conditions.push(`id.in.(${paymentIdsFromAllocations.join(',')})`);
+            }
+
+            query = query.or(conditions.join(','));
+        }
+
+        return query;
     }
 
     private applyFilters(query: any, filters: FindAllPaymentsFilters): any {

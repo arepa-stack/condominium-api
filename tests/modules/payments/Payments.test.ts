@@ -75,13 +75,16 @@ describe("Payments Use Cases", () => {
             })).rejects.toThrow("Payment date cannot be in the future");
         });
 
-        test("should throw MISSING_PROOF if proofUrl is absent", async () => {
+        test("should succeed if proofUrl is absent", async () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
-            expect(useCase.execute({
+            const result = await useCase.execute({
                 ...validTransferDto(),
                 proofUrl: undefined
-            })).rejects.toThrow("Payment proof is required");
+            });
+
+            expect(result.amount).toBe(100);
+            expect(mockPaymentRepo.create).toHaveBeenCalled();
         });
 
         test("should throw MISSING_BANK_INFO for TRANSFER without reference", async () => {
@@ -103,7 +106,7 @@ describe("Payments Use Cases", () => {
             })).rejects.toThrow("Bank is required");
         });
 
-        test("should register CASH payment without reference/bank (only proof required)", async () => {
+        test("should register CASH payment without reference/bank (optional proof)", async () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
             const result = await useCase.execute({
@@ -119,16 +122,19 @@ describe("Payments Use Cases", () => {
             expect(mockPaymentRepo.create).toHaveBeenCalled();
         });
 
-        test("should throw MISSING_PROOF for CASH without proof", async () => {
+        test("should succeed for CASH without proof", async () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
-            expect(useCase.execute({
+            const result = await useCase.execute({
                 userId: "user-1",
                 unitId: "unit-1",
                 amount: 50,
                 method: PaymentMethod.CASH,
                 paymentDate: new Date()
-            })).rejects.toThrow("Payment proof is required");
+            });
+
+            expect(result.amount).toBe(50);
+            expect(mockPaymentRepo.create).toHaveBeenCalled();
         });
     });
 
