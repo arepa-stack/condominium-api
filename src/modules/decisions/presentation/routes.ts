@@ -195,7 +195,7 @@ export function createDecisionRoutes(tag: string) {
       });
 
       // Persist the storage path; it gets signed on each read per spec §7.8.
-      (d as any).props = { ...(d as any).props, photo_url: file_path };
+      d.updatePhoto(file_path);
       await decisionRepo.update(d);
 
       const signedUrl = await storageService.getSignedUrl(file_path);
@@ -205,6 +205,27 @@ export function createDecisionRoutes(tag: string) {
       type: 'multipart/form-data',
       response: t.Object({ photo_url: t.String() }),
       detail: { tags: [tag], summary: 'Upload decision photo', security: [{ BearerAuth: [] }] },
+    })
+
+    // ── DELETE /decisions/:id/photo ──────────────────────────────────────────
+    .delete('/decisions/:id/photo', async ({ params }) => {
+      const d = await decisionRepo.findById(params.id);
+      if (!d) throw new DomainError('decision not found', 'DECISION_NOT_FOUND', 404);
+
+      if (d.photo_url) {
+        try {
+          await storageService.delete(d.photo_url);
+        } catch {
+          // Ignore error if file was already removed
+        }
+      }
+
+      d.updatePhoto(null);
+      await decisionRepo.update(d);
+      return { success: true };
+    }, {
+      response: t.Object({ success: t.Boolean() }),
+      detail: { tags: [tag], summary: 'Delete decision photo', security: [{ BearerAuth: [] }] },
     })
 
     // ── GET /decisions ────────────────────────────────────────────────────────

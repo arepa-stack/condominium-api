@@ -250,6 +250,11 @@ export class Decision {
         this.props.resulting_id = id;
     }
 
+    updatePhoto(photo_url: string | null): void {
+        this.props.photo_url = photo_url;
+        this.props.updated_at = new Date();
+    }
+
     /**
      * Wire-format DTO. photo_url is the stored path here — the presentation
      * layer re-signs it with a short TTL before returning to the client.

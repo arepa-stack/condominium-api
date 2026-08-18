@@ -52,7 +52,7 @@ export class DecisionFileStorageService {
       .upload(path, file.bytes, {
         contentType: file.mime,
         cacheControl: '600',
-        upsert: false,
+        upsert: true,
       });
 
     if (error) {
@@ -91,7 +91,7 @@ export class DecisionFileStorageService {
     decisionId: string,
     file: UploadFileInput,
   ): Promise<{ file_path: string }> {
-    const safeName = this.sanitizeName(file.name);
+    const safeName = `${Date.now()}_${this.sanitizeName(file.name)}`;
     const path = `decisions/${decisionId}/issue/${safeName}`;
     const file_path = await this.upload(path, file);
     return { file_path };
