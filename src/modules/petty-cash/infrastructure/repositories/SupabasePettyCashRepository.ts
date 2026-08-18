@@ -211,6 +211,24 @@ export class SupabasePettyCashRepository implements PettyCashRepository {
         return this.entryToDomain(data);
     }
 
+    async updateEntryDescription(entryId: string, description: string): Promise<PettyCashEntry> {
+        const { data, error } = await supabase
+            .from('petty_cash_entries')
+            .update({ description })
+            .eq('id', entryId)
+            .select('*')
+            .single();
+
+        if (error) {
+            throw new DomainError(
+                'Error updating petty cash entry description: ' + error.message,
+                'DB_ERROR',
+                500
+            );
+        }
+        return this.entryToDomain(data);
+    }
+
     async findEntriesByFundId(
         fundId: string,
         filters: EntryHistoryFilters

@@ -568,6 +568,28 @@ function createWriteRoutes() {
                 description:
                     'Creates a new REVERSAL entry with amount = -original.amount. Original entry is NEVER mutated (append-only). Idempotent: returns the existing reversal if called twice. Cannot reverse an entry whose type is already REVERSAL.',
             },
+        })
+        .patch('/funds/:buildingId/entries/:entryId', async ({ params, body }) => {
+            const entry = await pettyCashRepo.findEntryById(params.entryId);
+            if (!entry) {
+                throw new DomainError('Movimiento no encontrado', 'NOT_FOUND', 404);
+            }
+            const updated = await pettyCashRepo.updateEntryDescription(params.entryId, body.description);
+            return updated.toJSON() as any;
+        }, {
+            body: t.Object({
+                description: t.String({
+                    minLength: 1,
+                    maxLength: 500,
+                    description: 'Nueva descripción para el movimiento de caja chica.',
+                }),
+            }),
+            response: PettyCashEntrySchema,
+            detail: {
+                tags: ['Admin - Petty Cash'],
+                summary: 'Update petty cash entry description',
+                description: 'Modifica la descripción de un movimiento de caja chica.',
+            },
         });
 }
 
