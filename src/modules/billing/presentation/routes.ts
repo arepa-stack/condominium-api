@@ -9,9 +9,10 @@ import { GetAllInvoices } from '../application/use-cases/GetAllInvoices';
 import { GetUnitCredit } from '../application/use-cases/GetUnitCredit';
 import { GetInvoicePayments } from '../application/use-cases/GetInvoicePayments';
 import { GetPaymentInvoices } from '../application/use-cases/GetPaymentInvoices';
-import { UnauthorizedError, NotFoundError } from '@/core/errors';
+import { UnauthorizedError, NotFoundError, DomainError } from '@/core/errors';
 import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
 import { InvoiceTag } from '@/core/domain/enums';
+import { InvoiceStatus } from '../domain/entities/Invoice';
 import { PreviewInvoicesFromExcel } from '../application/use-cases/PreviewInvoicesFromExcel';
 import { BulkLoadInvoicesFromExcel } from '../application/use-cases/BulkLoadInvoicesFromExcel';
 import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositories/SupabaseUnitRepository';
@@ -365,8 +366,56 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
             period: body.period,
             description: body.description,
-            dueDate: body.due_date ? new Date(body.due_date) : undefined
+            dueDate: body.due_date ? new Date(body.due_date) : undefined,
+            receiptNumber: body.receipt_number?.trim() || undefined,
+            status: body.status as InvoiceStatus | undefined,
+            paidAmount: body.paid_amount !== undefined ? (typeof body.paid_amount === 'string' ? parseFloat(body.paid_amount) : body.paid_amount) : undefined,
         });
+
+        // If invoice was created as PAID, automatically record an approved payment and allocation
+        if (invoice.status === InvoiceStatus.PAID) {
+            try {
+                const { data: unitData } = await supabaseAdmin
+                    .from('units')
+                    .select('id, building_id, profile_units(profiles(id))')
+                    .eq('id', body.unit_id)
+                    .single();
+
+                const unitProfileId = (unitData?.profile_units as any[])?.[0]?.profiles?.id;
+                const payerId = unitProfileId || profile.id;
+                const paymentId = crypto.randomUUID();
+                const paymentDate = body.payment_date ? new Date(body.payment_date) : new Date();
+
+                const { error: paymentError } = await supabaseAdmin
+                    .from('payments')
+                    .insert({
+                        id: paymentId,
+                        user_id: payerId,
+                        building_id: unitData?.building_id || null,
+                        unit_id: body.unit_id,
+                        amount: invoice.amount,
+                        payment_date: paymentDate.toISOString().slice(0, 10),
+                        method: body.payment_method || 'CASH',
+                        reference: body.receipt_number || 'PAGO-DIRECTO',
+                        status: 'APPROVED',
+                        period: body.period,
+                        notes: `Factura pagada al emitir (${body.description || 'Gasto'}). Recibo: ${body.receipt_number || 'Sin comprobante adjunto'}`,
+                    });
+
+                if (!paymentError) {
+                    await supabaseAdmin
+                        .from('payment_allocations')
+                        .insert({
+                            id: crypto.randomUUID(),
+                            payment_id: paymentId,
+                            invoice_id: invoice.id,
+                            amount: invoice.amount,
+                        });
+                }
+            } catch (pErr) {
+                console.warn('Could not auto-create payment record for paid invoice:', pErr);
+            }
+        }
 
         return invoice.toJSON();
     }, {
@@ -375,12 +424,127 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             amount: t.Union([t.Number(), t.String()]),
             period: t.String({ examples: ['2026-01'] }),
             description: t.String(),
-            due_date: t.Optional(t.String())
+            due_date: t.Optional(t.String()),
+            receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
+            status: t.Optional(t.String()),
+            paid_amount: t.Optional(t.Union([t.Number(), t.String()])),
+            payment_method: t.Optional(t.String()),
+            payment_date: t.Optional(t.String()),
         }),
         response: InvoiceSchema,
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Load debt to a unit (Admin/Board)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    // 1.1 Admin updates invoice (e.g. mark as PAID)
+    .patch('/invoices/:id', async ({ params, body, profile }) => {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
+            throw new UnauthorizedError('Only Admin/Board can update invoices');
+        }
+
+        const invoice = await invoiceRepository.findById(params.id);
+        if (!invoice) throw new NotFoundError('Invoice not found');
+
+        const updates: any = {};
+        if (body.description !== undefined) updates.description = body.description;
+        if (body.receipt_number !== undefined) updates.receipt_number = body.receipt_number;
+        if (body.due_date !== undefined) updates.due_date = body.due_date ? new Date(body.due_date) : null;
+
+        if (body.status === 'PAID') {
+            updates.status = 'PAID';
+            updates.paid_amount = invoice.amount;
+        } else if (body.status !== undefined) {
+            updates.status = body.status;
+        }
+
+        if (body.paid_amount !== undefined) {
+            const pAmt = typeof body.paid_amount === 'string' ? parseFloat(body.paid_amount) : body.paid_amount;
+            updates.paid_amount = pAmt;
+            if (pAmt >= invoice.amount) {
+                updates.status = 'PAID';
+            }
+        }
+
+        updates.updated_at = new Date();
+
+        const { data, error } = await supabaseAdmin
+            .from('invoices')
+            .update(updates)
+            .eq('id', params.id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new DomainError('Error updating invoice: ' + error.message, 'DB_ERROR', 500);
+        }
+
+        // If marked as paid, ensure an approved payment and allocation exist
+        if (updates.status === 'PAID') {
+            try {
+                const { data: existingAllocations } = await supabaseAdmin
+                    .from('payment_allocations')
+                    .select('id')
+                    .eq('invoice_id', params.id);
+
+                if (!existingAllocations || existingAllocations.length === 0) {
+                    const { data: unitData } = await supabaseAdmin
+                        .from('units')
+                        .select('id, building_id, profile_units(profiles(id))')
+                        .eq('id', invoice.unit_id!)
+                        .single();
+
+                    const unitProfileId = (unitData?.profile_units as any[])?.[0]?.profiles?.id;
+                    const payerId = unitProfileId || profile.id;
+                    const paymentId = crypto.randomUUID();
+
+                    const { error: pErr } = await supabaseAdmin
+                        .from('payments')
+                        .insert({
+                            id: paymentId,
+                            user_id: payerId,
+                            building_id: unitData?.building_id || null,
+                            unit_id: invoice.unit_id,
+                            amount: invoice.amount,
+                            payment_date: (body.payment_date || new Date().toISOString()).slice(0, 10),
+                            method: body.payment_method || 'CASH',
+                            reference: body.receipt_number || invoice.receipt_number || 'PAGO-DIRECTO',
+                            status: 'APPROVED',
+                            period: invoice.period,
+                            notes: `Factura marcada como pagada por administración.`,
+                        });
+
+                    if (!pErr) {
+                        await supabaseAdmin
+                            .from('payment_allocations')
+                            .insert({
+                                id: crypto.randomUUID(),
+                                payment_id: paymentId,
+                                invoice_id: invoice.id,
+                                amount: invoice.amount,
+                            });
+                    }
+                }
+            } catch (autoPayErr) {
+                console.warn('Could not auto-create payment allocation on patch:', autoPayErr);
+            }
+        }
+
+        return data;
+    }, {
+        body: t.Object({
+            status: t.Optional(t.String()),
+            paid_amount: t.Optional(t.Union([t.Number(), t.String()])),
+            receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
+            description: t.Optional(t.String()),
+            due_date: t.Optional(t.Union([t.String(), t.Null()])),
+            payment_method: t.Optional(t.String()),
+            payment_date: t.Optional(t.String()),
+        }),
+        detail: {
+            tags: ['Admin - Billing'],
+            summary: 'Update invoice status or details (Admin/Board)',
             security: [{ BearerAuth: [] }]
         }
     })
