@@ -15,7 +15,7 @@ import { GetUnitById } from '../application/use-cases/GetUnitById';
 import { DeleteUnit } from '../application/use-cases/DeleteUnit';
 import { DeleteUnitsByBuilding } from '../application/use-cases/DeleteUnitsByBuilding';
 import { supabase } from '@/infrastructure/supabase';
-import { UnauthorizedError } from '@/core/errors';
+import { UnauthorizedError, NotFoundError } from '@/core/errors';
 
 // Initialize repositories
 const buildingRepo = new SupabaseBuildingRepository();
@@ -260,6 +260,29 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
         detail: {
             tags: ['Admin - Buildings'],
             summary: 'Create a single unit (Admin only)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .patch('/:id/units/:unitId', async ({ params, body }) => {
+        const unit = await unitRepo.findById(params.unitId);
+        if (!unit) throw new NotFoundError('Unit not found');
+        unit.update({
+            name: body.name,
+            floor: body.floor,
+            aliquot: body.aliquot
+        });
+        const updated = await unitRepo.update(unit);
+        return updated.toJSON();
+    }, {
+        body: t.Object({
+            name: t.Optional(t.String()),
+            floor: t.Optional(t.Nullable(t.String())),
+            aliquot: t.Optional(t.Nullable(t.Number())),
+        }),
+        response: UnitSchema,
+        detail: {
+            tags: ['Admin - Buildings'],
+            summary: 'Update unit details or aliquot (Admin only)',
             security: [{ BearerAuth: [] }]
         }
     })
