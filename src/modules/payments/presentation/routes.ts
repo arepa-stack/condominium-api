@@ -8,8 +8,8 @@ import { GetUnitPaymentSummary } from '../application/use-cases/GetUnitPaymentSu
 import { GetAllPayments } from '../application/use-cases/GetAllPayments';
 import { GetUnitBalance } from '@/modules/billing/application/use-cases/GetUnitBalance';
 import { StorageService } from '@/infrastructure/storage';
-import { supabase } from '@/infrastructure/supabase';
-import { UnauthorizedError, NotFoundError } from '@/core/errors';
+import { supabase, supabaseAdmin } from '@/infrastructure/supabase';
+import { UnauthorizedError, NotFoundError, DomainError } from '@/core/errors';
 import { PaymentMethod, UserRole } from '@/core/domain/enums';
 import { requireRole } from '@/core/presentation/guards';
 
@@ -418,6 +418,61 @@ const paymentAdminRoutes = new Elysia()
             tags: ['Admin - Payments'],
             summary: 'Reverse an approved payment (Admin/Board)',
             description: 'Reverts payment approval, cancels credits, and restores invoice balances',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    .post('/admin/payments/:id/proof', async ({ profile, params, body }) => {
+        const payment = await paymentRepo.findById(params.id);
+        if (!payment) {
+            throw new NotFoundError('Payment not found');
+        }
+
+        let proofUrl: string | undefined;
+        if (body.proof_image) {
+            const targetUserId = payment.user_id || profile.id;
+            proofUrl = await storageService.uploadPaymentProof(body.proof_image, targetUserId);
+        }
+
+        const updateData: Record<string, any> = {};
+        if (proofUrl) updateData.proof_url = proofUrl;
+        if (body.reference !== undefined && body.reference.trim() !== '') updateData.reference = body.reference.trim();
+        if (body.bank !== undefined && body.bank.trim() !== '') updateData.bank = body.bank.trim();
+        if (body.method !== undefined && body.method.trim() !== '') updateData.method = body.method.trim();
+        if (body.notes !== undefined && body.notes.trim() !== '') updateData.notes = body.notes.trim();
+
+        if (Object.keys(updateData).length > 0) {
+            updateData.updated_at = new Date().toISOString();
+            const { error } = await supabaseAdmin
+                .from('payments')
+                .update(updateData)
+                .eq('id', params.id);
+
+            if (error) {
+                throw new DomainError('Error updating payment: ' + error.message, 'DATABASE_ERROR', 500);
+            }
+        }
+
+        const updatedPayment = await paymentRepo.findById(params.id);
+        return {
+            success: true,
+            proof_url: proofUrl || payment.proof_url,
+            payment: updatedPayment ? updatedPayment.toJSON() : null,
+        };
+    }, {
+        body: t.Object({
+            proof_image: t.Optional(t.File({
+                types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'],
+                maxSize: 10 * 1024 * 1024
+            })),
+            reference: t.Optional(t.String()),
+            bank: t.Optional(t.String()),
+            method: t.Optional(t.String()),
+            notes: t.Optional(t.String()),
+        }),
+        detail: {
+            tags: ['Admin - Payments'],
+            summary: 'Upload or update payment proof and details (Admin/Board)',
+            description: 'Allows uploading the comprobante / capture, or updating reference, method, and notes on an existing payment',
             security: [{ BearerAuth: [] }]
         }
     });
