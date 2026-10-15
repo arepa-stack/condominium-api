@@ -402,7 +402,6 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                         method: body.payment_method || 'CASH',
                         reference: body.receipt_number || 'PAGO-DIRECTO',
                         status: 'APPROVED',
-                        period: body.period,
                         notes: paymentNote,
                     });
 
