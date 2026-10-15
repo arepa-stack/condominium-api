@@ -372,8 +372,9 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             paidAmount: body.paid_amount !== undefined ? (typeof body.paid_amount === 'string' ? parseFloat(body.paid_amount) : body.paid_amount) : undefined,
         });
 
-        // If invoice was created as PAID, automatically record an approved payment and allocation
-        if (invoice.status === InvoiceStatus.PAID) {
+        // If invoice was created with payment (PAID or PARTIAL), automatically record an approved payment and allocation
+        const paymentAmount = (invoice.paid_amount !== undefined && invoice.paid_amount > 0) ? invoice.paid_amount : (invoice.status === InvoiceStatus.PAID ? invoice.amount : 0);
+        if (paymentAmount > 0) {
             try {
                 const { data: unitData } = await supabaseAdmin
                     .from('units')
@@ -386,6 +387,9 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 const paymentId = crypto.randomUUID();
                 const paymentDate = body.payment_date ? new Date(body.payment_date) : new Date();
 
+                const isFullPayment = paymentAmount >= invoice.amount;
+                const paymentNote = `Factura ${isFullPayment ? 'pagada' : 'abonada parcialmente'} al emitir (${body.description || 'Gasto'}). Recibo: ${body.receipt_number || 'Sin comprobante adjunto'}`;
+
                 const { error: paymentError } = await supabaseAdmin
                     .from('payments')
                     .insert({
@@ -393,13 +397,13 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                         user_id: payerId,
                         building_id: unitData?.building_id || null,
                         unit_id: body.unit_id,
-                        amount: invoice.amount,
+                        amount: paymentAmount,
                         payment_date: paymentDate.toISOString().slice(0, 10),
                         method: body.payment_method || 'CASH',
                         reference: body.receipt_number || 'PAGO-DIRECTO',
                         status: 'APPROVED',
                         period: body.period,
-                        notes: `Factura pagada al emitir (${body.description || 'Gasto'}). Recibo: ${body.receipt_number || 'Sin comprobante adjunto'}`,
+                        notes: paymentNote,
                     });
 
                 if (!paymentError) {
@@ -409,11 +413,11 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                             id: crypto.randomUUID(),
                             payment_id: paymentId,
                             invoice_id: invoice.id,
-                            amount: invoice.amount,
+                            amount: paymentAmount,
                         });
                 }
             } catch (pErr) {
-                console.warn('Could not auto-create payment record for paid invoice:', pErr);
+                console.warn('Could not auto-create payment record for invoice payment:', pErr);
             }
         }
 
