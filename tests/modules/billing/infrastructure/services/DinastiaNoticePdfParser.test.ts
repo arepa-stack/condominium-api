@@ -3,14 +3,14 @@ import { parseNoticePage, PositionedText } from '@/modules/billing/infrastructur
 
 // Text items laid out like a Dinastia "aviso de cobro" page (PDF coordinates, y grows upwards).
 // Items are deliberately out of reading order, as the PDF text stream delivers them.
-function noticeItems(overrides: { unit?: string; netoBs?: string; netoUsd?: string; totalBs?: string } = {}): PositionedText[] {
-    const { unit = '02', netoBs = 'Bs 38.282,36', netoUsd = '$ 44,56', totalBs = 'Bs38.282,36' } = overrides;
+function noticeItems(overrides: { unit?: string; control?: string; netoBs?: string; netoUsd?: string; totalBs?: string } = {}): PositionedText[] {
+    const { unit = '02', control = '0926043001', netoBs = 'Bs 38.282,36', netoUsd = '$ 44,56', totalBs = 'Bs38.282,36' } = overrides;
     return [
         { str: 'Rif.:J-29749793-5', x: 138, y: 546 },
         { str: 'UNIDAD FAMILIAR:', x: 19, y: 460 },
         { str: 'INMUEBLE:', x: 41, y: 473 },
         { str: unit, x: 82, y: 459 },
-        { str: '0926043001', x: 89, y: 488 },
+        { str: control, x: 89, y: 488 },
         { str: 'N° CONTROL:', x: 34, y: 489 },
         { str: 'PERIODO:', x: 144, y: 487 },
         { str: 'SEP - 2026', x: 186, y: 487 },
@@ -36,18 +36,31 @@ describe('parseNoticePage', () => {
         const invoice = parseNoticePage(noticeItems());
 
         expect(invoice).toMatchObject({
-            unitName: '02',
+            unitName: '0-2',
             amount: 44.56,
             period: '2026-09',
             receiptNumber: '0926043001',
-            description: 'Condominio SEP - 2026 - Aviso 0926043001',
+            description: 'Condominio SEP - 2026',
         });
         expect(invoice!.issueDate.toISOString()).toBe('2026-10-05T00:00:00.000Z');
         expect(invoice!.warning).toBeUndefined();
     });
 
-    it('keeps non-numeric unit names such as PH', () => {
-        expect(parseNoticePage(noticeItems({ unit: 'PH' }))!.unitName).toBe('PH');
+    it('uses the same description for every notice of the period so they group together', () => {
+        const unit02 = parseNoticePage(noticeItems({ unit: '02' }))!;
+        const ph = parseNoticePage(noticeItems({ unit: 'PH', control: '0926043026' }))!;
+
+        expect(unit02.description).toBe(ph.description);
+    });
+
+    it('converts Dinastia unit codes to the app unit names (floor-unit)', () => {
+        expect(parseNoticePage(noticeItems({ unit: '02' }))!.unitName).toBe('0-2');
+        expect(parseNoticePage(noticeItems({ unit: '64' }))!.unitName).toBe('6-4');
+        expect(parseNoticePage(noticeItems({ unit: 'PH' }))!.unitName).toBe('P-H');
+    });
+
+    it('keeps unit codes that are not two characters as they are', () => {
+        expect(parseNoticePage(noticeItems({ unit: 'L1A' }))!.unitName).toBe('L1A');
     });
 
     it('parses thousands separators in USD amounts', () => {
