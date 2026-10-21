@@ -1,5 +1,5 @@
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
-import { IExcelInvoiceParser, RawInvoiceData } from '../../domain/services/IExcelInvoiceParser';
+import { IInvoiceFileParser, RawInvoiceData } from '../../domain/services/IExcelInvoiceParser';
 
 export interface ProposedInvoice extends RawInvoiceData {
     unitId?: string;
@@ -14,7 +14,7 @@ export interface PreviewInvoicesResponse {
 export class PreviewInvoicesFromExcel {
     constructor(
         private unitRepository: IUnitRepository,
-        private parser: IExcelInvoiceParser
+        private parser: IInvoiceFileParser
     ) { }
 
     async execute(buffer: Buffer, buildingId: string): Promise<PreviewInvoicesResponse> {

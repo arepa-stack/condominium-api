@@ -9,6 +9,7 @@ export interface ConfirmedInvoice {
     period: string;
     issueDate: string; // ISO string from JSON
     receiptNumber: string;
+    description?: string;
     status: 'EXISTS' | 'TO_BE_CREATED';
 }
 
@@ -99,7 +100,7 @@ export class BulkLoadInvoicesFromExcel {
             status: InvoiceStatus.PENDING,
             type: InvoiceType.DEBT,
             receipt_number: item.receiptNumber,
-            description: `Carga inicial - Recibo ${item.receiptNumber}`
+            description: item.description ?? `Carga inicial - Recibo ${item.receiptNumber}`
         });
     }
 }

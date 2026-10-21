@@ -17,6 +17,7 @@ import { PreviewInvoicesFromExcel } from '../application/use-cases/PreviewInvoic
 import { BulkLoadInvoicesFromExcel } from '../application/use-cases/BulkLoadInvoicesFromExcel';
 import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { ExcelJSInvoiceParser } from '../infrastructure/services/ExcelJSInvoiceParser';
+import { DinastiaNoticePdfParser } from '../infrastructure/services/DinastiaNoticePdfParser';
 
 // Initialize Repos & Use Cases
 const invoiceRepository = new SupabaseInvoiceRepository();
@@ -33,6 +34,7 @@ const getUnitCredit = new GetUnitCredit(creditLedgerRepository);
 const getInvoicePayments = new GetInvoicePayments(allocationRepository);
 const getPaymentInvoices = new GetPaymentInvoices(allocationRepository);
 const previewInvoices = new PreviewInvoicesFromExcel(unitRepository, excelParser);
+const previewPdfInvoices = new PreviewInvoicesFromExcel(unitRepository, new DinastiaNoticePdfParser());
 const bulkLoadInvoices = new BulkLoadInvoicesFromExcel(invoiceRepository, unitRepository);
 
 const InvoiceSchema = t.Object({
@@ -284,6 +286,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 period: inv.period,
                 issue_date: inv.issueDate,
                 receipt_number: inv.receiptNumber,
+                description: inv.description,
                 unit_id: inv.unitId,
                 status: inv.status,
                 warning: inv.warning
@@ -304,6 +307,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 period: t.String(),
                 issue_date: t.Any(),
                 receipt_number: t.String(),
+                description: t.Optional(t.String()),
                 unit_id: t.Optional(t.String()),
                 status: t.String(),
                 warning: t.Optional(t.String())
@@ -313,6 +317,58 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Preview invoices from Excel file (Admin)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    // 1.5b. Preview invoices from a Dinastia "avisos de cobro" PDF (one notice per page)
+    .post('/invoices/preview-pdf', async ({ query, body, profile }) => {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
+            throw new UnauthorizedError('Only Admin/Board can preview invoices');
+        }
+
+        const file = body.file as File;
+        if (!file) throw new Error('PDF file is required');
+
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const preview = await previewPdfInvoices.execute(buffer, query.building_id);
+        return {
+            invoices: preview.invoices.map(inv => ({
+                unit_name: inv.unitName,
+                amount: inv.amount,
+                period: inv.period,
+                issue_date: inv.issueDate,
+                receipt_number: inv.receiptNumber,
+                description: inv.description,
+                unit_id: inv.unitId,
+                status: inv.status,
+                warning: inv.warning
+            })),
+            units_to_create: preview.unitsToCreate
+        };
+    }, {
+        query: t.Object({
+            building_id: t.String()
+        }),
+        body: t.Object({
+            file: t.File()
+        }),
+        response: t.Object({
+            invoices: t.Array(t.Object({
+                unit_name: t.String(),
+                amount: t.Number(),
+                period: t.String(),
+                issue_date: t.Any(),
+                receipt_number: t.String(),
+                description: t.Optional(t.String()),
+                unit_id: t.Optional(t.String()),
+                status: t.String(),
+                warning: t.Optional(t.String())
+            })),
+            units_to_create: t.Array(t.String())
+        }),
+        detail: {
+            tags: ['Admin - Billing'],
+            summary: 'Preview invoices from administrator PDF notices (Admin)',
             security: [{ BearerAuth: [] }]
         }
     })
@@ -329,6 +385,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 period: item.period,
                 issueDate: item.issue_date,
                 receiptNumber: item.receipt_number,
+                description: item.description,
                 status: item.status as 'EXISTS' | 'TO_BE_CREATED'
             })),
             buildingId: query.building_id
@@ -346,6 +403,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 period: t.String(),
                 issue_date: t.String(),
                 receipt_number: t.String(),
+                description: t.Optional(t.String()),
                 status: t.String()
             }))
         }),
