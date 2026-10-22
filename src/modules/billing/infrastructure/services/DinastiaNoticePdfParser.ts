@@ -68,8 +68,8 @@ export function parseNoticePage(items: PositionedText[]): RawInvoiceData | null 
         throw new DomainError(`Aviso ${receiptNumber}: ${reason}`, 'VALIDATION_ERROR', 400);
     };
 
-    const unitCode = valueRightOf(items, 'UNIDAD FAMILIAR:') ?? fail('no se encontró la unidad familiar');
-    const unitName = toAppUnitName(unitCode);
+    // Kept as printed ("02", "PH"); the preview matches it to the building's unit names.
+    const unitName = valueRightOf(items, 'UNIDAD FAMILIAR:') ?? fail('no se encontró la unidad familiar');
     const text = items.map(item => item.str).join(' ');
 
     const periodMatch = text.match(/PERIODO:\s*([A-Z]{3})\s*-\s*(\d{4})/);
@@ -104,11 +104,6 @@ export function parseNoticePage(items: PositionedText[]): RawInvoiceData | null 
         description: `Condominio ${periodMatch![1]} - ${periodMatch![2]}`,
         ...(warning ? { warning } : {}),
     };
-}
-
-// Dinastia prints the unit as "<floor><unit>" ("02", "PH"); the app names units "<floor>-<unit>" ("0-2", "P-H").
-function toAppUnitName(unitCode: string): string {
-    return unitCode.length === 2 ? `${unitCode[0]}-${unitCode[1]}` : unitCode;
 }
 
 function valueRightOf(items: PositionedText[], label: string): string | undefined {
