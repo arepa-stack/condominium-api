@@ -21,22 +21,20 @@ export class PreviewInvoicesFromExcel {
         const { invoices: rawData } = await this.parser.parse(buffer);
         const existingUnits = await this.unitRepository.findByBuildingId(buildingId);
 
-        const unitsMap = new Map(existingUnits.map(unit => [unit.name.toLowerCase(), unit.id]));
+        const findUnit = buildUnitMatcher(existingUnits);
         const unitsToCreate = new Set<string>();
 
         const invoices: ProposedInvoice[] = rawData.map(item => {
-            const unitId = unitsMap.get(item.unitName.toLowerCase());
-            const status = unitId ? 'EXISTS' : 'TO_BE_CREATED';
+            const unit = findUnit(item.unitName);
 
-            if (status === 'TO_BE_CREATED') {
+            if (!unit) {
                 unitsToCreate.add(item.unitName);
+                return { ...item, unitId: undefined, status: 'TO_BE_CREATED' as const };
             }
 
-            return {
-                ...item,
-                unitId: unitId || undefined,
-                status
-            };
+            // A loose match ("02" -> "0-2") takes the stored name so confirm resolves the same unit
+            const unitName = unit.name.toLowerCase() === item.unitName.toLowerCase() ? item.unitName : unit.name;
+            return { ...item, unitName, unitId: unit.id, status: 'EXISTS' as const };
         });
 
         return {
@@ -44,4 +42,31 @@ export class PreviewInvoicesFromExcel {
             unitsToCreate: Array.from(unitsToCreate)
         };
     }
+}
+
+type UnitRef = { id: string; name: string };
+
+// Ignores case, spaces and separators: "02" matches "0-2", "PH" matches "P-H".
+function looseKey(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Exact (case-insensitive) match first, as before. Otherwise a loose match, accepted
+ * only when exactly one unit of the building has that loose key.
+ */
+function buildUnitMatcher(units: UnitRef[]): (name: string) => UnitRef | undefined {
+    const exact = new Map(units.map(unit => [unit.name.toLowerCase(), unit]));
+    const loose = new Map<string, UnitRef[]>();
+    for (const unit of units) {
+        const key = looseKey(unit.name);
+        loose.set(key, [...(loose.get(key) ?? []), unit]);
+    }
+
+    return (name: string) => {
+        const exactMatch = exact.get(name.toLowerCase());
+        if (exactMatch) return exactMatch;
+        const candidates = loose.get(looseKey(name)) ?? [];
+        return candidates.length === 1 ? candidates[0] : undefined;
+    };
 }

@@ -36,7 +36,7 @@ describe('parseNoticePage', () => {
         const invoice = parseNoticePage(noticeItems());
 
         expect(invoice).toMatchObject({
-            unitName: '0-2',
+            unitName: '02',
             amount: 44.56,
             period: '2026-09',
             receiptNumber: '0926043001',
@@ -53,14 +53,9 @@ describe('parseNoticePage', () => {
         expect(unit02.description).toBe(ph.description);
     });
 
-    it('converts Dinastia unit codes to the app unit names (floor-unit)', () => {
-        expect(parseNoticePage(noticeItems({ unit: '02' }))!.unitName).toBe('0-2');
-        expect(parseNoticePage(noticeItems({ unit: '64' }))!.unitName).toBe('6-4');
-        expect(parseNoticePage(noticeItems({ unit: 'PH' }))!.unitName).toBe('P-H');
-    });
-
-    it('keeps unit codes that are not two characters as they are', () => {
-        expect(parseNoticePage(noticeItems({ unit: 'L1A' }))!.unitName).toBe('L1A');
+    it('keeps the unit code exactly as printed; matching to existing units happens in the preview', () => {
+        expect(parseNoticePage(noticeItems({ unit: '02' }))!.unitName).toBe('02');
+        expect(parseNoticePage(noticeItems({ unit: 'PH' }))!.unitName).toBe('PH');
     });
 
     it('parses thousands separators in USD amounts', () => {
