@@ -66,13 +66,16 @@ const AdminInvoiceSchema = t.Object({
     created_at: t.Optional(t.String()),
     unit: t.Object({
         id: t.Optional(t.String()),
-        name: t.Optional(t.String())
+        name: t.Optional(t.String()),
+        aliquot: t.Optional(t.Union([t.Number(), t.Null()]))
     }),
     user: t.Union([
         t.Null(),
         t.Object({
             id: t.String(),
-            name: t.String()
+            name: t.String(),
+            email: t.Optional(t.Union([t.String(), t.Null()])),
+            phone: t.Optional(t.Union([t.String(), t.Null()]))
         })
     ])
 });

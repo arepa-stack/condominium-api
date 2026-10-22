@@ -194,9 +194,10 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                 id,
                 name,
                 building_id,
+                aliquot,
                 profile_units (
                     is_primary,
-                    profiles (id, name, email)
+                    profiles (id, name, email, phone)
                 )
             )
         `;
@@ -207,9 +208,10 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                 id,
                 name,
                 building_id,
+                aliquot,
                 profile_units (
                     is_primary,
-                    profiles (id, name, email)
+                    profiles (id, name, email, phone)
                 )
             )
         `;
@@ -339,40 +341,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
     }
 
     private toAdminResult(inv: any): AdminInvoiceResult {
-        const unit = inv.units as unknown as {
-            id: string;
-            name: string;
-            building_id: string;
-            profile_units: {
-                is_primary: boolean;
-                profiles: { id: string; name: string; email: string };
-            }[];
-        } | null;
-        const residents = unit?.profile_units?.map(pu => pu.profiles) || [];
-        const primary = unit?.profile_units?.find(pu => pu.is_primary)?.profiles;
-        const displayUser = primary || residents[0] || null;
-        const [yearStr, monthStr] = (inv.period || '0-0').split('-');
-
-        return {
-            id: inv.id as string,
-            amount: inv.amount as number,
-            paid_amount: parseFloat(inv.paid_amount || 0),
-            status: inv.status as string,
-            period: inv.period as string,
-            year: parseInt(yearStr),
-            month: parseInt(monthStr),
-            issue_date: inv.issue_date as string,
-            receipt_number: inv.receipt_number as string | undefined,
-            created_at: inv.created_at as string,
-            unit: {
-                id: unit?.id ?? '',
-                name: unit?.name ?? ''
-            },
-            user: displayUser ? {
-                id: displayUser.id as string,
-                name: displayUser.name as string
-            } : null
-        };
+        return mapAdminInvoiceRow(inv);
     }
 
     async findByBuildingId(
@@ -382,4 +351,50 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
     ): Promise<{ items: AdminInvoiceResult[]; total: number }> {
         return this.findInvoicesForAdmin({ ...filters, building_id: buildingId }, pagination);
     }
+}
+
+/**
+ * Maps an admin invoice row (with its unit and the unit's linked residents) to the
+ * admin list shape. The displayed user is the primary resident, else the first one.
+ */
+export function mapAdminInvoiceRow(inv: any): AdminInvoiceResult {
+    const unit = inv.units as unknown as {
+        id: string;
+        name: string;
+        building_id: string;
+        aliquot: number | string | null;
+        profile_units: {
+            is_primary: boolean;
+            profiles: { id: string; name: string; email: string | null; phone: string | null };
+        }[];
+    } | null;
+    const residents = unit?.profile_units?.map(pu => pu.profiles) || [];
+    const primary = unit?.profile_units?.find(pu => pu.is_primary)?.profiles;
+    const displayUser = primary || residents[0] || null;
+    const [yearStr, monthStr] = (inv.period || '0-0').split('-');
+
+    return {
+        id: inv.id as string,
+        amount: inv.amount as number,
+        paid_amount: parseFloat(inv.paid_amount || 0),
+        status: inv.status as string,
+        period: inv.period as string,
+        year: parseInt(yearStr),
+        month: parseInt(monthStr),
+        issue_date: inv.issue_date as string,
+        receipt_number: inv.receipt_number as string | undefined,
+        created_at: inv.created_at as string,
+        unit: {
+            id: unit?.id ?? '',
+            name: unit?.name ?? '',
+            // NUMERIC columns arrive as strings from PostgREST
+            aliquot: unit?.aliquot != null ? Number(unit.aliquot) : null
+        },
+        user: displayUser ? {
+            id: displayUser.id as string,
+            name: displayUser.name as string,
+            email: displayUser.email ?? null,
+            phone: displayUser.phone ?? null
+        } : null
+    };
 }
