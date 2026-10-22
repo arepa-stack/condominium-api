@@ -18,10 +18,13 @@ export interface AdminInvoiceResult {
     unit: {
         id: string;
         name: string;
+        aliquot: number | null;
     };
     user: {
         id: string;
         name: string;
+        email: string | null;
+        phone: string | null;
     } | null;
 }
 
