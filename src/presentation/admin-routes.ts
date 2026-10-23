@@ -12,6 +12,7 @@ import { Elysia } from 'elysia';
 import { requireRole } from '@/core/presentation/guards';
 import { UserRole } from '@/core/domain/enums';
 import { billingRoutes } from '@/modules/billing/presentation/routes';
+import { chargeConceptRoutes } from '@/modules/billing/presentation/concept-routes';
 import { paymentRoutes } from '@/modules/payments/presentation/routes';
 import { pettyCashRoutes } from '@/modules/petty-cash/presentation/routes';
 import { buildingAdminRoutes } from '@/modules/buildings/presentation/routes';
@@ -25,6 +26,7 @@ import { exchangeRateAdminRoutes } from '@/modules/exchange-rates/presentation/r
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
     .use(billingRoutes)          // invoices CRUD, debt, excel import, credit
+    .use(chargeConceptRoutes)    // charge concepts per building (invoice grouping)
     .use(paymentRoutes)          // all payments + approve/reject
     .use(pettyCashRoutes)        // fund read + write + assessments
     .use(buildingAdminRoutes)    // create, update, delete buildings/units

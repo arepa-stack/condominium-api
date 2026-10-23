@@ -1,6 +1,7 @@
 import { Invoice } from './entities/Invoice';
 import { PaymentAllocation } from './entities/PaymentAllocation';
 import { CreditLedgerEntry } from './entities/CreditLedgerEntry';
+import { ChargeConcept, ChargeConceptStatus } from './entities/ChargeConcept';
 import { InvoiceTag } from '@/core/domain/enums';
 import { PaginationFilters } from '@/core/domain/pagination';
 
@@ -104,4 +105,20 @@ export interface IPaymentAllocationRepository {
         paymentId: string,
         pagination: PaginationFilters
     ): Promise<{ items: any[]; total: number }>;
+}
+
+export interface ChargeConceptFilters {
+    status?: ChargeConceptStatus;
+}
+
+export interface IChargeConceptRepository {
+    create(concept: ChargeConcept): Promise<ChargeConcept>;
+    findById(id: string): Promise<ChargeConcept | null>;
+    findByBuildingId(buildingId: string, filters?: ChargeConceptFilters): Promise<ChargeConcept[]>;
+    update(concept: ChargeConcept): Promise<ChargeConcept>;
+}
+
+/** Narrow port: only what billing needs to know about a decision. */
+export interface IConceptDecisionLookup {
+    findById(id: string): Promise<{ building_id: string } | null>;
 }
