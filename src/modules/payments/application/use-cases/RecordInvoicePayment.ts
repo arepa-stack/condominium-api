@@ -58,6 +58,8 @@ export class RecordInvoicePayment {
             throw new DomainError('El monto del pago debe ser mayor a cero', 'VALIDATION_ERROR', 400);
         }
 
+        const vesProvenance = this.parseVesProvenance(dto);
+
         const invoice = await this.invoiceRepo.findById(dto.invoiceId);
         if (!invoice) {
             throw new NotFoundError('Invoice not found');
@@ -93,9 +95,7 @@ export class RecordInvoicePayment {
             proofUrl: dto.proofUrl,
             notes: dto.notes,
             requireBankInfo: false,
-            vesProvenance: dto.amountVes && dto.exchangeRate
-                ? { amountVes: dto.amountVes, exchangeRate: dto.exchangeRate, rateSource: dto.rateSource }
-                : undefined,
+            vesProvenance,
             allocations: [{ invoiceId: invoice.id, amount }],
         });
 
@@ -111,6 +111,23 @@ export class RecordInvoicePayment {
             this.paymentRepo.findById(payment.id),
         ]);
         return { invoice: updatedInvoice ?? invoice, payment: approvedPayment ?? payment };
+    }
+
+    // Bs details are all-or-nothing: never drop what the caller sent.
+    private parseVesProvenance(dto: RecordInvoicePaymentDTO) {
+        const { amountVes, exchangeRate, rateSource } = dto;
+        if (amountVes === undefined && exchangeRate === undefined && (rateSource === undefined || rateSource === null)) {
+            return undefined;
+        }
+        const positive = (value: number | undefined): value is number => Number.isFinite(value) && (value as number) > 0;
+        if (!positive(amountVes) || !positive(exchangeRate)) {
+            throw new DomainError(
+                'Para un pago en Bs se requieren el monto en Bs y la tasa, ambos mayores a cero',
+                'VALIDATION_ERROR',
+                400
+            );
+        }
+        return { amountVes, exchangeRate, rateSource };
     }
 
     private assertOpen(invoice: Invoice): void {

@@ -152,6 +152,18 @@ describe('RecordInvoicePayment', () => {
         expect(payment.rate_date).toBe('2026-10-20');
     });
 
+    it.each([
+        [{ amountVes: 49448.6 }],
+        [{ exchangeRate: 988.972 }],
+        [{ rateSource: 'euro_oficial' as const }],
+        [{ amountVes: 49448.6, exchangeRate: NaN }],
+        [{ amountVes: -1, exchangeRate: 988.972 }],
+    ])('rejects incomplete or invalid Bs details %j instead of dropping them', async (ves) => {
+        await expect(ctx.useCase.execute({ ...base, amount: 50, ...ves }))
+            .rejects.toThrow('Para un pago en Bs se requieren el monto en Bs y la tasa, ambos mayores a cero');
+        expect(await ctx.paymentRepo.findAll()).toHaveLength(0);
+    });
+
     it('does not require reference or bank for a payment recorded by the administration', async () => {
         await ctx.useCase.execute({ ...base, amount: 50, method: PaymentMethod.TRANSFER });
 
