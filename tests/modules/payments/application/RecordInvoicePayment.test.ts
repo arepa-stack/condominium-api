@@ -158,6 +158,20 @@ describe('RecordInvoicePayment', () => {
         expect(ctx.invoice().paid_amount).toBe(50);
     });
 
+    it.each([
+        [54.02, 50, 4.02],
+        [26.02, 9.99, 16.03],
+        [0.11, 0.10, 0.01],
+    ])('marks a %d invoice PAID when the rest of the balance is paid after a %d abono', async (amount, abono, rest) => {
+        ctx = setup({ invoice: makeInvoice({ amount, paid_amount: abono, status: InvoiceStatus.PARTIAL }) });
+
+        await ctx.useCase.execute({ ...base, amount: rest });
+
+        expect(ctx.invoice().paid_amount).toBe(amount);
+        expect(ctx.invoice().status).toBe(InvoiceStatus.PAID);
+        expect(ctx.credits).toHaveLength(0);
+    });
+
     it('rounds the amount to cents', async () => {
         await ctx.useCase.execute({ ...base, amount: 35.674 });
 

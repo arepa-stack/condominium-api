@@ -112,7 +112,7 @@ export class Invoice {
         if (amount <= 0) {
             throw new DomainError('addPayment amount must be positive', 'VALIDATION_ERROR', 400);
         }
-        const next = this.paid_amount + amount;
+        const next = Math.round((this.paid_amount + amount) * 100) / 100;
         if (next > this.amount) {
             throw new DomainError(
                 `addPayment would exceed invoice amount: ${next} > ${this.amount}. ` +
@@ -129,7 +129,7 @@ export class Invoice {
         if (amount <= 0) {
             throw new DomainError('subtractPayment amount must be positive', 'VALIDATION_ERROR', 400);
         }
-        this.props.paid_amount = Math.max(0, this.paid_amount - amount);
+        this.props.paid_amount = Math.max(0, Math.round((this.paid_amount - amount) * 100) / 100);
         this.props.updated_at = new Date();
     }
 
