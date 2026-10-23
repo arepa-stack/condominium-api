@@ -14,6 +14,8 @@ export interface AdminInvoiceResult {
     month: number;
     issue_date: string;
     receipt_number?: string;
+    description: string | null;
+    due_date: string | null;
     created_at: string;
     unit: {
         id: string;

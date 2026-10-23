@@ -45,6 +45,25 @@ describe('mapAdminInvoiceRow', () => {
         expect(result.user).toBeNull();
     });
 
+    it('returns the description and due date so clients do not fetch each invoice again', () => {
+        const result = mapAdminInvoiceRow({
+            ...baseRow,
+            description: 'Condominio SEP - 2026',
+            due_date: '2026-10-31',
+            units: null,
+        });
+
+        expect(result.description).toBe('Condominio SEP - 2026');
+        expect(result.due_date).toBe('2026-10-31');
+    });
+
+    it('returns null description and due date when the invoice has none', () => {
+        const result = mapAdminInvoiceRow({ ...baseRow, description: null, due_date: null, units: null });
+
+        expect(result.description).toBeNull();
+        expect(result.due_date).toBeNull();
+    });
+
     it('keeps building-level invoices without a unit working', () => {
         const result = mapAdminInvoiceRow({ ...baseRow, units: null });
 

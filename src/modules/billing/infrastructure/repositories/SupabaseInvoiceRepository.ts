@@ -383,6 +383,8 @@ export function mapAdminInvoiceRow(inv: any): AdminInvoiceResult {
         month: parseInt(monthStr),
         issue_date: inv.issue_date as string,
         receipt_number: inv.receipt_number as string | undefined,
+        description: (inv.description as string | null) ?? null,
+        due_date: (inv.due_date as string | null) ?? null,
         created_at: inv.created_at as string,
         unit: {
             id: unit?.id ?? '',
