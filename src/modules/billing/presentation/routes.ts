@@ -104,6 +104,8 @@ const AdminInvoiceSchema = t.Object({
     month: t.Number(),
     issue_date: t.String(),
     receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
+    description: t.Optional(t.Union([t.String(), t.Null()])),
+    due_date: t.Optional(t.Union([t.String(), t.Null()])),
     created_at: t.Optional(t.String()),
     unit: t.Object({
         id: t.Optional(t.String()),
