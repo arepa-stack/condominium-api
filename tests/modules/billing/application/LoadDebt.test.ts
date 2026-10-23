@@ -9,6 +9,7 @@ function setup(options: { failPayment?: boolean } = {}) {
     const invoiceRepository: any = {
         create: mock(async (inv: Invoice) => { paidAtCreation.push(inv.paid_amount); stored.set(inv.id, inv); return inv; }),
         update: mock(async (inv: Invoice) => { stored.set(inv.id, inv); return inv; }),
+        findById: mock(async (id: string) => stored.get(id) ?? null),
     };
     const recordInvoicePayment: any = {
         execute: mock(async (dto: { invoiceId: string; amount: number }) => {
@@ -84,6 +85,21 @@ describe('LoadDebt', () => {
 
         const [invoice] = [...stored.values()];
         expect(invoice.status).toBe(InvoiceStatus.CANCELLED);
+    });
+
+    it('keeps the invoice when the payment reached it before failing', async () => {
+        const { useCase, stored, recordInvoicePayment } = setup();
+        recordInvoicePayment.execute = mock(async (dto: { invoiceId: string; amount: number }) => {
+            const invoice = stored.get(dto.invoiceId)!;
+            invoice.addPayment(dto.amount);
+            invoice.updateStatus();
+            throw new Error('reconciliation required');
+        });
+
+        await expect(useCase.execute({ ...debt, paidAmount: 50 })).rejects.toThrow('reconciliation required');
+
+        const [invoice] = [...stored.values()];
+        expect(invoice.status).toBe(InvoiceStatus.PARTIAL);
     });
 
     it('rejects a paid amount above the invoice amount', async () => {

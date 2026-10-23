@@ -74,9 +74,13 @@ export class LoadDebt {
             });
             return paidInvoice;
         } catch (err) {
-            // Do not leave behind a debt the resident already paid.
-            invoice.cancel();
-            await this.invoiceRepository.update(invoice);
+            // Do not leave behind a debt the resident already paid; but if the
+            // payment reached the invoice anyway, keep it for manual reconciliation.
+            const current = (await this.invoiceRepository.findById(invoice.id)) ?? invoice;
+            if (current.status === InvoiceStatus.PENDING && current.paid_amount === 0) {
+                current.cancel();
+                await this.invoiceRepository.update(current);
+            }
             throw err;
         }
     }

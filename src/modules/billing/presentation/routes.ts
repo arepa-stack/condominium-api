@@ -519,6 +519,8 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         if (body.receipt_number !== undefined) updates.receipt_number = body.receipt_number;
         if (body.due_date !== undefined) updates.due_date = body.due_date ? new Date(body.due_date) : null;
 
+        const paymentMethod = parsePaymentMethod(body.payment_method);
+
         // Money only moves through the payment path, never by writing paid_amount here.
         if (body.paid_amount !== undefined && body.status !== 'PAID') {
             throw new DomainError('Use POST /billing/invoices/:id/payments to register a payment', 'VALIDATION_ERROR', 400);
@@ -546,7 +548,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 invoiceId: invoice.id,
                 actorId: profile.id,
                 amount: invoice.remainingBalance,
-                method: parsePaymentMethod(body.payment_method) ?? PaymentMethod.CASH,
+                method: paymentMethod ?? PaymentMethod.CASH,
                 paymentDate: body.payment_date ? new Date(body.payment_date) : new Date(),
                 reference: body.receipt_number || invoice.receipt_number || undefined,
                 notes: 'Factura marcada como pagada por administración.',
