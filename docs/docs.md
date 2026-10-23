@@ -422,7 +422,9 @@ No requieren autenticación. Usadas para registro, login y consulta de edificios
 | `/billing/invoices?tag=&page=&limit=` | GET | Lista **paginada** de invoices. Query params: `page` (default `1`), `limit` (default `10`), `unit_id`, `building_id`, `status`, `period`, `year`, `user_id`, `tag` (NORMAL / PETTY_CASH). Response: `{ data: AdminInvoice[], metadata: { total, page, limit, total_pages, has_next_page, has_prev_page } }`. |
 | `/billing/invoices/preview` | POST | Pre-visualizar facturas desde Excel |
 | `/billing/invoices/confirm` | POST | Confirmar y cargar facturas desde Excel |
-| `/billing/debt` | POST | Cargar deuda manual a una unidad |
+| `/billing/debt` | POST | Cargar deuda manual a una unidad. Si se envía `status: PAID` o `paid_amount > 0`, el pago se registra con `POST /billing/invoices/:id/payments` sobre la factura nueva; si falla, la factura se anula y se devuelve el error. |
+| `/billing/invoices/:id` | PATCH | Editar descripción, recibo o vencimiento. `status: PAID` ("Marcar como pagada") registra un pago aprobado por el saldo restante; `paid_amount` solo ya no se acepta (usar el endpoint de pagos). |
+| `/billing/invoices/:id/payments` | POST | Registrar un pago total o parcial (abono) sobre una factura existente: pago APPROVED + allocation, actualiza `paid_amount`/estado. Body: `amount` (USD acreditado), `method`, `payment_date?`, `reference?`, `bank?`, `notes?`, y si se pagó en Bs `amount_ves`, `exchange_rate`, `rate_source`. Rechaza montos mayores al saldo y facturas PAID/CANCELLED. Board solo en su edificio. |
 | `/billing/units/:id/balance` | GET | Balance de deuda de una unidad |
 | `/billing/units/:id/invoices?tag=` | GET | Invoices de una unidad (filtrable por tag) |
 | `/billing/units/:id/credit` | GET | Crédito/saldo a favor de una unidad |
@@ -731,7 +733,9 @@ CANCELLED → (terminal — ninguna transición)
 ```
 Opción A — Manual:
 1. Admin/Board carga deuda → POST /billing/debt (unit_id, amount, period, description)
-2. Se crea invoice con status calculado
+2. Se crea invoice PENDING; si viene con pago, se registra con POST /billing/invoices/:id/payments
+
+Abono o pago sobre una deuda existente → POST /billing/invoices/:id/payments (nunca crear otra factura)
 
 Opción B — Masiva desde Excel:
 1. Admin/Board sube archivo Excel → POST /billing/invoices/preview?building_id=xxx

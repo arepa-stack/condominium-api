@@ -18,6 +18,17 @@ import { BulkLoadInvoicesFromExcel } from '../application/use-cases/BulkLoadInvo
 import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { ExcelJSInvoiceParser } from '../infrastructure/services/ExcelJSInvoiceParser';
 import { DinastiaNoticePdfParser } from '../infrastructure/services/DinastiaNoticePdfParser';
+import { ProcessInvoiceOverpayment } from '../application/use-cases/ProcessInvoiceOverpayment';
+import { SupabasePaymentRepository } from '@/modules/payments/infrastructure/repositories/SupabasePaymentRepository';
+import { RegisterPayment } from '@/modules/payments/application/use-cases/RegisterPayment';
+import { ApprovePayment } from '@/modules/payments/application/use-cases/ApprovePayment';
+import { RecordInvoicePayment } from '@/modules/payments/application/use-cases/RecordInvoicePayment';
+import { SupabaseUserRepository } from '@/modules/users/infrastructure/repositories/SupabaseUserRepository';
+import { SupabaseBuildingRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseBuildingRepository';
+import { SupabasePettyCashRepository } from '@/modules/petty-cash/infrastructure/repositories/SupabasePettyCashRepository';
+import { exchangeRateService } from '@/infrastructure/exchange-rate';
+import { PaymentMethod } from '@/core/domain/enums';
+import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
 
 // Initialize Repos & Use Cases
 const invoiceRepository = new SupabaseInvoiceRepository();
@@ -26,7 +37,37 @@ const creditLedgerRepository = new SupabaseCreditLedgerRepository();
 const unitRepository = new SupabaseUnitRepository();
 const excelParser = new ExcelJSInvoiceParser();
 
-const loadDebt = new LoadDebt(invoiceRepository);
+const paymentRepository = new SupabasePaymentRepository();
+const userRepository = new SupabaseUserRepository();
+const recordInvoicePayment = new RecordInvoicePayment(
+    invoiceRepository,
+    unitRepository,
+    userRepository,
+    paymentRepository,
+    new RegisterPayment(paymentRepository, allocationRepository, new SupabaseBuildingRepository(), exchangeRateService),
+    new ApprovePayment(
+        paymentRepository,
+        userRepository,
+        allocationRepository,
+        new ProcessInvoiceOverpayment(invoiceRepository, creditLedgerRepository),
+        invoiceRepository,
+        new SupabasePettyCashRepository()
+    )
+);
+const loadDebt = new LoadDebt(invoiceRepository, recordInvoicePayment);
+
+const toNumber = (value: number | string | undefined | null) =>
+    value === undefined || value === null || value === '' ? undefined : (typeof value === 'string' ? parseFloat(value) : value);
+
+function parsePaymentMethod(value: string | undefined): PaymentMethod | undefined {
+    if (value === undefined) return undefined;
+    if (!(Object.values(PaymentMethod) as string[]).includes(value)) {
+        throw new DomainError(`Invalid payment method: ${value}`, 'VALIDATION_ERROR', 400);
+    }
+    return value as PaymentMethod;
+}
+
+const RateSourceSchema = t.Union([t.Literal('euro_oficial'), t.Literal('dolar_oficial'), t.Literal('dolar_paralelo'), t.Null()]);
 const getUnitBalance = new GetUnitBalance(invoiceRepository, creditLedgerRepository);
 const getUnitInvoices = new GetUnitInvoices(invoiceRepository);
 const getAllInvoices = new GetAllInvoices(invoiceRepository);
@@ -430,56 +471,15 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             dueDate: body.due_date ? new Date(body.due_date) : undefined,
             receiptNumber: body.receipt_number?.trim() || undefined,
             status: body.status as InvoiceStatus | undefined,
-            paidAmount: body.paid_amount !== undefined ? (typeof body.paid_amount === 'string' ? parseFloat(body.paid_amount) : body.paid_amount) : undefined,
+            paidAmount: toNumber(body.paid_amount),
+            // A payment received with the debt is recorded through RecordInvoicePayment
+            actorId: profile.id,
+            paymentMethod: parsePaymentMethod(body.payment_method),
+            paymentDate: body.payment_date ? new Date(body.payment_date) : undefined,
+            amountVes: toNumber(body.amount_ves),
+            exchangeRate: toNumber(body.exchange_rate),
+            rateSource: body.rate_source as RateSource | null | undefined,
         });
-
-        // If invoice was created with payment (PAID or PARTIAL), automatically record an approved payment and allocation
-        const paymentAmount = (invoice.paid_amount !== undefined && invoice.paid_amount > 0) ? invoice.paid_amount : (invoice.status === InvoiceStatus.PAID ? invoice.amount : 0);
-        if (paymentAmount > 0) {
-            try {
-                const { data: unitData } = await supabaseAdmin
-                    .from('units')
-                    .select('id, building_id, profile_units(profiles(id))')
-                    .eq('id', body.unit_id)
-                    .single();
-
-                const unitProfileId = (unitData?.profile_units as any[])?.[0]?.profiles?.id;
-                const payerId = unitProfileId || profile.id;
-                const paymentId = crypto.randomUUID();
-                const paymentDate = body.payment_date ? new Date(body.payment_date) : new Date();
-
-                const isFullPayment = paymentAmount >= invoice.amount;
-                const paymentNote = `Factura ${isFullPayment ? 'pagada' : 'abonada parcialmente'} al emitir (${body.description || 'Gasto'}). Recibo: ${body.receipt_number || 'Sin comprobante adjunto'}`;
-
-                const { error: paymentError } = await supabaseAdmin
-                    .from('payments')
-                    .insert({
-                        id: paymentId,
-                        user_id: payerId,
-                        building_id: unitData?.building_id || null,
-                        unit_id: body.unit_id,
-                        amount: paymentAmount,
-                        payment_date: paymentDate.toISOString().slice(0, 10),
-                        method: body.payment_method || 'CASH',
-                        reference: body.receipt_number || 'PAGO-DIRECTO',
-                        status: 'APPROVED',
-                        notes: paymentNote,
-                    });
-
-                if (!paymentError) {
-                    await supabaseAdmin
-                        .from('payment_allocations')
-                        .insert({
-                            id: crypto.randomUUID(),
-                            payment_id: paymentId,
-                            invoice_id: invoice.id,
-                            amount: paymentAmount,
-                        });
-                }
-            } catch (pErr) {
-                console.warn('Could not auto-create payment record for invoice payment:', pErr);
-            }
-        }
 
         return invoice.toJSON();
     }, {
@@ -494,6 +494,9 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             paid_amount: t.Optional(t.Union([t.Number(), t.String()])),
             payment_method: t.Optional(t.String()),
             payment_date: t.Optional(t.String()),
+            amount_ves: t.Optional(t.Union([t.Number(), t.String()])),
+            exchange_rate: t.Optional(t.Union([t.Number(), t.String()])),
+            rate_source: t.Optional(RateSourceSchema),
         }),
         response: InvoiceSchema,
         detail: {
@@ -516,19 +519,14 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         if (body.receipt_number !== undefined) updates.receipt_number = body.receipt_number;
         if (body.due_date !== undefined) updates.due_date = body.due_date ? new Date(body.due_date) : null;
 
-        if (body.status === 'PAID') {
-            updates.status = 'PAID';
-            updates.paid_amount = invoice.amount;
-        } else if (body.status !== undefined) {
-            updates.status = body.status;
-        }
+        const paymentMethod = parsePaymentMethod(body.payment_method);
 
-        if (body.paid_amount !== undefined) {
-            const pAmt = typeof body.paid_amount === 'string' ? parseFloat(body.paid_amount) : body.paid_amount;
-            updates.paid_amount = pAmt;
-            if (pAmt >= invoice.amount) {
-                updates.status = 'PAID';
-            }
+        // Money only moves through the payment path, never by writing paid_amount here.
+        if (body.paid_amount !== undefined && body.status !== 'PAID') {
+            throw new DomainError('Use POST /billing/invoices/:id/payments to register a payment', 'VALIDATION_ERROR', 400);
+        }
+        if (body.status !== undefined && body.status !== 'PAID') {
+            updates.status = body.status;
         }
 
         updates.updated_at = new Date();
@@ -544,55 +542,27 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             throw new DomainError('Error updating invoice: ' + error.message, 'DB_ERROR', 500);
         }
 
-        // If marked as paid, ensure an approved payment and allocation exist
-        if (updates.status === 'PAID') {
-            try {
-                const { data: existingAllocations } = await supabaseAdmin
-                    .from('payment_allocations')
-                    .select('id')
-                    .eq('invoice_id', params.id);
+        // "Marcar como pagada": pay the remaining balance with an approved payment.
+        if (body.status === 'PAID' && invoice.status !== InvoiceStatus.PAID) {
+            await recordInvoicePayment.execute({
+                invoiceId: invoice.id,
+                actorId: profile.id,
+                amount: invoice.remainingBalance,
+                method: paymentMethod ?? PaymentMethod.CASH,
+                paymentDate: body.payment_date ? new Date(body.payment_date) : new Date(),
+                reference: body.receipt_number || invoice.receipt_number || undefined,
+                notes: 'Factura marcada como pagada por administración.',
+            });
 
-                if (!existingAllocations || existingAllocations.length === 0) {
-                    const { data: unitData } = await supabaseAdmin
-                        .from('units')
-                        .select('id, building_id, profile_units(profiles(id))')
-                        .eq('id', invoice.unit_id!)
-                        .single();
-
-                    const unitProfileId = (unitData?.profile_units as any[])?.[0]?.profiles?.id;
-                    const payerId = unitProfileId || profile.id;
-                    const paymentId = crypto.randomUUID();
-
-                    const { error: pErr } = await supabaseAdmin
-                        .from('payments')
-                        .insert({
-                            id: paymentId,
-                            user_id: payerId,
-                            building_id: unitData?.building_id || null,
-                            unit_id: invoice.unit_id,
-                            amount: invoice.amount,
-                            payment_date: (body.payment_date || new Date().toISOString()).slice(0, 10),
-                            method: body.payment_method || 'CASH',
-                            reference: body.receipt_number || invoice.receipt_number || 'PAGO-DIRECTO',
-                            status: 'APPROVED',
-                            period: invoice.period,
-                            notes: `Factura marcada como pagada por administración.`,
-                        });
-
-                    if (!pErr) {
-                        await supabaseAdmin
-                            .from('payment_allocations')
-                            .insert({
-                                id: crypto.randomUUID(),
-                                payment_id: paymentId,
-                                invoice_id: invoice.id,
-                                amount: invoice.amount,
-                            });
-                    }
-                }
-            } catch (autoPayErr) {
-                console.warn('Could not auto-create payment allocation on patch:', autoPayErr);
+            const { data: paid, error: readError } = await supabaseAdmin
+                .from('invoices')
+                .select()
+                .eq('id', params.id)
+                .single();
+            if (readError) {
+                throw new DomainError('Error reading invoice: ' + readError.message, 'DB_ERROR', 500);
             }
+            return paid;
         }
 
         return data;
@@ -609,6 +579,46 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
         detail: {
             tags: ['Admin - Billing'],
             summary: 'Update invoice status or details (Admin/Board)',
+            security: [{ BearerAuth: [] }]
+        }
+    })
+    // 1.2 Admin/Board records a full or partial payment on an existing invoice
+    .post('/invoices/:id/payments', async ({ params, body, profile }) => {
+        if (!profile.isAdmin && !profile.isBoardAnywhere) {
+            throw new UnauthorizedError('Only Admin/Board can record invoice payments');
+        }
+
+        const { invoice, payment } = await recordInvoicePayment.execute({
+            invoiceId: params.id,
+            actorId: profile.id,
+            amount: toNumber(body.amount) ?? 0,
+            method: parsePaymentMethod(body.method)!,
+            paymentDate: body.payment_date ? new Date(body.payment_date) : new Date(),
+            reference: body.reference?.trim() || undefined,
+            bank: body.bank?.trim() || undefined,
+            notes: body.notes?.trim() || undefined,
+            amountVes: toNumber(body.amount_ves),
+            exchangeRate: toNumber(body.exchange_rate),
+            rateSource: body.rate_source as RateSource | null | undefined,
+        });
+
+        return { invoice: invoice.toJSON(), payment: payment.toJSON() };
+    }, {
+        body: t.Object({
+            amount: t.Union([t.Number(), t.String()], { examples: [50] }),
+            method: t.String({ examples: ['PAGO_MOVIL', 'TRANSFER', 'CASH'] }),
+            payment_date: t.Optional(t.String({ examples: ['2026-10-20'] })),
+            reference: t.Optional(t.String()),
+            bank: t.Optional(t.String()),
+            notes: t.Optional(t.String()),
+            amount_ves: t.Optional(t.Union([t.Number(), t.String()])),
+            exchange_rate: t.Optional(t.Union([t.Number(), t.String()])),
+            rate_source: t.Optional(RateSourceSchema),
+        }),
+        detail: {
+            tags: ['Admin - Billing'],
+            summary: 'Record a full or partial payment on an existing invoice (Admin/Board)',
+            description: 'Registers an approved payment allocated to the invoice. Rejects amounts above the remaining balance and PAID/CANCELLED invoices. When paid in Bolívares, amount stays the credited USD and amount_ves/exchange_rate/rate_source are kept as provenance.',
             security: [{ BearerAuth: [] }]
         }
     })
