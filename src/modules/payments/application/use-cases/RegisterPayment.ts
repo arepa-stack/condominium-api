@@ -13,7 +13,7 @@ import { IPaymentAllocationRepository as IBillingAllocationRepository } from '@/
 // And PaymentRepository from local module
 import { IPaymentRepository as ILocalPaymentRepository } from '../../domain/repository';
 import { IBuildingRepository } from '@/modules/buildings/domain/repository';
-import type { IExchangeRateService } from '@/core/domain/ports/IExchangeRateService';
+import type { IExchangeRateService, RateSource } from '@/core/domain/ports/IExchangeRateService';
 import type { PaymentCurrency } from '../../domain/entities/Payment';
 
 export interface RegisterPaymentDTO {
@@ -29,6 +29,17 @@ export interface RegisterPaymentDTO {
     bank?: string;
     proofUrl?: string;
     notes?: string;
+    // USD payment that was actually paid in Bolívares at a rate agreed at payment
+    // time (recorded by the administration): `amount` stays the credited USD and
+    // this keeps where it came from. Ignored for VES payments.
+    vesProvenance?: {
+        amountVes: number;
+        exchangeRate: number;
+        rateSource?: RateSource | null;
+    };
+    // Reference and bank are required for PAGO_MOVIL/TRANSFER unless the payment
+    // is recorded by the administration, which may not have them.
+    requireBankInfo?: boolean;
     // Allocation amounts are always in the CANONICAL base unit.
     allocations?: {
         invoiceId: string;
@@ -67,7 +78,14 @@ export class RegisterPayment {
         const payment = this.initializePayment(dto, conv);
         const createdPayment = await this.paymentRepository.create(payment);
 
-        await this.createAllocations(createdPayment.id, dto.allocations);
+        try {
+            await this.createAllocations(createdPayment.id, dto.allocations);
+        } catch (err) {
+            // Never leave a payment without the allocations it was registered with
+            // (allocations cascade on delete).
+            await this.paymentRepository.delete(createdPayment.id);
+            throw err;
+        }
 
         return createdPayment;
     }
@@ -76,6 +94,16 @@ export class RegisterPayment {
         const currency: PaymentCurrency = dto.currency ?? 'USD';
 
         // Physical USD (or any USD-denominated payment): amount is already canonical.
+        if (currency === 'USD' && dto.vesProvenance) {
+            return {
+                canonical: dto.amount,
+                original_currency: 'VES',
+                original_amount: dto.vesProvenance.amountVes,
+                exchange_rate: dto.vesProvenance.exchangeRate,
+                rate_source: dto.vesProvenance.rateSource ?? null,
+                rate_date: dto.paymentDate.toISOString().slice(0, 10),
+            };
+        }
         if (currency === 'USD') {
             return {
                 canonical: dto.amount,
@@ -135,7 +163,7 @@ export class RegisterPayment {
     }
 
     private validateBankFields(dto: RegisterPaymentDTO): void {
-        if (dto.method === PaymentMethod.CASH) return;
+        if (dto.method === PaymentMethod.CASH || dto.requireBankInfo === false) return;
         if (!dto.reference || dto.reference.trim().length === 0) {
             throw new DomainError(
                 'Reference is required for PAGO_MOVIL and TRANSFER payments',

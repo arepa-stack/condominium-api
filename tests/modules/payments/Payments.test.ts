@@ -56,6 +56,20 @@ describe("Payments Use Cases", () => {
             expect(mockAllocRepo.create).toHaveBeenCalled();
         });
 
+        test("should delete the payment when one of its allocations cannot be saved", async () => {
+            const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
+            mockPaymentRepo.create = mock(async (p) => new Payment({ ...p.toJSON(), id: "pay-1" }));
+            mockPaymentRepo.delete = mock(async () => {});
+            mockAllocRepo.create = mock(async () => { throw new Error("allocation insert failed"); });
+
+            await expect(useCase.execute({
+                ...validTransferDto(),
+                allocations: [{ invoiceId: "inv-1", amount: 50 }]
+            })).rejects.toThrow("allocation insert failed");
+
+            expect(mockPaymentRepo.delete).toHaveBeenCalledWith("pay-1");
+        });
+
         test("should throw if allocation exceeds payment", async () => {
             const useCase = new RegisterPayment(mockPaymentRepo, mockAllocRepo);
 
