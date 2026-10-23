@@ -26,8 +26,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_charge_concepts_building_name
     ON public.charge_concepts(building_id, lower(btrim(name)));
 
 -- Nullable on purpose: existing invoices are classified by a one-time script.
+-- NO ACTION (checked at statement end) blocks deleting a concept that still has
+-- invoices, but lets a building delete cascade to both its invoices and concepts.
 ALTER TABLE public.invoices
-    ADD COLUMN IF NOT EXISTS concept_id UUID REFERENCES public.charge_concepts(id) ON DELETE RESTRICT;
+    ADD COLUMN IF NOT EXISTS concept_id UUID REFERENCES public.charge_concepts(id) ON DELETE NO ACTION;
 
 CREATE INDEX IF NOT EXISTS idx_invoices_concept_period ON public.invoices(concept_id, period);
 
