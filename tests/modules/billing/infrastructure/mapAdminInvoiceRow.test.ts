@@ -70,4 +70,9 @@ describe('mapAdminInvoiceRow', () => {
         expect(result.unit).toEqual({ id: '', name: '', aliquot: null });
         expect(result.user).toBeNull();
     });
+
+    it('returns the charge concept id, or null when the invoice has none', () => {
+        expect(mapAdminInvoiceRow({ ...baseRow, concept_id: 'c-1', units: null }).concept_id).toBe('c-1');
+        expect(mapAdminInvoiceRow({ ...baseRow, units: null }).concept_id).toBeNull();
+    });
 });

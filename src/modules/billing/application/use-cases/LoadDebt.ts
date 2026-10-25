@@ -4,12 +4,14 @@ import { DomainError } from '@/core/errors';
 import { PaymentMethod } from '@/core/domain/enums';
 import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
 import type { RecordInvoicePayment } from '@/modules/payments/application/use-cases/RecordInvoicePayment';
+import type { ChargeConceptGuard } from '../services/ChargeConceptGuard';
 
 export interface LoadDebtDTO {
     unitId: string;
     amount: number;
     period: string;
     description?: string;
+    conceptId?: string;
     dueDate?: Date;
     receiptNumber?: string;
     status?: InvoiceStatus;
@@ -26,7 +28,8 @@ export interface LoadDebtDTO {
 export class LoadDebt {
     constructor(
         private invoiceRepository: IInvoiceRepository,
-        private recordInvoicePayment?: RecordInvoicePayment
+        private recordInvoicePayment?: RecordInvoicePayment,
+        private conceptGuard?: Pick<ChargeConceptGuard, 'assertBillableForUnit'>
     ) { }
 
     async execute(dto: LoadDebtDTO): Promise<Invoice> {
@@ -37,6 +40,13 @@ export class LoadDebt {
         const paidAmount = dto.status === InvoiceStatus.PAID ? dto.amount : (dto.paidAmount ?? 0);
         if (paidAmount > dto.amount) {
             throw new DomainError('Paid amount cannot exceed the invoice amount', 'VALIDATION_ERROR', 400);
+        }
+
+        if (dto.conceptId) {
+            if (!this.conceptGuard) {
+                throw new DomainError('Cannot check the charge concept of this debt', 'CONFIGURATION_ERROR', 500);
+            }
+            await this.conceptGuard.assertBillableForUnit(dto.conceptId, dto.unitId);
         }
 
         // Always stored unpaid: a received payment moves the balance through the
@@ -53,6 +63,7 @@ export class LoadDebt {
             type: InvoiceType.DEBT,
             description: dto.description,
             receipt_number: dto.receiptNumber,
+            concept_id: dto.conceptId ?? null,
         }));
 
         if (paidAmount <= 0) return invoice;

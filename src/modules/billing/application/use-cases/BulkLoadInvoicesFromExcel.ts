@@ -2,6 +2,7 @@ import { IInvoiceRepository } from '@/modules/billing/domain/repository';
 import { IUnitRepository } from '@/modules/buildings/domain/repository';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { Unit } from '@/modules/buildings/domain/entities/Unit';
+import type { ChargeConceptGuard } from '../services/ChargeConceptGuard';
 
 export interface ConfirmedInvoice {
     unitName: string;
@@ -16,23 +17,34 @@ export interface ConfirmedInvoice {
 export interface BulkLoadInvoicesRequest {
     invoices: ConfirmedInvoice[];
     buildingId: string;
+    /** Charge concept assigned to every imported invoice. */
+    conceptId?: string;
 }
 
 export class BulkLoadInvoicesFromExcel {
     constructor(
         private invoiceRepository: IInvoiceRepository,
-        private unitRepository: IUnitRepository
+        private unitRepository: IUnitRepository,
+        private conceptGuard?: Pick<ChargeConceptGuard, 'assertBillable'>
     ) { }
 
     async execute(request: BulkLoadInvoicesRequest): Promise<void> {
-        const { invoices, buildingId } = request;
+        const { invoices, buildingId, conceptId } = request;
+
+        // Checked before anything is written: a rejected concept leaves no units behind.
+        if (conceptId) {
+            if (!this.conceptGuard) {
+                throw new Error('Cannot check the charge concept of this import');
+            }
+            await this.conceptGuard.assertBillable(conceptId, buildingId);
+        }
 
         await this.syncUnits(invoices, buildingId);
 
         const unitsMap = await this.getUnitsNameMap(buildingId);
         const processedReceipts = await this.getExistingReceipts(buildingId);
 
-        const newInvoices = this.createInvoiceEntities(invoices, unitsMap, processedReceipts);
+        const newInvoices = this.createInvoiceEntities(invoices, unitsMap, processedReceipts, conceptId ?? null);
 
         if (newInvoices.length > 0) {
             await this.invoiceRepository.createBatch(newInvoices);
@@ -78,14 +90,15 @@ export class BulkLoadInvoicesFromExcel {
     private createInvoiceEntities(
         invoices: ConfirmedInvoice[],
         unitsMap: Map<string, string>,
-        existingReceipts: Set<string>
+        existingReceipts: Set<string>,
+        conceptId: string | null
     ): Invoice[] {
         return invoices
             .filter(item => !existingReceipts.has(item.receiptNumber))
-            .map(item => this.mapToInvoiceEntity(item, unitsMap));
+            .map(item => this.mapToInvoiceEntity(item, unitsMap, conceptId));
     }
 
-    private mapToInvoiceEntity(item: ConfirmedInvoice, unitsMap: Map<string, string>): Invoice {
+    private mapToInvoiceEntity(item: ConfirmedInvoice, unitsMap: Map<string, string>, conceptId: string | null): Invoice {
         const unitId = unitsMap.get(item.unitName.toLowerCase());
         if (!unitId) {
             throw new Error(`Unit ${item.unitName} not found after sync`);
@@ -100,7 +113,8 @@ export class BulkLoadInvoicesFromExcel {
             status: InvoiceStatus.PENDING,
             type: InvoiceType.DEBT,
             receipt_number: item.receiptNumber,
-            description: item.description ?? `Carga inicial - Recibo ${item.receiptNumber}`
+            description: item.description ?? `Carga inicial - Recibo ${item.receiptNumber}`,
+            concept_id: conceptId
         });
     }
 }

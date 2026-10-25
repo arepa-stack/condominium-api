@@ -35,6 +35,10 @@ const ChargeConceptSchema = t.Object({
 
 const TAG = 'Admin - Billing Concepts';
 
+// Validated here so a malformed id is a 422, not a database error.
+const BuildingParams = t.Object({ buildingId: t.String({ format: 'uuid' }) });
+const ConceptParams = t.Object({ buildingId: t.String({ format: 'uuid' }), conceptId: t.String({ format: 'uuid' }) });
+
 export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:buildingId/concepts' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
     .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'charge-concepts-access'))
@@ -44,6 +48,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         });
         return concepts.map(c => c.toJSON());
     }, {
+        params: BuildingParams,
         query: t.Object({ status: t.Optional(StatusSchema) }),
         response: t.Array(ChargeConceptSchema),
         detail: { tags: [TAG], summary: 'List charge concepts of a building' },
@@ -60,6 +65,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         set.status = 201;
         return concept.toJSON();
     }, {
+        params: BuildingParams,
         body: t.Object({
             name: t.String({ minLength: 1, maxLength: 120 }),
             kind: KindSchema,
@@ -80,6 +86,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         });
         return concept.toJSON();
     }, {
+        params: ConceptParams,
         body: t.Object({
             name: t.Optional(t.String({ minLength: 1, maxLength: 120 })),
             base_amount: t.Optional(NullableAmount),

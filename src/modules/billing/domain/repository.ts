@@ -17,6 +17,7 @@ export interface AdminInvoiceResult {
     receipt_number?: string;
     description: string | null;
     due_date: string | null;
+    concept_id: string | null;
     created_at: string;
     unit: {
         id: string;

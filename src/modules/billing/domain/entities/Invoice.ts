@@ -39,6 +39,8 @@ export interface InvoiceProps {
      * debt, etc.).
      */
     assessment_id?: string | null;
+    /** What the invoice charges for (`charge_concepts.id`). NULL until classified. */
+    concept_id?: string | null;
     created_at?: Date;
     updated_at?: Date;
 }
@@ -97,6 +99,7 @@ export class Invoice {
     get receipt_number(): string | undefined { return this.props.receipt_number; }
     get paid_amount(): number { return this.props.paid_amount || 0; }
     get assessment_id(): string | null | undefined { return this.props.assessment_id; }
+    get concept_id(): string | null { return this.props.concept_id ?? null; }
     get created_at(): Date { return this.props.created_at!; }
     get updated_at(): Date { return this.props.updated_at!; }
 
