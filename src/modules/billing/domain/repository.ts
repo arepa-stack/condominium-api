@@ -56,6 +56,7 @@ export interface FindAllInvoicesFilters {
     period?: string;
     type?: string;
     tag?: InvoiceTag;
+    concept_id?: string;
     page?: number | string;
     limit?: number | string;
 }
