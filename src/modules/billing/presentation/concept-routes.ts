@@ -8,6 +8,7 @@ import { CreateChargeConcept } from '../application/use-cases/CreateChargeConcep
 import { ListChargeConcepts } from '../application/use-cases/ListChargeConcepts';
 import { UpdateChargeConcept } from '../application/use-cases/UpdateChargeConcept';
 import { BillConcept } from '../application/use-cases/BillConcept';
+import { GetBillingSummary } from '../application/use-cases/GetBillingSummary';
 import { ChargeConceptGuard } from '../application/services/ChargeConceptGuard';
 import { SupabaseInvoiceRepository } from '../infrastructure/repositories/SupabaseInvoiceRepository';
 import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
@@ -19,8 +20,10 @@ const createChargeConcept = new CreateChargeConcept(conceptRepository, new Supab
 const listChargeConcepts = new ListChargeConcepts(conceptRepository);
 const updateChargeConcept = new UpdateChargeConcept(conceptRepository, decisionRepository);
 const unitRepository = new SupabaseUnitRepository();
+const invoiceRepository = new SupabaseInvoiceRepository();
+const getBillingSummary = new GetBillingSummary(conceptRepository, invoiceRepository);
 const billConcept = new BillConcept(
-    new SupabaseInvoiceRepository(),
+    invoiceRepository,
     unitRepository,
     new ChargeConceptGuard(conceptRepository, unitRepository)
 );
@@ -45,14 +48,39 @@ const ChargeConceptSchema = t.Object({
 
 const TAG = 'Admin - Billing Concepts';
 
+const TotalsSchema = {
+    invoice_count: t.Number(),
+    billed: t.Number(),
+    collected: t.Number(),
+    outstanding: t.Number(),
+    paid_count: t.Number(),
+    partial_count: t.Number(),
+    pending_count: t.Number(),
+};
+
+const BillingSummarySchema = t.Object({
+    groups: t.Array(t.Object({
+        concept_id: t.String(),
+        name: t.String(),
+        kind: KindSchema,
+        distribution: DistributionSchema,
+        status: StatusSchema,
+        period: t.Union([t.String(), t.Null()]),
+        goal: t.Union([t.Number(), t.Null()]),
+        progress: t.Union([t.Number(), t.Null()]),
+        ...TotalsSchema,
+    })),
+    unclassified: t.Object(TotalsSchema),
+});
+
 // Validated here so a malformed id is a 422, not a database error.
 const BuildingParams = t.Object({ buildingId: t.String({ format: 'uuid' }) });
 const ConceptParams = t.Object({ buildingId: t.String({ format: 'uuid' }), conceptId: t.String({ format: 'uuid' }) });
 
-export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:buildingId/concepts' })
+export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:buildingId' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
     .use(requireBuildingAccess((ctx) => ctx.params.buildingId, 'charge-concepts-access'))
-    .get('/', async ({ params, query }) => {
+    .get('/concepts', async ({ params, query }) => {
         const concepts = await listChargeConcepts.execute(params.buildingId, {
             status: query.status as ChargeConceptStatus | undefined,
         });
@@ -63,7 +91,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         response: t.Array(ChargeConceptSchema),
         detail: { tags: [TAG], summary: 'List charge concepts of a building' },
     })
-    .post('/', async ({ params, body, set }) => {
+    .post('/concepts', async ({ params, body, set }) => {
         const concept = await createChargeConcept.execute({
             building_id: params.buildingId,
             name: body.name,
@@ -86,7 +114,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         response: { 201: ChargeConceptSchema },
         detail: { tags: [TAG], summary: 'Create a charge concept' },
     })
-    .patch('/:conceptId', async ({ params, body }) => {
+    .patch('/concepts/:conceptId', async ({ params, body }) => {
         const concept = await updateChargeConcept.execute(params.buildingId, params.conceptId, {
             name: body.name,
             base_amount: body.base_amount,
@@ -107,7 +135,7 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         response: ChargeConceptSchema,
         detail: { tags: [TAG], summary: 'Update or close a charge concept (kind cannot change)' },
     })
-    .post('/:conceptId/invoices', async ({ params, body, set }) => {
+    .post('/concepts/:conceptId/invoices', async ({ params, body, set }) => {
         const result = await billConcept.execute({
             buildingId: params.buildingId,
             conceptId: params.conceptId,
@@ -145,5 +173,16 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
             tags: [TAG],
             summary: 'Bill a concept to every unit of the building for a period',
             description: 'amount defaults to the concept base amount: total to split for ALIQUOT/EQUAL, per-unit amount for FIXED. ALIQUOT rounds each unit to the cent; EQUAL adds up exactly. 409 if the concept was already billed for the period.',
+        },
+    })
+    .get('/billing-summary', async ({ params }) => {
+        return await getBillingSummary.execute(params.buildingId);
+    }, {
+        params: BuildingParams,
+        response: BillingSummarySchema,
+        detail: {
+            tags: [TAG],
+            summary: 'Billed and collected totals grouped by charge concept',
+            description: 'ORDINARY concepts are grouped by concept and month, EXTRAORDINARY concepts by concept with progress against the goal. Cancelled and petty cash invoices are left out; invoices without a concept are totalled as unclassified.',
         },
     });

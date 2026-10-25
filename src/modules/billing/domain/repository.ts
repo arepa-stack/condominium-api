@@ -2,6 +2,7 @@ import { Invoice } from './entities/Invoice';
 import { PaymentAllocation } from './entities/PaymentAllocation';
 import { CreditLedgerEntry } from './entities/CreditLedgerEntry';
 import { ChargeConcept, ChargeConceptStatus } from './entities/ChargeConcept';
+import { BillingRow } from './services/BillingSummary';
 import { InvoiceTag } from '@/core/domain/enums';
 import { PaginationFilters } from '@/core/domain/pagination';
 
@@ -80,6 +81,8 @@ export interface IInvoiceRepository {
     ): Promise<{ items: AdminInvoiceResult[]; total: number }>;
     update(invoice: Invoice): Promise<Invoice>;
     createBatch(invoices: Invoice[]): Promise<Invoice[]>;
+    /** Non-cancelled NORMAL invoices of a building, with only the columns the billing summary needs. */
+    findBillingRowsByBuilding(buildingId: string): Promise<BillingRow[]>;
 }
 
 export interface ICreditLedgerRepository {
