@@ -3,7 +3,7 @@ import { LoadDebt } from '@/modules/billing/application/use-cases/LoadDebt';
 import { Invoice, InvoiceStatus } from '@/modules/billing/domain/entities/Invoice';
 import { PaymentMethod } from '@/core/domain/enums';
 
-function setup(options: { failPayment?: boolean } = {}) {
+function setup(options: { failPayment?: boolean; rejectConcept?: boolean } = {}) {
     const stored = new Map<string, Invoice>();
     const paidAtCreation: number[] = [];
     const invoiceRepository: any = {
@@ -20,8 +20,14 @@ function setup(options: { failPayment?: boolean } = {}) {
             return { invoice, payment: { id: 'pay-1' } };
         }),
     };
-    const useCase = new LoadDebt(invoiceRepository, recordInvoicePayment);
-    return { useCase, invoiceRepository, recordInvoicePayment, stored, paidAtCreation };
+    const conceptGuard: any = {
+        assertBillableForUnit: mock(async () => {
+            if (options.rejectConcept) throw new Error('Charge concept not found in this building');
+            return { id: 'c-1' };
+        }),
+    };
+    const useCase = new LoadDebt(invoiceRepository, recordInvoicePayment, conceptGuard);
+    return { useCase, invoiceRepository, recordInvoicePayment, stored, paidAtCreation, conceptGuard };
 }
 
 const debt = { unitId: 'unit-34', amount: 114.18, period: '2026-10', description: 'Cuota Especial', actorId: 'admin-1' };
@@ -107,5 +113,30 @@ describe('LoadDebt', () => {
 
         await expect(useCase.execute({ ...debt, paidAmount: 200 })).rejects.toThrow('Paid amount cannot exceed the invoice amount');
         expect(invoiceRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('stores the charge concept after checking it belongs to the unit building', async () => {
+        const { useCase, conceptGuard } = setup();
+
+        const invoice = await useCase.execute({ ...debt, conceptId: 'c-1' });
+
+        expect(conceptGuard.assertBillableForUnit).toHaveBeenCalledWith('c-1', 'unit-34');
+        expect(invoice.concept_id).toBe('c-1');
+    });
+
+    it('does not create the invoice when the concept is rejected', async () => {
+        const { useCase, invoiceRepository } = setup({ rejectConcept: true });
+
+        await expect(useCase.execute({ ...debt, conceptId: 'c-9' })).rejects.toThrow('Charge concept not found in this building');
+        expect(invoiceRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps working without a concept', async () => {
+        const { useCase, conceptGuard } = setup();
+
+        const invoice = await useCase.execute(debt);
+
+        expect(conceptGuard.assertBillableForUnit).not.toHaveBeenCalled();
+        expect(invoice.concept_id).toBeNull();
     });
 });

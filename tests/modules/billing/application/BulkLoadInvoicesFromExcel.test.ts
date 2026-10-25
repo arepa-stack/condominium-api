@@ -3,7 +3,7 @@ import { BulkLoadInvoicesFromExcel, ConfirmedInvoice } from '@/modules/billing/a
 import { Invoice } from '@/modules/billing/domain/entities/Invoice';
 import { Unit } from '@/modules/buildings/domain/entities/Unit';
 
-function setup() {
+function setup(options: { rejectConcept?: boolean } = {}) {
     const created: Invoice[] = [];
     const invoiceRepository = {
         findAll: mock(async () => []),
@@ -13,8 +13,14 @@ function setup() {
         findByBuildingId: mock(async () => [new Unit({ id: 'unit-02', building_id: 'b1', name: '02' })]),
         createBatch: mock(async () => {}),
     };
-    const useCase = new BulkLoadInvoicesFromExcel(invoiceRepository as any, unitRepository as any);
-    return { useCase, created };
+    const conceptGuard = {
+        assertBillable: mock(async () => {
+            if (options.rejectConcept) throw new Error('Charge concept not found in this building');
+            return { id: 'c-1' };
+        }),
+    };
+    const useCase = new BulkLoadInvoicesFromExcel(invoiceRepository as any, unitRepository as any, conceptGuard as any);
+    return { useCase, created, unitRepository, conceptGuard };
 }
 
 const row: ConfirmedInvoice = {
@@ -44,5 +50,32 @@ describe('BulkLoadInvoicesFromExcel', () => {
         await useCase.execute({ buildingId: 'b1', invoices: [row] });
 
         expect(created[0].description).toBe('Carga inicial - Recibo 0926043001');
+    });
+
+    it('assigns the chosen charge concept to every imported invoice', async () => {
+        const { useCase, created, conceptGuard } = setup();
+
+        await useCase.execute({ buildingId: 'b1', conceptId: 'c-1', invoices: [row, { ...row, receiptNumber: '0926043002' }] });
+
+        expect(conceptGuard.assertBillable).toHaveBeenCalledWith('c-1', 'b1');
+        expect(created.map(i => i.concept_id)).toEqual(['c-1', 'c-1']);
+    });
+
+    it('creates no units and no invoices when the concept is rejected', async () => {
+        const { useCase, created, unitRepository } = setup({ rejectConcept: true });
+
+        await expect(useCase.execute({ buildingId: 'b1', conceptId: 'c-9', invoices: [{ ...row, unitName: '99', status: 'TO_BE_CREATED' }] }))
+            .rejects.toThrow('Charge concept not found in this building');
+        expect(unitRepository.createBatch).not.toHaveBeenCalled();
+        expect(created).toHaveLength(0);
+    });
+
+    it('leaves the concept empty when none is chosen', async () => {
+        const { useCase, created, conceptGuard } = setup();
+
+        await useCase.execute({ buildingId: 'b1', invoices: [row] });
+
+        expect(conceptGuard.assertBillable).not.toHaveBeenCalled();
+        expect(created[0].concept_id).toBeNull();
     });
 });

@@ -19,6 +19,8 @@ import { SupabaseUnitRepository } from '../../buildings/infrastructure/repositor
 import { ExcelJSInvoiceParser } from '../infrastructure/services/ExcelJSInvoiceParser';
 import { DinastiaNoticePdfParser } from '../infrastructure/services/DinastiaNoticePdfParser';
 import { ProcessInvoiceOverpayment } from '../application/use-cases/ProcessInvoiceOverpayment';
+import { ChargeConceptGuard } from '../application/services/ChargeConceptGuard';
+import { SupabaseChargeConceptRepository } from '../infrastructure/repositories/SupabaseChargeConceptRepository';
 import { SupabasePaymentRepository } from '@/modules/payments/infrastructure/repositories/SupabasePaymentRepository';
 import { RegisterPayment } from '@/modules/payments/application/use-cases/RegisterPayment';
 import { ApprovePayment } from '@/modules/payments/application/use-cases/ApprovePayment';
@@ -54,7 +56,8 @@ const recordInvoicePayment = new RecordInvoicePayment(
         new SupabasePettyCashRepository()
     )
 );
-const loadDebt = new LoadDebt(invoiceRepository, recordInvoicePayment);
+const conceptGuard = new ChargeConceptGuard(new SupabaseChargeConceptRepository(), unitRepository);
+const loadDebt = new LoadDebt(invoiceRepository, recordInvoicePayment, conceptGuard);
 
 const toNumber = (value: number | string | undefined | null) =>
     value === undefined || value === null || value === '' ? undefined : (typeof value === 'string' ? parseFloat(value) : value);
@@ -76,7 +79,7 @@ const getInvoicePayments = new GetInvoicePayments(allocationRepository);
 const getPaymentInvoices = new GetPaymentInvoices(allocationRepository);
 const previewInvoices = new PreviewInvoicesFromExcel(unitRepository, excelParser);
 const previewPdfInvoices = new PreviewInvoicesFromExcel(unitRepository, new DinastiaNoticePdfParser());
-const bulkLoadInvoices = new BulkLoadInvoicesFromExcel(invoiceRepository, unitRepository);
+const bulkLoadInvoices = new BulkLoadInvoicesFromExcel(invoiceRepository, unitRepository, conceptGuard);
 
 const InvoiceSchema = t.Object({
     id: t.String(),
@@ -89,6 +92,7 @@ const InvoiceSchema = t.Object({
     status: t.String(),
     tag: t.Optional(t.String()),
     paid_amount: t.Optional(t.Union([t.Number(), t.Null()])),
+    concept_id: t.Optional(t.Union([t.String(), t.Null()])),
     due_date: t.Optional(t.Any()),
     created_at: t.Optional(t.Any()),
     updated_at: t.Optional(t.Any())
@@ -106,6 +110,7 @@ const AdminInvoiceSchema = t.Object({
     receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
     description: t.Optional(t.Union([t.String(), t.Null()])),
     due_date: t.Optional(t.Union([t.String(), t.Null()])),
+    concept_id: t.Optional(t.Union([t.String(), t.Null()])),
     created_at: t.Optional(t.String()),
     unit: t.Object({
         id: t.Optional(t.String()),
@@ -434,7 +439,8 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
                 description: item.description,
                 status: item.status as 'EXISTS' | 'TO_BE_CREATED'
             })),
-            buildingId: query.building_id
+            buildingId: query.building_id,
+            conceptId: body.concept_id ?? undefined
         });
 
         return { success: true };
@@ -443,6 +449,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             building_id: t.String()
         }),
         body: t.Object({
+            concept_id: t.Optional(t.Union([t.String({ format: 'uuid' }), t.Null()])),
             invoices: t.Array(t.Object({
                 unit_name: t.String(),
                 amount: t.Number(),
@@ -470,6 +477,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             amount: typeof body.amount === 'string' ? parseFloat(body.amount) : body.amount,
             period: body.period,
             description: body.description,
+            conceptId: body.concept_id ?? undefined,
             dueDate: body.due_date ? new Date(body.due_date) : undefined,
             receiptNumber: body.receipt_number?.trim() || undefined,
             status: body.status as InvoiceStatus | undefined,
@@ -490,6 +498,7 @@ export const billingRoutes = new Elysia({ prefix: '/billing' })
             amount: t.Union([t.Number(), t.String()]),
             period: t.String({ examples: ['2026-01'] }),
             description: t.String(),
+            concept_id: t.Optional(t.Union([t.String({ format: 'uuid' }), t.Null()])),
             due_date: t.Optional(t.String()),
             receipt_number: t.Optional(t.Union([t.String(), t.Null()])),
             status: t.Optional(t.String()),

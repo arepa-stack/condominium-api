@@ -22,6 +22,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             receipt_number: data.receipt_number as string | undefined,
             paid_amount: parseFloat(data.paid_amount as string || '0'),
             assessment_id: (data.assessment_id as string | null) ?? null,
+            concept_id: (data.concept_id as string | null) ?? null,
             created_at: data.created_at ? new Date(data.created_at as string) : undefined,
             updated_at: data.updated_at ? new Date(data.updated_at as string) : undefined
         });
@@ -43,6 +44,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
             description: invoice.description,
             receipt_number: invoice.receipt_number,
             assessment_id: invoice.assessment_id ?? null,
+            concept_id: invoice.concept_id,
             updated_at: invoice.updated_at
         };
     }
@@ -385,6 +387,7 @@ export function mapAdminInvoiceRow(inv: any): AdminInvoiceResult {
         receipt_number: inv.receipt_number as string | undefined,
         description: (inv.description as string | null) ?? null,
         due_date: (inv.due_date as string | null) ?? null,
+        concept_id: (inv.concept_id as string | null) ?? null,
         created_at: inv.created_at as string,
         unit: {
             id: unit?.id ?? '',
