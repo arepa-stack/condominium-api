@@ -110,6 +110,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                 if (filters?.period) q = q.eq('period', filters.period);
                 if (filters?.type) q = q.eq('type', filters.type);
                 if (filters?.tag) q = q.eq('tag', filters.tag);
+                if (filters?.concept_id) q = q.eq('concept_id', filters.concept_id);
                 return q;
             };
 
@@ -146,6 +147,7 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
         if (filters?.period) query = query.eq('period', filters.period);
         if (filters?.type) query = query.eq('type', filters.type);
         if (filters?.tag) query = query.eq('tag', filters.tag);
+        if (filters?.concept_id) query = query.eq('concept_id', filters.concept_id);
 
         const { data, error } = await query;
         if (error) throw new DomainError('Error fetching invoices: ' + error.message, 'DB_ERROR', 500);

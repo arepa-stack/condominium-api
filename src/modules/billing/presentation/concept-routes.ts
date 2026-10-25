@@ -7,6 +7,10 @@ import { SupabaseDecisionRepository } from '@/modules/decisions/infrastructure/r
 import { CreateChargeConcept } from '../application/use-cases/CreateChargeConcept';
 import { ListChargeConcepts } from '../application/use-cases/ListChargeConcepts';
 import { UpdateChargeConcept } from '../application/use-cases/UpdateChargeConcept';
+import { BillConcept } from '../application/use-cases/BillConcept';
+import { ChargeConceptGuard } from '../application/services/ChargeConceptGuard';
+import { SupabaseInvoiceRepository } from '../infrastructure/repositories/SupabaseInvoiceRepository';
+import { SupabaseUnitRepository } from '@/modules/buildings/infrastructure/repositories/SupabaseUnitRepository';
 import { ChargeConceptKind, ChargeConceptStatus, ChargeDistribution } from '../domain/entities/ChargeConcept';
 
 const conceptRepository = new SupabaseChargeConceptRepository();
@@ -14,6 +18,12 @@ const decisionRepository = new SupabaseDecisionRepository();
 const createChargeConcept = new CreateChargeConcept(conceptRepository, new SupabaseBuildingRepository(), decisionRepository);
 const listChargeConcepts = new ListChargeConcepts(conceptRepository);
 const updateChargeConcept = new UpdateChargeConcept(conceptRepository, decisionRepository);
+const unitRepository = new SupabaseUnitRepository();
+const billConcept = new BillConcept(
+    new SupabaseInvoiceRepository(),
+    unitRepository,
+    new ChargeConceptGuard(conceptRepository, unitRepository)
+);
 
 const KindSchema = t.Union([t.Literal('ORDINARY'), t.Literal('EXTRAORDINARY')]);
 const DistributionSchema = t.Union([t.Literal('ALIQUOT'), t.Literal('EQUAL'), t.Literal('FIXED')]);
@@ -96,4 +106,44 @@ export const chargeConceptRoutes = new Elysia({ prefix: '/billing/buildings/:bui
         }),
         response: ChargeConceptSchema,
         detail: { tags: [TAG], summary: 'Update or close a charge concept (kind cannot change)' },
+    })
+    .post('/:conceptId/invoices', async ({ params, body, set }) => {
+        const result = await billConcept.execute({
+            buildingId: params.buildingId,
+            conceptId: params.conceptId,
+            period: body.period,
+            amount: body.amount,
+            description: body.description,
+            dueDate: body.due_date ? new Date(body.due_date) : undefined,
+        });
+        set.status = 201;
+        return {
+            concept_id: params.conceptId,
+            period: body.period,
+            count: result.invoices.length,
+            total: result.total,
+            invoices: result.invoices.map(inv => ({ id: inv.id, unit_id: inv.unit_id ?? null, amount: inv.amount })),
+        };
+    }, {
+        params: ConceptParams,
+        body: t.Object({
+            period: t.String({ examples: ['2026-10'] }),
+            amount: t.Optional(t.Number({ exclusiveMinimum: 0 })),
+            description: t.Optional(t.String({ maxLength: 500 })),
+            due_date: t.Optional(t.String({ format: 'date' })),
+        }),
+        response: {
+            201: t.Object({
+                concept_id: t.String(),
+                period: t.String(),
+                count: t.Number(),
+                total: t.Number(),
+                invoices: t.Array(t.Object({ id: t.String(), unit_id: t.Union([t.String(), t.Null()]), amount: t.Number() })),
+            }),
+        },
+        detail: {
+            tags: [TAG],
+            summary: 'Bill a concept to every unit of the building for a period',
+            description: 'amount defaults to the concept base amount: total to split for ALIQUOT/EQUAL, per-unit amount for FIXED. ALIQUOT rounds each unit to the cent; EQUAL adds up exactly. 409 if the concept was already billed for the period.',
+        },
     });
