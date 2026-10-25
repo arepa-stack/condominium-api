@@ -1,4 +1,5 @@
 import { IInvoiceRepository, FindAllInvoicesFilters, AdminInvoiceResult } from '../../domain/repository';
+import { BillingRow } from '../../domain/services/BillingSummary';
 import { PaginationFilters, toRange } from '@/core/domain/pagination';
 import { Invoice, InvoiceProps, InvoiceStatus, InvoiceType } from '../../domain/entities/Invoice';
 import { InvoiceTag } from '@/core/domain/enums';
@@ -165,6 +166,31 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
 
         if (error) throw new DomainError('Error updating invoice', 'DB_ERROR', 500);
         return this.toDomain(data);
+    }
+
+    async findBillingRowsByBuilding(buildingId: string): Promise<BillingRow[]> {
+        const columns = 'id, concept_id, period, amount, paid_amount, status';
+        // Unit invoices may lack building_id, so they are reached through the unit;
+        // building-level invoices through building_id. Petty cash stays out of the summary.
+        const [direct, viaUnit] = await Promise.all([
+            fetchAllPages(() => supabase.from('invoices').select(columns)
+                .eq('building_id', buildingId).eq('tag', InvoiceTag.NORMAL).neq('status', 'CANCELLED')),
+            fetchAllPages(() => supabase.from('invoices').select(`${columns}, units!inner(building_id)`)
+                .eq('units.building_id', buildingId).eq('tag', InvoiceTag.NORMAL).neq('status', 'CANCELLED')),
+        ]);
+
+        const rows = new Map<string, BillingRow>();
+        for (const r of [...direct, ...viaUnit]) {
+            rows.set(r.id as string, {
+                concept_id: (r.concept_id as string | null) ?? null,
+                period: r.period as string,
+                // NUMERIC columns arrive as strings from PostgREST
+                amount: Number(r.amount),
+                paid_amount: Number(r.paid_amount ?? 0),
+                status: r.status as string,
+            });
+        }
+        return [...rows.values()];
     }
 
     async createBatch(invoices: Invoice[]): Promise<Invoice[]> {
@@ -404,4 +430,17 @@ export function mapAdminInvoiceRow(inv: any): AdminInvoiceResult {
             phone: displayUser.phone ?? null
         } : null
     };
+}
+
+const PAGE_SIZE = 1000; // PostgREST max_rows
+
+/** Reads every row of a query in pages ordered by id, past the PostgREST row limit. */
+async function fetchAllPages(build: () => any): Promise<Record<string, unknown>[]> {
+    const all: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+        const { data, error } = await build().order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1);
+        if (error) throw new DomainError('Error fetching billing rows: ' + error.message, 'DB_ERROR', 500);
+        all.push(...(data ?? []));
+        if (!data || data.length < PAGE_SIZE) return all;
+    }
 }
