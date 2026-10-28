@@ -46,6 +46,24 @@ describe('UpdateBuilding Use Case', () => {
         expect(updated.address).toBe('New Address');
     });
 
+    it('should normalize the building code and reject one already in use', async () => {
+        await userRepo.create(new User({
+            id: 'admin-1',
+            email: 'admin@test.com',
+            name: 'Admin',
+            app_role: 'admin' as const,
+            status: UserStatus.ACTIVE
+        }));
+        await buildingRepo.create(new Building({ id: 'building-1', name: 'A', address: 'A', building_code: 'COND-63178E55' }));
+        await buildingRepo.create(new Building({ id: 'building-2', name: 'B', address: 'B', building_code: 'COND-TAKEN' }));
+
+        const updated = await updateBuilding.execute({ id: 'building-1', building_code: ' res-norte ', updaterId: 'admin-1' });
+        expect(updated.building_code).toBe('RES-NORTE');
+
+        await expect(updateBuilding.execute({ id: 'building-1', building_code: 'cond-taken', updaterId: 'admin-1' })).rejects.toThrow('already in use');
+        await expect(updateBuilding.execute({ id: 'building-1', building_code: 'bad code!', updaterId: 'admin-1' })).rejects.toThrow();
+    });
+
     it('should fail when requested by non-admin', async () => {
         const resident = new User({
             id: 'resident-1',

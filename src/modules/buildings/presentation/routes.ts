@@ -224,7 +224,8 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
             updaterId: user.id,
             name: body.name,
             address: body.address,
-            default_rate_source: body.default_rate_source
+            default_rate_source: body.default_rate_source,
+            building_code: body.building_code
         });
     }, {
         body: t.Object({
@@ -235,6 +236,7 @@ export const buildingAdminRoutes = new Elysia({ prefix: '/buildings' })
                 t.Literal('dolar_oficial'),
                 t.Literal('dolar_paralelo'),
             ])),
+            building_code: t.Optional(t.String({ minLength: 3, maxLength: 30 })),
         }),
         response: BuildingSchema,
         detail: {
