@@ -1,4 +1,5 @@
 import { Config } from '@/core/config';
+import { ValidationError } from '@/core/errors';
 import type { RateSource } from '@/core/domain/ports/IExchangeRateService';
 
 export interface BuildingProps {
@@ -51,6 +52,16 @@ export class Building {
             throw new Error('Building address cannot be empty');
         }
         this.props.address = address;
+        this.props.updated_at = new Date();
+    }
+
+    // Changing it invalidates every printed QR that points to the old code.
+    updateBuildingCode(code: string): void {
+        const normalized = code.trim().toUpperCase();
+        if (!/^[A-Z0-9-]{3,30}$/.test(normalized)) {
+            throw new ValidationError('Building code must be 3-30 characters: letters, numbers or hyphens');
+        }
+        this.props.building_code = normalized;
         this.props.updated_at = new Date();
     }
 
