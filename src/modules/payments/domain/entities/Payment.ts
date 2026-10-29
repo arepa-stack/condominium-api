@@ -92,6 +92,27 @@ export class Payment {
         this.props.updated_at = new Date();
     }
 
+    /**
+     * Currency the approver confirmed the resident paid in. The canonical USD `amount` (and the
+     * allocations built on it) stays as reported; VES only records the Bs side and its rate.
+     */
+    setPaidCurrency(currency: PaymentCurrency, amountVes?: number, exchangeRate?: number): void {
+        if (currency === 'VES') {
+            this.props.original_currency = 'VES';
+            this.props.original_amount = amountVes;
+            this.props.exchange_rate = exchangeRate;
+            this.props.rate_date = this.props.payment_date.toISOString().slice(0, 10);
+        } else {
+            this.props.original_currency = 'USD';
+            this.props.original_amount = this.props.amount;
+            this.props.exchange_rate = null;
+            this.props.rate_date = null;
+        }
+        // The rate was typed or confirmed by the approver, not taken from a source.
+        this.props.rate_source = null;
+        this.props.updated_at = new Date();
+    }
+
     reject(processorId: string, notes?: string): void {
         if (this.props.status === PaymentStatus.REJECTED) return;
         this.props.status = PaymentStatus.REJECTED;

@@ -98,6 +98,13 @@ const InvoiceSchema = t.Object({
     updated_at: t.Optional(t.Any())
 });
 
+// Currency a payment was received in; amount_ves is the Bs share of this invoice (null for USD).
+const PaidCurrencyFields = {
+    original_currency: t.Optional(t.Union([t.Literal('USD'), t.Literal('VES')])),
+    exchange_rate: t.Optional(t.Union([t.Number(), t.Null()])),
+    amount_ves: t.Optional(t.Union([t.Number(), t.Null()])),
+};
+
 const AdminInvoiceSchema = t.Object({
     id: t.String(),
     amount: t.Number(),
@@ -125,7 +132,15 @@ const AdminInvoiceSchema = t.Object({
             email: t.Optional(t.Union([t.String(), t.Null()])),
             phone: t.Optional(t.Union([t.String(), t.Null()]))
         })
-    ])
+    ]),
+    // Approved payments applied to the invoice and how each was paid.
+    payments: t.Optional(t.Array(t.Object({
+        payment_id: t.String(),
+        method: t.String(),
+        payment_date: t.String(),
+        allocated_amount: t.Number(),
+        ...PaidCurrencyFields,
+    })))
 });
 
 const AllocationSchema = t.Object({
@@ -179,6 +194,7 @@ const InvoicePaymentSchema = t.Object({
     allocated_amount: t.Number(),
     allocation_id: t.String(),
     allocated_at: t.Any(),
+    ...PaidCurrencyFields,
     user: t.Optional(t.Object({
         id: t.String(),
         name: t.String()

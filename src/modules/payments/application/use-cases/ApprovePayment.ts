@@ -1,9 +1,9 @@
 import { IPaymentRepository } from '../../domain/repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { IPaymentAllocationRepository, IInvoiceRepository } from '@/modules/billing/domain/repository';
-import { ForbiddenError, NotFoundError } from '@/core/errors';
+import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
-import { Payment } from '../../domain/entities/Payment';
+import { Payment, type PaymentCurrency } from '../../domain/entities/Payment';
 import {
     PaymentStatus,
     InvoiceTag,
@@ -17,6 +17,11 @@ export interface ApprovePaymentDTO {
     paymentId: string;
     approverId: string;
     notes?: string;
+    /** Currency the approver confirms; omitted keeps what the resident reported. */
+    currency?: PaymentCurrency;
+    /** Required with currency VES: Bs received and the Bs-per-USD rate applied. */
+    amountVes?: number;
+    exchangeRate?: number;
 }
 
 export interface RejectPaymentDTO {
@@ -35,7 +40,10 @@ export class ApprovePayment {
         private pettyCashRepo: PettyCashRepository
     ) { }
 
-    async approve({ paymentId, approverId, notes }: ApprovePaymentDTO): Promise<void> {
+    async approve({ paymentId, approverId, notes, currency, amountVes, exchangeRate }: ApprovePaymentDTO): Promise<void> {
+        if (currency === 'VES' && !(amountVes! > 0 && exchangeRate! > 0)) {
+            throw new ValidationError('A VES approval needs the Bs amount and the exchange rate');
+        }
         const { payment } = await this.loadAndAuthorize(paymentId, approverId, 'approve');
 
         // Idempotency: short-circuit on retry. Without this, the allocation
@@ -71,6 +79,7 @@ export class ApprovePayment {
             await this.processOverpayment.assertInvoiceCanAcceptPayment(alloc.invoice_id);
         }
 
+        if (currency) payment.setPaidCurrency(currency, amountVes, exchangeRate);
         payment.approve(approverId, notes);
         await this.paymentRepo.update(payment);
 
