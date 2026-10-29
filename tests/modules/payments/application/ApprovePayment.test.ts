@@ -314,6 +314,38 @@ describe('ApprovePayment Use Case', () => {
             expect(invoicePre.status).toBe(InvoiceStatus.PAID);
         });
 
+        it('approving in VES records the Bs side and notes it on the invoice, USD amount unchanged', async () => {
+            await paymentRepo.create(buildPayment(100));
+            const allocation = new PaymentAllocation({ id: 'alloc-1', payment_id: 'payment-1', invoice_id: 'invoice-1', amount: 100 });
+            const invoicePre = new Invoice({
+                id: 'invoice-1', unit_id: 'unit-1', building_id: 'building-1', amount: 100, paid_amount: 0,
+                period: '2026-01', issue_date: new Date(), status: InvoiceStatus.PENDING, type: InvoiceType.DEBT,
+                description: 'Cuota'
+            });
+            (allocationRepo.findByPaymentId as ReturnType<typeof mock>).mockImplementation(async () => [allocation]);
+            (invoiceRepo.findById as ReturnType<typeof mock>).mockImplementation(async () => invoicePre);
+
+            await approvePayment.approve({
+                paymentId: 'payment-1', approverId: 'admin-1', currency: 'VES', amountVes: 100500, exchangeRate: 1005
+            });
+
+            const updated = await paymentRepo.findById('payment-1');
+            expect(updated?.amount).toBe(100);
+            expect(updated?.original_currency).toBe('VES');
+            expect(updated?.original_amount).toBe(100500);
+            expect(updated?.exchange_rate).toBe(1005);
+            expect(invoicePre.status).toBe(InvoiceStatus.PAID);
+            expect(invoicePre.description).toContain('Pagado en Bs: 100.500,00 Bs. (Tasa: 1005.0000 Bs.');
+        });
+
+        it('rejects a VES approval without Bs amount or rate', async () => {
+            await paymentRepo.create(buildPayment(100));
+            await expect(
+                approvePayment.approve({ paymentId: 'payment-1', approverId: 'admin-1', currency: 'VES', amountVes: 100500 })
+            ).rejects.toThrow('exchange rate');
+            expect((await paymentRepo.findById('payment-1'))?.status).toBe(PaymentStatus.PENDING);
+        });
+
         it('should NOT create a credit entry for exact payment (100 on 100)', async () => {
             // payment.amount matches allocation.amount exactly — zero surplus,
             // zero invoice overpayment → no credit entries of any kind.

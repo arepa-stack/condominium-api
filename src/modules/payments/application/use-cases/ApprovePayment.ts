@@ -1,9 +1,9 @@
 import { IPaymentRepository } from '../../domain/repository';
 import { IUserRepository } from '@/modules/users/domain/repository';
 import { IPaymentAllocationRepository, IInvoiceRepository } from '@/modules/billing/domain/repository';
-import { ForbiddenError, NotFoundError } from '@/core/errors';
+import { ForbiddenError, NotFoundError, ValidationError } from '@/core/errors';
 import { ProcessInvoiceOverpayment } from '@/modules/billing/application/use-cases/ProcessInvoiceOverpayment';
-import { Payment } from '../../domain/entities/Payment';
+import { Payment, type PaymentCurrency } from '../../domain/entities/Payment';
 import {
     PaymentStatus,
     InvoiceTag,
@@ -17,6 +17,11 @@ export interface ApprovePaymentDTO {
     paymentId: string;
     approverId: string;
     notes?: string;
+    /** Currency the approver confirms; omitted keeps what the resident reported. */
+    currency?: PaymentCurrency;
+    /** Required with currency VES: Bs received and the Bs-per-USD rate applied. */
+    amountVes?: number;
+    exchangeRate?: number;
 }
 
 export interface RejectPaymentDTO {
@@ -35,7 +40,10 @@ export class ApprovePayment {
         private pettyCashRepo: PettyCashRepository
     ) { }
 
-    async approve({ paymentId, approverId, notes }: ApprovePaymentDTO): Promise<void> {
+    async approve({ paymentId, approverId, notes, currency, amountVes, exchangeRate }: ApprovePaymentDTO): Promise<void> {
+        if (currency === 'VES' && !(amountVes! > 0 && exchangeRate! > 0)) {
+            throw new ValidationError('A VES approval needs the Bs amount and the exchange rate');
+        }
         const { payment } = await this.loadAndAuthorize(paymentId, approverId, 'approve');
 
         // Idempotency: short-circuit on retry. Without this, the allocation
@@ -71,6 +79,7 @@ export class ApprovePayment {
             await this.processOverpayment.assertInvoiceCanAcceptPayment(alloc.invoice_id);
         }
 
+        if (currency) payment.setPaidCurrency(currency, amountVes, exchangeRate);
         payment.approve(approverId, notes);
         await this.paymentRepo.update(payment);
 
@@ -96,6 +105,10 @@ export class ApprovePayment {
                     payment,
                     approverId
                 );
+            }
+
+            if (payment.original_currency === 'VES' && payment.exchange_rate) {
+                await this.notePaidInBs(alloc.invoice_id, alloc.amount, payment);
             }
 
             totalAllocated += alloc.amount;
@@ -135,6 +148,28 @@ export class ApprovePayment {
         const { payment } = await this.loadAndAuthorize(paymentId, approverId, 'reject');
         payment.reject(approverId, notes);
         await this.paymentRepo.update(payment);
+    }
+
+    /**
+     * The admin billing list and invoice receipt tell Bs from cash by the invoice description
+     * ("Pagado en Bs: …", the format the admin writes for invoices paid on creation). Without it a
+     * Pago Móvil approved here showed as "Efectivo (Dólares)".
+     * ponytail: description text as the currency flag; read the invoice's payments instead once the
+     * invoice list returns them.
+     */
+    private async notePaidInBs(invoiceId: string, allocated: number, payment: Payment): Promise<void> {
+        const invoice = await this.invoiceRepo.findById(invoiceId);
+        if (!invoice || /Pagado en Bs:|Abono en Bs:/.test(invoice.description ?? '')) return;
+        const rate = payment.exchange_rate!;
+        // The whole Bs amount when the payment went to this invoice only, else this allocation's share.
+        const bs = allocated >= payment.amount && payment.original_amount
+            ? payment.original_amount
+            : Math.round(allocated * rate * 100) / 100;
+        const bsText = bs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        invoice.appendToDescription(
+            `Pagado en Bs: ${bsText} Bs. (Tasa: ${rate.toFixed(4)} Bs. - Fecha: ${payment.rate_date})`
+        );
+        await this.invoiceRepo.update(invoice);
     }
 
     /**
