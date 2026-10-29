@@ -314,7 +314,7 @@ describe('ApprovePayment Use Case', () => {
             expect(invoicePre.status).toBe(InvoiceStatus.PAID);
         });
 
-        it('approving in VES records the Bs side and notes it on the invoice, USD amount unchanged', async () => {
+        it('approving in VES records the Bs side on the payment, USD amount unchanged', async () => {
             await paymentRepo.create(buildPayment(100));
             const allocation = new PaymentAllocation({ id: 'alloc-1', payment_id: 'payment-1', invoice_id: 'invoice-1', amount: 100 });
             const invoicePre = new Invoice({
@@ -335,7 +335,7 @@ describe('ApprovePayment Use Case', () => {
             expect(updated?.original_amount).toBe(100500);
             expect(updated?.exchange_rate).toBe(1005);
             expect(invoicePre.status).toBe(InvoiceStatus.PAID);
-            expect(invoicePre.description).toContain('Pagado en Bs: 100.500,00 Bs. (Tasa: 1005.0000 Bs.');
+            expect(invoicePre.description).toBe('Cuota'); // currency lives on the payment, not in the text
         });
 
         it('rejects a VES approval without Bs amount or rate', async () => {

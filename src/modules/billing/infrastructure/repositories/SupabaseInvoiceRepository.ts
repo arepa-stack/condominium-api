@@ -1,4 +1,4 @@
-import { IInvoiceRepository, FindAllInvoicesFilters, AdminInvoiceResult } from '../../domain/repository';
+import { IInvoiceRepository, FindAllInvoicesFilters, AdminInvoiceResult, InvoicePaymentCurrency } from '../../domain/repository';
 import { BillingRow } from '../../domain/services/BillingSummary';
 import { PaginationFilters, toRange } from '@/core/domain/pagination';
 import { Invoice, InvoiceProps, InvoiceStatus, InvoiceType } from '../../domain/entities/Invoice';
@@ -229,7 +229,8 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                     is_primary,
                     profiles (id, name, email, phone)
                 )
-            )
+            ),
+            ${PAYMENTS_SELECT}
         `;
 
         const selectStrInner = `
@@ -243,7 +244,8 @@ export class SupabaseInvoiceRepository implements IInvoiceRepository {
                     is_primary,
                     profiles (id, name, email, phone)
                 )
-            )
+            ),
+            ${PAYMENTS_SELECT}
         `;
 
         let data: any[] = [];
@@ -428,9 +430,36 @@ export function mapAdminInvoiceRow(inv: any): AdminInvoiceResult {
             name: displayUser.name as string,
             email: displayUser.email ?? null,
             phone: displayUser.phone ?? null
-        } : null
+        } : null,
+        payments: ((inv.payment_allocations ?? []) as { amount: number | string; payments: any }[])
+            .filter(a => a.payments?.status === 'APPROVED')
+            .map(a => mapInvoicePaymentCurrency(Number(a.amount), a.payments))
     };
 }
+
+/**
+ * One allocation as "how this invoice was paid". The Bs share is the payment's whole Bs amount
+ * when all of it went to this invoice (keeps the exact figure the resident sent), else
+ * allocation × rate.
+ */
+export function mapInvoicePaymentCurrency(allocated: number, payment: any): InvoicePaymentCurrency {
+    // NUMERIC columns arrive as strings from PostgREST
+    const rate = payment.exchange_rate != null ? Number(payment.exchange_rate) : null;
+    const isVes = payment.original_currency === 'VES' && !!rate;
+    const whole = payment.original_amount != null && allocated >= Number(payment.amount) - 0.001;
+    return {
+        payment_id: payment.id,
+        method: payment.method,
+        payment_date: payment.payment_date,
+        allocated_amount: allocated,
+        original_currency: isVes ? 'VES' : 'USD',
+        exchange_rate: isVes ? rate : null,
+        amount_ves: !isVes ? null : whole ? Number(payment.original_amount) : Math.round(allocated * rate! * 100) / 100,
+    };
+}
+
+// Every payment applied to each invoice; mapAdminInvoiceRow keeps the approved ones.
+const PAYMENTS_SELECT = `payment_allocations (amount, payments (id, status, method, payment_date, amount, original_currency, original_amount, exchange_rate))`;
 
 const PAGE_SIZE = 1000; // PostgREST max_rows
 

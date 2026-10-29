@@ -76,3 +76,39 @@ describe('mapAdminInvoiceRow', () => {
         expect(mapAdminInvoiceRow({ ...baseRow, units: null }).concept_id).toBeNull();
     });
 });
+
+describe('mapAdminInvoiceRow payments', () => {
+    const pay = (over: object) => ({
+        id: 'pay-1', status: 'APPROVED', method: 'PAGO_MOVIL', payment_date: '2026-10-28',
+        amount: '114.18', original_currency: 'VES', original_amount: '115000', exchange_rate: '1007.1816', ...over,
+    });
+
+    it('lists each approved payment with its Bs share, so two Bs payments at different rates both show', () => {
+        const result = mapAdminInvoiceRow({
+            ...baseRow, units: null,
+            payment_allocations: [
+                { amount: '114.18', payments: pay({}) },
+                { amount: '20', payments: pay({ id: 'pay-2', amount: '50', original_amount: '50000', exchange_rate: '1000' }) },
+                { amount: '10', payments: pay({ id: 'pay-3', status: 'PENDING' }) },
+            ],
+        });
+
+        expect(result.payments).toEqual([
+            // whole payment on this invoice: the exact Bs the resident sent
+            { payment_id: 'pay-1', method: 'PAGO_MOVIL', payment_date: '2026-10-28', allocated_amount: 114.18,
+              original_currency: 'VES', exchange_rate: 1007.1816, amount_ves: 115000 },
+            // part of a payment: allocation × rate
+            { payment_id: 'pay-2', method: 'PAGO_MOVIL', payment_date: '2026-10-28', allocated_amount: 20,
+              original_currency: 'VES', exchange_rate: 1000, amount_ves: 20000 },
+        ]);
+    });
+
+    it('marks USD payments with no Bs amount, and an invoice without payments has none', () => {
+        const usd = mapAdminInvoiceRow({
+            ...baseRow, units: null,
+            payment_allocations: [{ amount: 10, payments: pay({ method: 'CASH', amount: 10, original_currency: 'USD', original_amount: 10, exchange_rate: null }) }],
+        });
+        expect(usd.payments[0]).toMatchObject({ original_currency: 'USD', exchange_rate: null, amount_ves: null });
+        expect(mapAdminInvoiceRow({ ...baseRow, units: null }).payments).toEqual([]);
+    });
+});
