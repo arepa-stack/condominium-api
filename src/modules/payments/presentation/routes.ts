@@ -374,7 +374,10 @@ const paymentAdminRoutes = new Elysia()
             await approvePayment.approve({
                 paymentId: params.id,
                 approverId: profile.id,
-                notes: body.notes
+                notes: body.notes,
+                currency: body.currency,
+                amountVes: body.amount_ves,
+                exchangeRate: body.exchange_rate
             });
         } else if (body.status === 'REJECTED') {
             await approvePayment.reject({
@@ -388,7 +391,11 @@ const paymentAdminRoutes = new Elysia()
     }, {
         body: t.Object({
             status: t.Union([t.Literal('PENDING'), t.Literal('APPROVED'), t.Literal('REJECTED')]),
-            notes: t.Optional(t.String())
+            notes: t.Optional(t.String()),
+            // Approval only: currency the payment was received in; VES also needs Bs amount and rate.
+            currency: t.Optional(t.Union([t.Literal('USD'), t.Literal('VES')])),
+            amount_ves: t.Optional(t.Number({ exclusiveMinimum: 0 })),
+            exchange_rate: t.Optional(t.Number({ exclusiveMinimum: 0 }))
         }),
         response: SuccessResponse,
         detail: {

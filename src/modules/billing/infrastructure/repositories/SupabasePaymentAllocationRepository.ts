@@ -3,6 +3,14 @@ import { PaymentAllocation } from '../../domain/entities/PaymentAllocation';
 import { supabaseAdmin as supabase } from '@/infrastructure/supabase';
 import { DomainError } from '@/core/errors';
 import { PaginationFilters, toRange } from '@/core/domain/pagination';
+import { mapInvoicePaymentCurrency } from './SupabaseInvoiceRepository';
+
+// Currency the payment was received in and the Bs share of this allocation.
+const paidCurrency = (allocation: any) => {
+    const { original_currency, exchange_rate, amount_ves } =
+        mapInvoicePaymentCurrency(Number(allocation.amount), allocation.payments ?? {});
+    return { original_currency, exchange_rate, amount_ves };
+};
 
 export class SupabasePaymentAllocationRepository implements IPaymentAllocationRepository {
     private toDomain(data: unknown): PaymentAllocation {
@@ -94,6 +102,7 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
         return (data || []).map((allocation: any) => {
             return {
                 ...allocation.payments,
+                ...paidCurrency(allocation),
                 allocated_amount: allocation.amount, // The part of this payment that went to this invoice
                 allocation_id: allocation.id,
                 allocated_at: allocation.created_at
@@ -134,6 +143,7 @@ export class SupabasePaymentAllocationRepository implements IPaymentAllocationRe
 
         const items = (data || []).map((allocation: any) => ({
             ...allocation.payments,
+            ...paidCurrency(allocation),
             allocated_amount: allocation.amount,
             allocation_id: allocation.id,
             allocated_at: allocation.created_at,

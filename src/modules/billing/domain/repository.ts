@@ -31,6 +31,20 @@ export interface AdminInvoiceResult {
         email: string | null;
         phone: string | null;
     } | null;
+    /** Approved payments applied to the invoice, with the currency they were received in. */
+    payments: InvoicePaymentCurrency[];
+}
+
+/** How one payment paid (part of) an invoice: USD applied and, when paid in Bs, its Bs share and rate. */
+export interface InvoicePaymentCurrency {
+    payment_id: string;
+    method: string;
+    payment_date: string;
+    allocated_amount: number;
+    original_currency: 'USD' | 'VES';
+    exchange_rate: number | null;
+    /** Bs that went to this invoice; null for USD payments. */
+    amount_ves: number | null;
 }
 
 export interface PaymentAllocationResult {
