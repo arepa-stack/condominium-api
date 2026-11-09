@@ -55,6 +55,11 @@ mock.module('@/modules/condo-receipts/infrastructure/SupabaseCondoReceiptReposit
         async listCodes(buildingId: string) { return state.codes.filter(c => c.building_id === buildingId); }
         async findCode(id: string) { return state.codes.find(c => c.id === id) ?? null; }
         async createCode(code: any) { const c = { id: crypto.randomUUID(), ...code }; state.codes.push(c); return c; }
+        async createCodes(codes: any[]) {
+            const created = codes.map(c => ({ id: crypto.randomUUID(), ...c }));
+            state.codes.push(...created);
+            return created;
+        }
         async listExpenses(buildingId: string, period: string) {
             return state.expenses.filter(e => e.building_id === buildingId && e.period === period);
         }
@@ -137,6 +142,15 @@ describe('expense codes', () => {
         expect(res.status).toBe(201);
         expect(body).toMatchObject({ building_id: A, code: '300047', description: 'LIMPIEZA' });
         expect(await (await call('GET', url(A, '/codes'))).json()).toHaveLength(1);
+    });
+
+    it('POST /codes/standard loads the catalog for the building only', async () => {
+        const res = await call('POST', url(A, '/codes/standard'));
+        expect(res.status).toBe(200);
+        const codes = await res.json() as any[];
+        expect(codes.length).toBeGreaterThan(30);
+        expect(codes[0]).toMatchObject({ building_id: A, code: '6.1.1.1', description: 'SUELDOS Y SALARIOS' });
+        expect((await call('POST', url(B, '/codes/standard'))).status).toBe(403);
     });
 
     it('400 on missing fields', async () => {
