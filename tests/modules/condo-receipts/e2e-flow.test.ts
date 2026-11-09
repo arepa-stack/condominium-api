@@ -27,6 +27,7 @@ import { ChargeConcept, ChargeConceptKind } from '@/modules/billing/domain/entit
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import type { FindAllInvoicesFilters } from '@/modules/billing/domain/repository';
 import { Unit } from '@/modules/buildings/domain/entities/Unit';
+import { STANDARD_EXPENSE_CODES } from '@/modules/condo-receipts/domain/StandardExpenseCodes';
 
 const B = 'building-A';
 const OTHER = 'building-B';
@@ -48,6 +49,12 @@ class InMemoryCondoRepo implements ICondoReceiptRepository {
         if (this.codes.some(c => c.building_id === code.building_id && c.code === code.code)) throw new Error('duplicate');
         const created = { id: crypto.randomUUID(), ...code };
         this.codes.push(created);
+        return created;
+    }
+
+    async createCodes(codes: Omit<ExpenseCode, 'id'>[]) {
+        const created = codes.map(c => ({ id: crypto.randomUUID(), ...c }));
+        this.codes.push(...created);
         return created;
     }
 
@@ -199,7 +206,7 @@ describe('A) monthly cycle', () => {
         expect(receipt.lines).toEqual([
             { code: '200001', description: 'CONSUMO DE AGUA', amount_bs: 1000, percent: 36.36 },
             { code: '300047', description: 'SUMINISTRO ÚTILES Y PRODUCTOS DE LIMPIEZA', amount_bs: 1500, percent: 54.55 },
-            { code: null, description: '10% FONDO DE RESERVA', amount_bs: 250, percent: 9.09 },
+            { code: '6.1.2.99', description: '10% FONDO DE RESERVA', amount_bs: 250, percent: 9.09 },
         ]);
         expect(receipt.total_bs).toBe(2750);
         expect(receipt.total_usd).toBe(27.5);
@@ -252,7 +259,48 @@ describe('A) monthly cycle', () => {
         const receipt = await ctx.service.generate({ buildingId: B, period: PERIOD, reservePercent: 0, userId: 'admin' });
         expect(receipt.concept_id).toBe('c-1');
         expect(ctx.conceptRepo.concepts).toHaveLength(1);
-        expect(receipt.lines.some(l => l.code === null)).toBe(false); // 0% → no reserve line
+        expect(receipt.lines.some(l => l.code === '6.1.2.99')).toBe(false); // 0% → no reserve line
+    });
+});
+
+// ── A2) Standard catalog ──────────────────────────────────────────────────────
+
+describe('A2) standard expense catalog', () => {
+    it('loads the chart of accounts in natural order, keeps existing codes and is idempotent', async () => {
+        const ctx = buildContext();
+        await ctx.service.createCode(B, '6.1.2.14', 'Agua del edificio'); // already customised
+        await ctx.service.createCode(OTHER, '6.1.2.2', 'x');
+
+        const codes = await ctx.service.loadStandardCodes(B);
+
+        expect(codes).toHaveLength(STANDARD_EXPENSE_CODES.length);
+        expect(codes.every(c => c.building_id === B)).toBe(true);
+        expect(codes.find(c => c.code === '6.1.2.14')?.description).toBe('AGUA DEL EDIFICIO');
+        const order = codes.map(c => c.code);
+        expect(order.indexOf('6.1.1.9')).toBeLessThan(order.indexOf('6.1.1.10'));
+        const i = order.indexOf('6.1.2.18');
+        expect(order.slice(i, i + 5)).toEqual(['6.1.2.18', '6.1.2.18.1', '6.1.2.18.2', '6.1.2.18.3', '6.1.2.19']);
+        expect(order).not.toContain('6.1.2.99');
+
+        expect(await ctx.service.loadStandardCodes(B)).toHaveLength(STANDARD_EXPENSE_CODES.length);
+        expect(await ctx.service.listCodes(OTHER)).toHaveLength(1);
+    });
+
+    it('standard codes are unique and the reserve code cannot be created by hand', async () => {
+        expect(new Set(STANDARD_EXPENSE_CODES.map(c => c.code)).size).toBe(STANDARD_EXPENSE_CODES.length);
+        await expectRejected(buildContext().service.createCode(B, '6.1.2.99', 'Reserva'), 400);
+    });
+
+    it('receipt lines follow the natural code order with the reserve last', async () => {
+        const ctx = buildContext();
+        const codes = await ctx.service.loadStandardCodes(B);
+        for (const code of ['6.1.2.18.1', '6.1.1.10', '6.1.2.2', '6.1.1.9']) {
+            await ctx.service.addExpense({
+                buildingId: B, period: PERIOD, codeId: codes.find(c => c.code === code)!.id, amount: 100, currency: 'VES', userId: 'admin',
+            });
+        }
+        const receipt = await ctx.service.generate({ buildingId: B, period: PERIOD, reservePercent: 10, userId: 'admin' });
+        expect(receipt.lines.map(l => l.code)).toEqual(['6.1.1.9', '6.1.1.10', '6.1.2.2', '6.1.2.18.1', '6.1.2.99']);
     });
 });
 

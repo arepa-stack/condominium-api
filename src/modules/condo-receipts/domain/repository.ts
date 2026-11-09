@@ -71,6 +71,7 @@ export interface ICondoReceiptRepository {
     listCodes(buildingId: string): Promise<ExpenseCode[]>;
     findCode(id: string): Promise<ExpenseCode | null>;
     createCode(code: Omit<ExpenseCode, 'id'>): Promise<ExpenseCode>;
+    createCodes(codes: Omit<ExpenseCode, 'id'>[]): Promise<ExpenseCode[]>;
 
     listExpenses(buildingId: string, period: string): Promise<MonthlyExpense[]>;
     findExpense(id: string): Promise<MonthlyExpense | null>;

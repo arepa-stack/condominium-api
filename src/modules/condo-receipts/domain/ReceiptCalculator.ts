@@ -12,7 +12,7 @@ export interface ReceiptExpense {
 }
 
 export interface ReceiptLine {
-    /** Null for the reserve fund line. */
+    /** Null only on reserve lines of receipts generated before the reserve had a code. */
     code: string | null;
     description: string;
     amount_bs: number;
@@ -43,6 +43,7 @@ export interface CalculateReceiptInput {
     rate: number;
     reservePercent: number;
     reserveLabel: string;
+    reserveCode: string;
     units: DistributableUnit[];
 }
 
@@ -80,7 +81,7 @@ export function calculateReceipt(input: CalculateReceiptInput): CalculatedReceip
 
     const subtotal = rawLines.reduce((sum, l) => sum + l.cents, 0);
     const reserveCents = Math.round((subtotal * input.reservePercent) / 100);
-    if (reserveCents > 0) rawLines.push({ code: null, description: input.reserveLabel, cents: reserveCents });
+    if (reserveCents > 0) rawLines.push({ code: input.reserveCode, description: input.reserveLabel, cents: reserveCents });
 
     const totalCents = subtotal + reserveCents;
     const lines: ReceiptLine[] = rawLines.map(l => ({

@@ -6,7 +6,7 @@ const units = [
     { id: 'u1', name: '1', aliquot: 40 },
 ];
 
-const base = { period: '2026-10', rate: 100, reserveLabel: 'FONDO DE RESERVA', units };
+const base = { period: '2026-10', rate: 100, reserveLabel: 'FONDO DE RESERVA', reserveCode: '6.1.2.99', units };
 
 describe('calculateReceipt', () => {
     it('groups by code, converts USD to Bs and adds the reserve line', () => {
@@ -23,7 +23,7 @@ describe('calculateReceipt', () => {
         expect(r.lines).toEqual([
             { code: '200001', description: 'AGUA', amount_bs: 1000, percent: 45.45 },
             { code: '300047', description: 'LIMPIEZA', amount_bs: 1000, percent: 45.45 },
-            { code: null, description: 'FONDO DE RESERVA', amount_bs: 200, percent: 9.09 },
+            { code: '6.1.2.99', description: 'FONDO DE RESERVA', amount_bs: 200, percent: 9.09 },
         ]);
         expect(r.total_bs).toBe(2200);
         expect(r.total_usd).toBe(22);
