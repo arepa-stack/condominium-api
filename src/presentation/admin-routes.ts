@@ -23,6 +23,7 @@ import { leadAdminRoutes } from '@/modules/leads/presentation/admin-routes';
 import { informationCenterAdminRoutes } from '@/modules/information-center/presentation/routes';
 import { exchangeRateAdminRoutes } from '@/modules/exchange-rates/presentation/routes';
 import { buildingPaymentInfoAdminRoutes } from '@/modules/buildings/presentation/payment-info-routes';
+import { condoReceiptRoutes } from '@/modules/condo-receipts/presentation/routes';
 
 export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(requireRole([UserRole.ADMIN, UserRole.BOARD]))
@@ -38,4 +39,5 @@ export const adminRoutes = new Elysia({ prefix: '/api/v1/admin' })
     .use(leadAdminRoutes)         // landing leads management (solicitudes)
     .use(informationCenterAdminRoutes) // announcements, rules, services
     .use(exchangeRateAdminRoutes)       // exchange rate refresh + manual override
-    .use(buildingPaymentInfoAdminRoutes); // per-building bank account, Pago Móvil and QR
+    .use(buildingPaymentInfoAdminRoutes) // per-building bank account, Pago Móvil and QR
+    .use(condoReceiptRoutes);            // monthly expenses + condominium receipt
