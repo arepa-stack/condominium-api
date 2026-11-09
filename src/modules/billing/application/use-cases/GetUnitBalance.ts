@@ -7,6 +7,7 @@ export interface UnitBalanceDetailDTO {
     paid: number;
     remaining: number;
     period: string;
+    description?: string;
     status: string;
 }
 
@@ -65,6 +66,7 @@ export class GetUnitBalance {
                 paid: invoice.paid_amount,
                 remaining,
                 period: invoice.period,
+                description: invoice.description,
                 status: invoice.status
             });
         }

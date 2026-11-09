@@ -88,7 +88,8 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
         const { data, error } = await supabase
             .from('buildings')
             .select('*')
-            .eq('building_code', buildingCode)
+            // Codes are stored uppercase (Building.updateBuildingCode / CreateBuilding)
+            .eq('building_code', buildingCode.trim().toUpperCase())
             .single();
 
         if (error) {
@@ -125,6 +126,10 @@ export class SupabaseBuildingRepository implements IBuildingRepository {
             .single();
 
         if (error) {
+            // Unique violation on buildings_building_code_key: a concurrent update took the code
+            if (error.code === '23505') {
+                throw new DomainError('Building code already in use', 'CONFLICT', 409);
+            }
             throw new DomainError('Error updating building: ' + error.message, 'DB_ERROR', 500);
         }
 

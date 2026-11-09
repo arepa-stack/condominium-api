@@ -77,6 +77,25 @@ describe("Billing Use Cases", () => {
             expect(balance.details[1].remaining).toBe(150);
         });
 
+        test("passes each invoice's description through to the details", async () => {
+            const invoice = new Invoice({
+                id: "inv-1",
+                unit_id: "unit-1",
+                amount: 14.18,
+                paid_amount: 0,
+                period: "2026-10",
+                status: InvoiceStatus.PENDING,
+                type: InvoiceType.EXPENSE,
+                issue_date: new Date(),
+                description: "Cuota Especial: Reparaciones Mayores y Pintura"
+            });
+            mockInvoiceRepo.findAll = mock(async () => [invoice]);
+
+            const balance = await new GetUnitBalance(mockInvoiceRepo, mockCreditLedgerRepo).execute("unit-1");
+
+            expect(balance.details[0].description).toBe("Cuota Especial: Reparaciones Mayores y Pintura");
+        });
+
         test("excludes PAID and CANCELLED invoices from the total", async () => {
             const invoices = [
                 makeInvoice({ id: "open", amount: 100, paid_amount: 0, status: InvoiceStatus.PENDING }),

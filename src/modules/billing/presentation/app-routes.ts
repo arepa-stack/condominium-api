@@ -44,6 +44,7 @@ const BalanceDetailSchema = t.Object({
     paid: t.Number(),
     remaining: t.Number(),
     period: t.String(),
+    description: t.Optional(t.Union([t.String(), t.Null()])),
     status: t.String()
 });
 
@@ -115,6 +116,7 @@ export const billingAppRoutes = new Elysia({ prefix: '/billing' })
                 paid: d.paid,
                 remaining: d.remaining,
                 period: d.period,
+                description: d.description,
                 status: d.status
             }))
         };
