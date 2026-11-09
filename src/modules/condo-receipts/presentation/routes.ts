@@ -42,7 +42,12 @@ export const condoReceiptRoutes = new Elysia({ prefix: '/condo-receipts/building
             code: t.String({ minLength: 1, maxLength: 20 }),
             description: t.String({ minLength: 1, maxLength: 160 }),
         }),
-        detail: { tags: [TAG], summary: 'Add an expense code (e.g. 200001 CONSUMO DE AGUA)' },
+        detail: { tags: [TAG], summary: 'Add an expense code (e.g. 6.1.2.14 CONSUMO DE AGUA)' },
+    })
+
+    .post('/codes/standard', ({ params }) => condoReceipts.loadStandardCodes(params.buildingId), {
+        params: BuildingParams,
+        detail: { tags: [TAG], summary: 'Load the standard expense catalog (chart of accounts, group 6); existing codes are kept' },
     })
 
     // Expenses of the month

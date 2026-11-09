@@ -5,6 +5,7 @@ import type { IChargeConceptRepository, IInvoiceRepository } from '@/modules/bil
 import { ChargeConcept, ChargeConceptKind, ChargeDistribution } from '@/modules/billing/domain/entities/ChargeConcept';
 import { Invoice, InvoiceStatus, InvoiceType } from '@/modules/billing/domain/entities/Invoice';
 import { calculateReceipt, lineShare, type ExpenseCurrency } from '../domain/ReceiptCalculator';
+import { compareCodes, RESERVE_FUND_CODE, STANDARD_EXPENSE_CODES } from '../domain/StandardExpenseCodes';
 import type { ExpenseInvoiceFile, ICondoReceiptRepository, IExpenseInvoiceStorage, MonthlyExpense } from '../domain/repository';
 
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -60,14 +61,26 @@ export class CondoReceipts {
 
     // ── Expense codes ─────────────────────────────────────────────────────────
 
-    listCodes(buildingId: string) {
-        return this.repo.listCodes(buildingId);
+    async listCodes(buildingId: string) {
+        return (await this.repo.listCodes(buildingId)).sort((a, b) => compareCodes(a.code, b.code));
+    }
+
+    /** Adds the standard catalog's codes the building does not have yet. Returns the full catalog. */
+    async loadStandardCodes(buildingId: string) {
+        const existing = new Set((await this.repo.listCodes(buildingId)).map(c => c.code));
+        await this.repo.createCodes(
+            STANDARD_EXPENSE_CODES.filter(c => !existing.has(c.code)).map(c => ({ building_id: buildingId, ...c }))
+        );
+        return this.listCodes(buildingId);
     }
 
     async createCode(buildingId: string, code: string, description: string) {
         code = code.trim();
         description = description.trim().toUpperCase();
         if (!code || !description) throw new DomainError('Code and description are required', 'VALIDATION_ERROR', 400);
+        if (code === RESERVE_FUND_CODE) {
+            throw new DomainError(`Code ${code} is reserved for the reserve fund line the receipt adds by itself`, 'VALIDATION_ERROR', 400);
+        }
         return this.repo.createCode({ building_id: buildingId, code, description });
     }
 
@@ -174,6 +187,7 @@ export class CondoReceipts {
             rate: rate.bs_per_unit,
             reservePercent: dto.reservePercent,
             reserveLabel: `${dto.reservePercent}% ${RESERVE_LABEL}`,
+            reserveCode: RESERVE_FUND_CODE,
             units: units.map(u => ({ id: u.id, name: u.name, aliquot: u.aliquot })),
         });
 

@@ -79,6 +79,16 @@ export class SupabaseCondoReceiptRepository implements ICondoReceiptRepository {
         return data;
     }
 
+    async createCodes(codes: Omit<ExpenseCode, 'id'>[]): Promise<ExpenseCode[]> {
+        if (codes.length === 0) return [];
+        const { data, error } = await supabase
+            .from('expense_codes')
+            .insert(codes)
+            .select('id, building_id, code, description');
+        if (error) throw dbError('creating expense codes', error);
+        return data;
+    }
+
     async listExpenses(buildingId: string, period: string): Promise<MonthlyExpense[]> {
         const { data, error } = await supabase
             .from('monthly_expenses')
